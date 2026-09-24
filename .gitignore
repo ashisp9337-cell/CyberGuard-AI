@@ -1,0 +1,19 @@
+node_modules
+dist
+.env
+*.tsbuildinfo
+.DS_Store
+
+# Backend
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.db
+backend/.env
+backend/uploads/*
+!backend/uploads/.gitignore
+backend/reports/*
+!backend/reports/.gitignore
+backend/app/ml/models/*.joblib
+backend/.pytest_cache/
+backend/htmlcov/

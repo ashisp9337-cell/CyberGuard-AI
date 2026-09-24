@@ -1,0 +1,105 @@
+import logging
+import time
+import uuid
+
+from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from app.core.config import get_settings
+from app.db.database import Base, engine
+from app.db import models  # noqa: F401 — ensures models are registered before create_all
+from app.api.routes import auth, analysis, scans, dashboard, events, reports, settings as settings_route, threat_intelligence, monitoring, chat
+
+settings = get_settings()
+
+logging.basicConfig(level=logging.INFO if not settings.is_production else logging.WARNING)
+logger = logging.getLogger("cyberguard")
+
+# For local/dev SQLite convenience only — production should use Alembic
+# migrations (see alembic/ and README "Database migrations").
+if settings.DATABASE_URL.startswith("sqlite"):
+    Base.metadata.create_all(bind=engine)
+
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+
+app = FastAPI(
+    title="CyberGuard AI API",
+    description="Backend for the CyberGuard AI cyber threat, phishing & deepfake detection platform.",
+    version="1.0.0",
+)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origin_list,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.middleware("http")
+async def request_logging(request: Request, call_next):
+    request_id = uuid.uuid4().hex[:12]
+    start = time.time()
+    response = await call_next(request)
+    duration_ms = round((time.time() - start) * 1000, 1)
+    logger.info(f"[{request_id}] {request.method} {request.url.path} -> {response.status_code} ({duration_ms}ms)")
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    detail = exc.detail
+    if isinstance(detail, dict) and "error" in detail:
+        payload = detail
+    else:
+        payload = {"error": {"code": "HTTP_ERROR", "message": str(detail)}}
+    return JSONResponse(status_code=exc.status_code, content=payload)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(status_code=422, content={"error": {"code": "VALIDATION_ERROR", "message": "Invalid request.", "details": exc.errors()}})
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled error")
+    if settings.is_production:
+        return JSONResponse(status_code=500, content={"error": {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."}})
+    return JSONResponse(status_code=500, content={"error": {"code": "INTERNAL_ERROR", "message": str(exc)}})
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok", "environment": settings.ENVIRONMENT}
+
+
+app.include_router(auth.router)
+app.include_router(analysis.router)
+app.include_router(scans.router)
+app.include_router(dashboard.router)
+app.include_router(events.router)
+app.include_router(reports.router)
+app.include_router(settings_route.router)
+app.include_router(threat_intelligence.router)
+app.include_router(monitoring.router)
+app.include_router(chat.router)

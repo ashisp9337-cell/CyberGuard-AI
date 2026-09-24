@@ -1,0 +1,175 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Registering these as real Tailwind theme colors (not just plain CSS
+     vars) means every utility variant — hover:, focus:, disabled:,
+     placeholder:, etc. — is generated automatically for text-*, bg-*, and
+     border-* on all of them, and each one re-resolves live when the
+     underlying --ui-* variable changes under [data-theme="light"] below. */
+  --color-canvas: var(--ui-canvas);
+  --color-surface: var(--ui-surface);
+  --color-elevated: var(--ui-elevated);
+  --color-hover: var(--ui-hover);
+  --color-border: var(--ui-border);
+  --color-border-strong: var(--ui-border-strong);
+
+  --color-fg: var(--ui-fg);
+  --color-fg-secondary: var(--ui-fg-secondary);
+  --color-fg-muted: var(--ui-fg-muted);
+  --color-fg-faint: var(--ui-fg-faint);
+
+  --color-critical: var(--ui-critical);
+  --color-critical-bg: var(--ui-critical-bg);
+  --color-high: var(--ui-high);
+  --color-high-bg: var(--ui-high-bg);
+  --color-warning: var(--ui-warning);
+  --color-warning-bg: var(--ui-warning-bg);
+  --color-safe: var(--ui-safe);
+  --color-safe-bg: var(--ui-safe-bg);
+  --color-info: var(--ui-info);
+  --color-info-bg: var(--ui-info-bg);
+  --color-low: var(--ui-low);
+  --color-low-bg: var(--ui-low-bg);
+  --color-brand: var(--ui-brand);
+  --color-brand-blue: var(--ui-brand-blue);
+  --color-purple: var(--ui-purple);
+}
+
+/* Dark theme (default) — this is the existing look, unchanged in value. */
+:root {
+  --ui-canvas: #05070a;
+  --ui-surface: #0b0e14;
+  --ui-elevated: #10141d;
+  --ui-hover: #161b26;
+  --ui-border: #1e2430;
+  --ui-border-strong: #262d3b;
+
+  --ui-fg: #e6e9ef;
+  --ui-fg-secondary: #cbd5e1;
+  --ui-fg-muted: #64748b;
+  --ui-fg-faint: #475569;
+
+  --ui-critical: #ef4444;
+  --ui-critical-bg: #2a1414;
+  --ui-high: #f97316;
+  --ui-high-bg: #2a1c0e;
+  --ui-warning: #eab308;
+  --ui-warning-bg: #2a2410;
+  --ui-safe: #22c55e;
+  --ui-safe-bg: #10241a;
+  --ui-info: #38bdf8;
+  --ui-info-bg: #0e2230;
+  --ui-low: #84cc16;
+  --ui-low-bg: #1c2611;
+  --ui-brand: #22d3ee;
+  --ui-brand-blue: #3b82f6;
+  --ui-purple: #a855f7;
+
+  color-scheme: dark;
+}
+
+/* Light theme — applied by setting data-theme="light" on <html>, done by
+   ThemeContext (src/context/ThemeContext.tsx). */
+[data-theme="light"] {
+  --ui-canvas: #f5f7fa;
+  --ui-surface: #ffffff;
+  --ui-elevated: #ffffff;
+  --ui-hover: #eef1f6;
+  --ui-border: #e2e8f0;
+  --ui-border-strong: #cbd5e1;
+
+  --ui-fg: #0f172a;
+  --ui-fg-secondary: #334155;
+  --ui-fg-muted: #64748b;
+  --ui-fg-faint: #94a3b8;
+
+  --ui-critical: #dc2626;
+  --ui-critical-bg: #fee2e2;
+  --ui-high: #ea580c;
+  --ui-high-bg: #ffedd5;
+  --ui-warning: #ca8a04;
+  --ui-warning-bg: #fef9c3;
+  --ui-safe: #16a34a;
+  --ui-safe-bg: #dcfce7;
+  --ui-info: #0284c7;
+  --ui-info-bg: #e0f2fe;
+  --ui-low: #65a30d;
+  --ui-low-bg: #ecfccb;
+  --ui-brand: #0e7490;
+  --ui-brand-blue: #2563eb;
+  --ui-purple: #9333ea;
+
+  color-scheme: light;
+}
+
+html {
+  color-scheme: dark; /* overridden inline by ThemeContext once it mounts */
+}
+
+body {
+  background-color: var(--color-canvas);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  margin: 0;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-fg-faint);
+}
+
+.focus-ring:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.35); }
+  100% { box-shadow: 0 0 0 8px rgba(34, 211, 238, 0); }
+}
+.pulse-live {
+  animation: pulse-ring 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes scan-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.scan-sweep {
+  animation: scan-sweep 1.6s ease-in-out infinite;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.bg-canvas { background-color: var(--color-canvas); }
+.bg-surface { background-color: var(--color-surface); }
+.bg-elevated { background-color: var(--color-elevated); }
+.bg-hover-surface:hover { background-color: var(--color-hover); }
+.border-default { border-color: var(--color-border); }
+.border-strong { border-color: var(--color-border-strong); }

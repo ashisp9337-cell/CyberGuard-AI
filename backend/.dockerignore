@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.pyc
+cyberguard.db
+uploads/*
+reports/*
+.env
+.pytest_cache/
+tests/
