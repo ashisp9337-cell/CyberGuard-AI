@@ -534,6 +534,10 @@ def _classify_url(text, url_input) -> Classification:
     if url.lower().startswith("http://"):
         found.append(("ssl-domain-analysis", "plain HTTP (no TLS)"))
 
+    # A sign-in page on a free hosting platform is the textbook fake login page, even when it also
+    # spoofs a brand name: make that the main subtopic and keep the rest as secondary.
+    if publish and _login_path(path, query):
+        found.sort(key=lambda f: f[0] != "fake-login-page")
     if not found:
         return Classification(m, "general", "url-structure", ["no single structural category stands out; the "
                               "existing general URL analysis is used"], status="fallback")

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { ClassificationBadge, SeverityBadge } from "@/components/ui/Badge";
@@ -6,9 +7,37 @@ import { Button } from "@/components/ui/Button";
 import { CLASSIFICATION_META } from "@/lib/severity";
 import { formatDate } from "@/lib/utils";
 import { ICONS } from "@/lib/icons";
-import type { AnalysisResult } from "@/types";
+import type { AnalysisResult, ResponseAction } from "@/types";
+import { useToast } from "@/context/ToastContext";
+import { escalateScan } from "@/services/api/incidentsService";
+
+const PRIORITY_META: Record<ResponseAction["priority"], { label: string; color: string; bg: string }> = {
+  immediate: { label: "Now", color: "var(--color-critical)", bg: "var(--color-critical-bg)" },
+  high: { label: "Soon", color: "var(--color-high)", bg: "var(--color-high-bg)" },
+  normal: { label: "Later", color: "var(--color-info)", bg: "var(--color-info-bg)" },
+};
 
 export function ResultView({ result, onNewScan, onSave }: { result: AnalysisResult; onNewScan: () => void; onSave?: () => void }) {
+  const { notify } = useToast();
+  const [escalation, setEscalation] = useState<"idle" | "sending" | "done">("idle");
+
+  async function handleEscalate() {
+    setEscalation("sending");
+    try {
+      const res = await escalateScan(result.scanId);
+      setEscalation("done");
+      notify({
+        variant: "success",
+        title: "Escalated to the security team",
+        description: res.alertChannels.length
+          ? `Incident opened and an alert is being sent via ${res.alertChannels.join(", ")}.`
+          : "Incident opened on the dashboard. (No Telegram/email alert channel is configured.)",
+      });
+    } catch (err) {
+      setEscalation("idle");
+      notify({ variant: "critical", title: "Could not escalate", description: err instanceof Error ? err.message : "Please try again." });
+    }
+  }
   const meta = CLASSIFICATION_META[result.classification];
   const triggered = result.indicators.filter((i) => i.triggered).sort((a, b) => b.weight - a.weight);
 
@@ -74,18 +103,54 @@ export function ResultView({ result, onNewScan, onSave }: { result: AnalysisResu
         </CardBody>
       </Card>
 
+      {/* Auto-quarantine banner */}
+      {result.quarantine?.status === "quarantined" && (
+        <div className="flex items-start gap-3 rounded-xl border p-4"
+             style={{ borderColor: "var(--color-critical)", backgroundColor: "var(--color-critical-bg)" }}>
+          <ICONS.lock size={18} className="mt-0.5 shrink-0" style={{ color: "var(--color-critical)" }} />
+          <div>
+            <p className="text-sm font-semibold text-white">This email was quarantined automatically</p>
+            <p className="text-xs text-slate-400 mt-0.5">{result.quarantine.reason}. You can release or delete it from Email Quarantine on the dashboard.</p>
+          </div>
+        </div>
+      )}
+
       {/* Recommendations */}
       <Card>
-        <CardHeader title="Recommended Actions" icon={<ICONS.shieldCheck size={16} />} />
+        <CardHeader
+          title="Recommended Actions"
+          subtitle={result.responseActions?.length ? "Chosen for this specific threat, most urgent first" : undefined}
+          icon={<ICONS.shieldCheck size={16} />}
+        />
         <CardBody>
-          <ul className="space-y-2.5">
-            {result.recommendations.map((r, i) => (
-              <li key={i} className="flex items-start gap-2.5 text-sm text-slate-300">
-                <ICONS.chevronRight size={15} className="text-cyan-400 mt-0.5 shrink-0" />
-                {r}
-              </li>
-            ))}
-          </ul>
+          {result.responseActions?.length ? (
+            <ul className="space-y-2">
+              {result.responseActions.map((a) => (
+                <li key={a.id} className="flex items-start gap-3 rounded-lg border border-default bg-elevated p-3">
+                  <span
+                    className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                    style={{ color: PRIORITY_META[a.priority].color, backgroundColor: PRIORITY_META[a.priority].bg }}
+                  >
+                    {PRIORITY_META[a.priority].label}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-white">{a.title}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">{a.detail}</p>
+                  </div>
+                  <span className="shrink-0 text-[10px] text-slate-500 mt-0.5">{a.owner === "soc" ? "Security team" : "User"}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <ul className="space-y-2.5">
+              {result.recommendations.map((r, i) => (
+                <li key={i} className="flex items-start gap-2.5 text-sm text-slate-300">
+                  <ICONS.chevronRight size={15} className="text-cyan-400 mt-0.5 shrink-0" />
+                  {r}
+                </li>
+              ))}
+            </ul>
+          )}
         </CardBody>
       </Card>
 
@@ -96,8 +161,9 @@ export function ResultView({ result, onNewScan, onSave }: { result: AnalysisResu
         <Button variant="secondary" onClick={onSave}>
           <ICONS.download size={15} /> Export Report
         </Button>
-        <Button variant="ghost">
-          <ICONS.send size={15} /> Escalate to Team
+        <Button variant="ghost" onClick={handleEscalate} disabled={escalation !== "idle"}>
+          <ICONS.send size={15} />{" "}
+          {escalation === "done" ? "Escalated to Team ✓" : escalation === "sending" ? "Escalating…" : "Escalate to Team"}
         </Button>
       </div>
     </motion.div>

@@ -92,7 +92,18 @@ export interface AnalysisResult {
   indicators: DetectedIndicator[];
   explanation: string;
   recommendations: string[];
+  responseActions?: ResponseAction[];
+  quarantine?: { status: "quarantined" | "delivered"; auto: boolean; reason: string; at: string } | null;
   status: ScanStatus;
+}
+
+export interface ResponseAction {
+  id: string;
+  action: string;
+  title: string;
+  detail: string;
+  priority: "immediate" | "high" | "normal";
+  owner: "user" | "soc";
 }
 
 // ---- File upload ---------------------------------------------
@@ -134,6 +145,7 @@ export interface ThreatActivityPoint {
   label: string;
   malware: number;
   phishing: number;
+  impersonation: number;
   deepfake: number;
   suspiciousUrls: number;
   accountTakeover: number;

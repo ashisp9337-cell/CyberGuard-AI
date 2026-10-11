@@ -33,6 +33,8 @@ export function AnalysisWorkspace({ module: mod, subtopic }: { module: Detection
   const { addScanToHistory } = useAppContext();
 
   const needsFile = subtopic.inputKind === "file";
+  // Auto-detect pages may take EITHER pasted text OR a file (e.g. phishing: a message or an .eml / QR image).
+  const optionalFile = subtopic.id === "auto" && !needsFile && !!subtopic.acceptedFileTypes?.length;
   const needsUrl = subtopic.inputKind === "url";
   const needsText = subtopic.inputKind === "text" || subtopic.inputKind === "email" || subtopic.inputKind === "identity";
 
@@ -77,7 +79,7 @@ export function AnalysisWorkspace({ module: mod, subtopic }: { module: Detection
       if (!urlValue.trim()) return "Please enter a URL to analyze.";
       if (!URL_PATTERN.test(urlValue.trim())) return "Please enter a valid URL (e.g. https://example.com).";
     }
-    if (needsText && !textValue.trim()) return "Please paste content to analyze.";
+    if (needsText && !textValue.trim() && !(optionalFile && file)) return "Please paste content to analyze.";
     if (needsText && textValue.length > MAX_TEXT_LEN) return `Content is too long (max ${MAX_TEXT_LEN} characters).`;
     return null;
   }
@@ -99,8 +101,8 @@ export function AnalysisWorkspace({ module: mod, subtopic }: { module: Detection
       subtopic,
       textInput: needsText ? textValue : undefined,
       urlInput: needsUrl ? urlValue : undefined,
-      file: needsFile && file ? file : undefined,
-      fileBlob: needsFile && fileBlob ? fileBlob : undefined,
+      file: (needsFile || optionalFile) && file ? file : undefined,
+      fileBlob: (needsFile || optionalFile) && fileBlob ? fileBlob : undefined,
       extraFieldValues: extraValues,
     };
 
@@ -169,7 +171,7 @@ export function AnalysisWorkspace({ module: mod, subtopic }: { module: Detection
                   error={error && !textValue ? error : undefined}
                 />
               )}
-              {needsFile && (
+              {(needsFile || optionalFile) && (
                 <FileUploader
                   accepted={subtopic.acceptedFileTypes}
                   maxSizeMb={subtopic.maxFileSizeMb ?? 50}
@@ -198,7 +200,7 @@ export function AnalysisWorkspace({ module: mod, subtopic }: { module: Detection
 
               <div className="flex items-center justify-between pt-2">
                 <p className="text-xs text-slate-500 flex items-center gap-1.5">
-                  <ICONS.info size={13} /> Results are simulated for this prototype build.
+                  <ICONS.info size={13} /> Results come from CYBERGUARD's detection engines and are saved to your scan history.
                 </p>
                 <Button onClick={handleAnalyze} size="lg">
                   <ICONS.scan size={16} /> Analyze

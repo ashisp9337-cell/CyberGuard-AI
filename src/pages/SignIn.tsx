@@ -9,9 +9,12 @@ import { TextInput } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
 import { ICONS } from "@/lib/icons";
+import { OtpStep } from "@/components/auth/OtpStep";
+import { AUTH_CONFIG } from "@/services/auth/config";
+import { otpAuthService, type OtpChallenge } from "@/services/auth/otpAuthService";
 
 export default function SignIn() {
-  const { signIn } = useAuth();
+  const { signIn, acceptSignedInUser } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const redirectTo = (location.state as { from?: string } | null)?.from ?? "/dashboard";
@@ -22,6 +25,8 @@ export default function SignIn() {
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Step 2 of login: the code emailed after the password was accepted.
+  const [challenge, setChallenge] = useState<OtpChallenge | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -32,13 +37,40 @@ export default function SignIn() {
     }
     setSubmitting(true);
     try {
-      await signIn({ email: email.trim(), password, rememberMe });
-      navigate(redirectTo, { replace: true });
+      if (AUTH_CONFIG.isBackend) {
+        // Password is checked first; the session only starts after the emailed code.
+        setChallenge(await otpAuthService.startLogin(email.trim(), password, rememberMe));
+      } else {
+        await signIn({ email: email.trim(), password, rememberMe });
+        navigate(redirectTo, { replace: true });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign in failed. Please try again.");
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (challenge) {
+    return (
+      <AuthLayout>
+        <AuthCard title="Check Your Email" subtitle="One more step: enter the code we sent to confirm it's really you.">
+          <OtpStep
+            challenge={challenge}
+            verifyLabel="Verify & Sign In"
+            onVerify={async (code) => {
+              acceptSignedInUser(await otpAuthService.verifyLogin(challenge.challengeId, code));
+              navigate(redirectTo, { replace: true });
+            }}
+            onResend={() => otpAuthService.resend(challenge.challengeId, "login")}
+            onBack={() => {
+              setChallenge(null);
+              setPassword("");
+            }}
+          />
+        </AuthCard>
+      </AuthLayout>
+    );
   }
 
   return (
@@ -106,7 +138,7 @@ export default function SignIn() {
 
           <Button type="submit" size="lg" className="w-full" disabled={submitting}>
             {submitting ? <ICONS.loader size={16} className="animate-spin" /> : <ICONS.shieldCheck size={16} />}
-            {submitting ? "Signing in..." : "Sign In Securely"}
+            {submitting ? "Checking..." : "Continue"}
           </Button>
         </form>
       </AuthCard>

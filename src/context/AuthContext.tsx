@@ -12,6 +12,8 @@ interface AuthContextValue {
   signInWithGoogle: () => Promise<void>;
   forgotPassword: (email: string) => Promise<{ devResetToken?: string }>;
   resetPassword: (token: string, newPassword: string) => Promise<void>;
+  /** Called after an OTP step succeeds: the backend has already set the session cookie. */
+  acceptSignedInUser: (user: AuthUser) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -76,6 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signInWithGoogle,
         forgotPassword,
         resetPassword,
+        acceptSignedInUser: setUser,
       }}
     >
       {children}

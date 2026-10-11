@@ -11,6 +11,7 @@ const RANGE_DAYS: Record<Range, number> = { "24h": 1, "7d": 7, "30d": 30 };
 
 const SERIES = [
   { key: "phishing", label: "Phishing", color: "#f97316" },
+  { key: "impersonation", label: "Impersonation", color: "#ec4899" },
   { key: "malware", label: "Malware", color: "#ef4444" },
   { key: "suspiciousUrls", label: "Suspicious URLs", color: "#22c55e" },
   { key: "accountTakeover", label: "Account Takeover", color: "#38bdf8" },

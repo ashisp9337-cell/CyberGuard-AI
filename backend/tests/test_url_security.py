@@ -114,3 +114,10 @@ def test_brand_nickname_on_free_platform_login_is_critical():
 def test_ml_warning_is_not_shown_on_official_sites():
     r = scan("https://login.microsoftonline.com/")
     assert "Domain name resembles phishing domains (ML model)" not in labels(r) and r["riskScore"] <= 15
+
+
+def test_brand_login_on_free_platform_routes_to_fake_login_page():
+    from app.services import subtopic_router
+    c = subtopic_router._classify_url("https://m365-mfa-renew.pages.dev/login?user=ashis", "")
+    assert c.subtopic_id == "fake-login-page" and "domain-spoofing" in c.secondary
+    assert subtopic_router._classify_url("https://paypal.com.account-verify.co/signin", "").subtopic_id == "domain-spoofing"

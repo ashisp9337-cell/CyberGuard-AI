@@ -36,9 +36,10 @@ export function TechnologySection() {
         <div className="max-w-2xl mx-auto mt-8 rounded-xl border border-default bg-elevated p-4 flex items-start gap-3">
           <ICONS.info size={16} className="text-cyan-400 shrink-0 mt-0.5" />
           <p className="text-xs text-slate-400 leading-relaxed">
-            <span className="font-semibold text-slate-300">Current prototype:</span> this build uses simulated analysis
-            workflows to demonstrate the full detection experience end-to-end, and is architected to support future
-            backend, ML model, and threat intelligence integrations without changing the interface.
+            <span className="font-semibold text-slate-300">How it works:</span> every scan runs on the CYBERGUARD
+            backend — trained ML models, rule engines and threat-intelligence lookups — and each result shows the
+            indicators behind its score. Where a model is not available yet (for example deepfake video or audio), the
+            result says so instead of guessing.
           </p>
         </div>
       </Reveal>

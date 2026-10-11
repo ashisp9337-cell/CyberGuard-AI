@@ -54,6 +54,41 @@ export async function fetchThreatDistribution(): Promise<ThreatDistributionSlice
   return data.map((d) => ({ ...d, value: Math.round((d.value / total) * 100) }));
 }
 
+export interface TopTarget {
+  name: string;
+  count: number;
+  maxRisk: number;
+  lastSeen: string;
+  category?: string;
+  modules?: string[];
+}
+
+export interface TopTargets {
+  days: number;
+  threatScans: number;
+  services: TopTarget[];
+  accounts: TopTarget[];
+}
+
+export async function fetchTopTargets(days = 30, limit = 6): Promise<TopTargets> {
+  if (API_CONFIG.useMockData) {
+    const now = new Date().toISOString();
+    return {
+      days, threatScans: 14,
+      services: [
+        { name: "SBI", category: "bank", count: 5, maxRisk: 92, lastSeen: now, modules: ["Phishing"] },
+        { name: "Income Tax Department", category: "government", count: 3, maxRisk: 88, lastSeen: now, modules: ["Impersonation"] },
+        { name: "Microsoft", category: "brand", count: 2, maxRisk: 76, lastSeen: now, modules: ["Phishing", "Malicious URLs"] },
+      ],
+      accounts: [
+        { name: "root", count: 3, maxRisk: 90, lastSeen: now },
+        { name: "student@bput.ac.in", count: 2, maxRisk: 81, lastSeen: now },
+      ],
+    };
+  }
+  return apiClient.get<TopTargets>(`/api/dashboard/top-targets?days=${days}&limit=${limit}`);
+}
+
 export async function fetchLiveFeed(limit = 20): Promise<LiveEvent[]> {
   if (API_CONFIG.useMockData) {
     const { generateLiveEvents } = await import("@/services/mock/mockData");

@@ -82,6 +82,13 @@ export const apiClient = {
       body: body !== undefined ? JSON.stringify(body) : undefined,
     }, options);
   },
+  patch<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
+    return request<T>(path, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    }, options);
+  },
   delete<T>(path: string, options?: RequestOptions): Promise<T> {
     return request<T>(path, { method: "DELETE" }, options);
   },

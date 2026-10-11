@@ -5,9 +5,9 @@ import { ICONS } from "@/lib/icons";
 
 const FAQS = [
   { q: "How does CYBERGUARD AI analyze content?", a: "Each detection module runs a multi-stage AI pipeline: feature extraction, threat-intelligence lookups, static and behavioral analysis, and a final AI risk evaluation that produces a 0-100 risk score." },
-  { q: "Is my uploaded data stored?", a: "In this prototype, all analysis runs against simulated mock data in your browser. No files are uploaded to a server." },
+  { q: "Is my uploaded data stored?", a: "Yes. Every scan result is stored in the CYBERGUARD database (PostgreSQL) under your account so it appears in Scan History, the dashboard and reports. Uploaded files are kept on the server under random names in a private uploads folder and are never executed." },
   { q: "How is the risk score calculated?", a: "Detected indicators are weighted and combined into a single risk score, which maps to a classification: Safe, Low Risk, Suspicious, High Risk, or Critical." },
-  { q: "Can I connect a real backend later?", a: "Yes — the frontend's service layer is designed to swap mock data generators for real API calls without changing any UI components." },
+  { q: "What happens when a serious threat is found?", a: "High-risk and critical detections open an incident on the dashboard, suggest specific response actions, quarantine dangerous emails automatically, and — if configured — alert the security team on Telegram or email. You can also press \"Escalate to Team\" on any result." },
 ];
 
 export default function Help() {

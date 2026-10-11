@@ -115,6 +115,7 @@ export function generateThreatActivity(range: "24h" | "7d" | "30d"): ThreatActiv
       label,
       malware: Math.floor(localRng() * 12) + 1,
       phishing: Math.floor(localRng() * 18) + 2,
+      impersonation: Math.floor(localRng() * 7),
       deepfake: Math.floor(localRng() * 6),
       suspiciousUrls: Math.floor(localRng() * 15) + 1,
       accountTakeover: Math.floor(localRng() * 8),

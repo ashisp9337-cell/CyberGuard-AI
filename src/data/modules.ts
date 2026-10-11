@@ -1,4 +1,4 @@
-import type { DetectionModule, IndicatorTemplate } from "@/types";
+import type { DetectionModule, DetectionModuleId, IndicatorTemplate, InputKind, SubtopicConfig } from "@/types";
 
 // Reusable indicator template groups, mixed per subtopic
 const phishingIndicators: IndicatorTemplate[] = [
@@ -101,12 +101,12 @@ export const DETECTION_MODULES: DetectionModule[] = [
     icon: "impersonation",
     color: "#eab308",
     subtopics: [
-      { id: "government-impersonation", moduleId: "impersonation", title: "Government Official Impersonation", description: "Detect fraudulent claims of government authority.", icon: "government", inputKind: "identity", supportedInput: "Paste message, name, or profile details", placeholder: "Describe or paste the communication claiming government authority...", indicatorPool: impersonationIndicators },
-      { id: "management-impersonation", moduleId: "impersonation", title: "Senior Management Impersonation", description: "Detect CEO/executive fraud and business email compromise attempts.", icon: "management", inputKind: "identity", supportedInput: "Paste message or executive details", placeholder: "Paste the message claiming to be from senior management...", indicatorPool: impersonationIndicators },
-      { id: "teacher-impersonation", moduleId: "impersonation", title: "Teacher / University Authority Impersonation", description: "Detect impersonation of academic staff or institutions.", icon: "teacher", inputKind: "identity", supportedInput: "Paste message or profile details", placeholder: "Paste the communication claiming academic authority...", indicatorPool: impersonationIndicators },
-      { id: "financial-impersonation", moduleId: "impersonation", title: "Financial Institution Impersonation", description: "Detect fake bank, NBFC, or payment provider communications.", icon: "financial", inputKind: "identity", supportedInput: "Paste message or institution details", placeholder: "Paste the communication claiming to be from a financial institution...", indicatorPool: impersonationIndicators },
-      { id: "brand-impersonation", moduleId: "impersonation", title: "Organization / Brand Impersonation", description: "Detect fake accounts or content impersonating a company or brand.", icon: "financial", inputKind: "identity", supportedInput: "Paste profile or message details", placeholder: "Paste the profile or message details claiming brand affiliation...", indicatorPool: impersonationIndicators },
-      { id: "contact-impersonation", moduleId: "impersonation", title: "Friend / Relative / Known Contact Impersonation", description: "Detect account takeover or spoofing of known personal contacts.", icon: "contact", inputKind: "identity", supportedInput: "Paste message or contact details", placeholder: "Paste the suspicious message from a supposed known contact...", indicatorPool: impersonationIndicators },
+      { id: "government-impersonation", moduleId: "impersonation", title: "Government Official Impersonation", description: "Detect fraudulent claims of government authority.", icon: "government", inputKind: "identity", supportedInput: "Paste message, name, or profile details", placeholder: "Describe or paste the communication claiming government authority...", indicatorPool: impersonationIndicators, extraFields: [{ id: "senderEmail", label: "Sender email (optional)", placeholder: "e.g. noreply@passport.gov.in" }] },
+      { id: "management-impersonation", moduleId: "impersonation", title: "Senior Management Impersonation", description: "Detect CEO/executive fraud and business email compromise attempts.", icon: "management", inputKind: "identity", supportedInput: "Paste message or executive details", placeholder: "Paste the message claiming to be from senior management...", indicatorPool: impersonationIndicators, extraFields: [{ id: "companyDomain", label: "Your company's domain (optional)", placeholder: "e.g. acme.com" }, { id: "senderEmail", label: "Sender email (optional)", placeholder: "e.g. ceo@acme.com" }] },
+      { id: "teacher-impersonation", moduleId: "impersonation", title: "Teacher / University Authority Impersonation", description: "Detect impersonation of academic staff or institutions.", icon: "teacher", inputKind: "identity", supportedInput: "Paste message or profile details", placeholder: "Paste the communication claiming academic authority...", indicatorPool: impersonationIndicators, extraFields: [{ id: "institutionDomain", label: "Your institution's domain (optional)", placeholder: "e.g. bput.ac.in" }, { id: "senderEmail", label: "Sender email (optional)", placeholder: "e.g. registrar@bput.ac.in" }] },
+      { id: "financial-impersonation", moduleId: "impersonation", title: "Financial Institution Impersonation", description: "Detect fake bank, NBFC, or payment provider communications.", icon: "financial", inputKind: "identity", supportedInput: "Paste message or institution details", placeholder: "Paste the communication claiming to be from a financial institution...", indicatorPool: impersonationIndicators, extraFields: [{ id: "senderEmail", label: "Sender email (optional)", placeholder: "e.g. alerts@hdfcbank.com" }] },
+      { id: "brand-impersonation", moduleId: "impersonation", title: "Organization / Brand Impersonation", description: "Detect fake accounts or content impersonating a company or brand.", icon: "financial", inputKind: "identity", supportedInput: "Paste profile or message details", placeholder: "Paste the profile or message details claiming brand affiliation...", indicatorPool: impersonationIndicators, extraFields: [{ id: "senderEmail", label: "Sender email / handle (optional)", placeholder: "e.g. alerts@amazon.com" }] },
+      { id: "contact-impersonation", moduleId: "impersonation", title: "Friend / Relative / Known Contact Impersonation", description: "Detect account takeover or spoofing of known personal contacts.", icon: "contact", inputKind: "identity", supportedInput: "Paste message or contact details", placeholder: "Paste the suspicious message from a supposed known contact...", indicatorPool: impersonationIndicators, extraFields: [{ id: "claimedSenderName", label: "Claimed sender (must match a saved contact)", placeholder: "e.g. Dr. S. K. Nayak (HOD)" }, { id: "senderEmail", label: "Sender email / handle (optional)", placeholder: "e.g. sender@example.com" }] },
     ],
   },
   {
@@ -164,8 +164,40 @@ export function getModule(id: string): DetectionModule | undefined {
   return DETECTION_MODULES.find((m) => m.id === id);
 }
 
+/**
+ * "Auto-detect" entry for each module: the backend classifies the input
+ * (subtopicId "auto") and routes it to the existing detector for the detected
+ * subtopic. File types listed here are ones the backend upload accepts AND the
+ * routed detector actually reads.
+ */
+const AUTO_INPUT: Record<DetectionModuleId, { inputKind: InputKind; acceptedFileTypes?: string[]; supportedInput: string; placeholder: string }> = {
+  phishing: { inputKind: "text", acceptedFileTypes: [".eml", ".msg", ".txt", ".png", ".jpg", ".jpeg"],
+    supportedInput: "Paste an email, SMS, social-media message or URL, or upload an .eml file / QR image",
+    placeholder: "Paste the full email (with headers), a message, or a URL..." },
+  deepfake: { inputKind: "file", acceptedFileTypes: [".png", ".jpg", ".jpeg", ".mp4", ".mov", ".avi", ".mkv", ".webm", ".mp3", ".wav"],
+    supportedInput: "Upload an image, video or audio file", placeholder: "" },
+  impersonation: { inputKind: "text", supportedInput: "Paste the message that claims to come from someone",
+    placeholder: "Paste the message (an email with headers works best)..." },
+  credential: { inputKind: "text", supportedInput: "Paste authentication or session log lines",
+    placeholder: "Paste login / session log lines here..." },
+  "url-security": { inputKind: "url", supportedInput: "Enter a URL or website address", placeholder: "https://example.com/login" },
+  "cyber-threat": { inputKind: "text", supportedInput: "Paste log or event lines (firewall, API, process, audit, system)",
+    placeholder: "Paste raw log or event lines here..." },
+};
+
+export function getAutoSubtopic(mod: DetectionModule): SubtopicConfig {
+  const cfg = AUTO_INPUT[mod.id];
+  return {
+    id: "auto", moduleId: mod.id, title: "Auto-detect",
+    description: "CYBERGUARD identifies the detection type from the input and runs the matching detector.",
+    icon: mod.icon, inputKind: cfg.inputKind, supportedInput: cfg.supportedInput, placeholder: cfg.placeholder,
+    acceptedFileTypes: cfg.acceptedFileTypes, maxFileSizeMb: 15, indicatorPool: mod.subtopics[0]?.indicatorPool ?? [],
+  };
+}
+
 export function getSubtopic(moduleId: string, subtopicId: string) {
   const mod = getModule(moduleId);
+  if (mod && subtopicId === "auto") return getAutoSubtopic(mod);
   return mod?.subtopics.find((s) => s.id === subtopicId);
 }
 

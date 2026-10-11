@@ -1,4 +1,4 @@
-import { Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useParams } from "react-router-dom";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { SubtopicCard } from "@/components/modules/SubtopicCard";
 import { getModule } from "@/data/modules";
@@ -22,6 +22,18 @@ export default function ModuleOverview() {
         </div>
       </div>
       <p className="text-sm text-fg-muted max-w-2xl mb-6">{mod.description}</p>
+
+      <Link
+        to={`/modules/${mod.id}/auto`}
+        className="mb-6 flex items-center gap-3 rounded-xl border border-default bg-elevated p-4 hover:border-cyan-500 transition-colors focus-ring"
+      >
+        <ICONS.scan size={18} className="text-cyan-400 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-fg">Auto-detect</p>
+          <p className="text-xs text-fg-muted">Not sure which type it is? Paste or upload it and CYBERGUARD picks the right detection type.</p>
+        </div>
+        <ICONS.chevronRight size={16} className="text-fg-muted shrink-0" />
+      </Link>
 
       <PageHeader title="Detection Types" subtitle={`Select a detection type below to open its dedicated analysis workspace.`} />
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
