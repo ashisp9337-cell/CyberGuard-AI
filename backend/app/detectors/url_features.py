@@ -53,7 +53,8 @@ def extract_url_features(url: str) -> list:
         sum(c.isdigit() for c in url),
         query.count("=") if query else 0,
         max(host.count(".") - 1, 0),
-        1 if parsed.scheme == "https" else 0,
+        # typed without http(s):// -> unknown, not "no HTTPS" (the scheme is only known when given)
+        1 if parsed.scheme == "https" or "://" not in url else 0,
         1 if IP_RE.match(host) else 0,
         1 if parsed.port else 0,
         1 if "xn--" in host else 0,

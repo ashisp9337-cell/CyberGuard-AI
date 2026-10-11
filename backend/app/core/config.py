@@ -37,6 +37,45 @@ class Settings(BaseSettings):
 
     CORS_ORIGINS: str = "http://localhost:5173"
 
+    # ---- Alerts to the admin / SOC (Module 6) ----
+    # Telegram: create a bot with @BotFather, then put its token and your chat id here.
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_CHAT_ID: str = ""
+    # Email via SMTP (Gmail: smtp.gmail.com, port 587, and an App Password -- not your normal password).
+    # Port 587 = STARTTLS, port 465 = SSL; both work.
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""
+    ALERT_EMAIL_TO: str = ""          # comma-separated SOC / admin addresses
+    # WhatsApp. Two providers:
+    #   callmebot (free, personal use, sends only to YOUR OWN number):
+    #       save +34 644 95 73 56, WhatsApp it "I allow callmebot to send me messages", it replies with an apikey.
+    #   twilio (official, can message other people): account SID, auth token and the sandbox/sender number.
+    WHATSAPP_PROVIDER: str = "callmebot"   # callmebot | twilio
+    WHATSAPP_TO: str = ""                  # your number with country code, e.g. +919876543210
+    CALLMEBOT_APIKEY: str = ""
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_WHATSAPP_FROM: str = ""         # e.g. whatsapp:+14155238886 (Twilio sandbox number)
+    ALERT_MIN_SCORE: int = 71         # 71+ = high risk and critical
+    ALERT_DEDUP_MINUTES: int = 10     # same threat on the same target is alerted once per window
+    APP_BASE_URL: str = "http://localhost:5173"   # used for the "open in CYBERGUARD" link
+    # Auto-quarantine: emails scoring this or more are held in quarantine automatically.
+    AUTO_QUARANTINE: bool = True
+    QUARANTINE_MIN_SCORE: int = 71
+
+    # ---- One-time codes (OTP) for signup and login ----
+    OTP_TTL_MINUTES: int = 10        # a code stops working after this
+    OTP_MAX_ATTEMPTS: int = 5        # wrong guesses before the code is burned
+    OTP_RESEND_SECONDS: int = 60     # wait before "Resend code" works again
+    OTP_MAX_RESENDS: int = 5
+    RATE_LIMIT_ENABLED: bool = True  # per-IP limits on login/signup/OTP endpoints
+    # URL scans: follow redirects and read the final page (read-only, no JavaScript, never local
+    # addresses -- see app/services/safe_fetch.py). Set false to never contact scanned sites.
+    LIVE_PAGE_CHECKS: bool = True
+
     UPLOAD_DIR: str = "./uploads"
     REPORTS_DIR: str = "./reports"
     MODELS_DIR: str = "./app/ml/models"

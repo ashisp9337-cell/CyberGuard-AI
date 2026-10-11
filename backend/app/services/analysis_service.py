@@ -4,7 +4,7 @@ the six CyberGuard modules and their subtopics defined in the frontend's
 src/data/modules.ts. This is the single place that decides "what kind of
 analysis does this input need" — detectors themselves stay generic.
 """
-from app.detectors import phishing, malicious_url, deepfake, impersonation, account_takeover, cyber_threat, email_parser, qr_analyzer
+from app.detectors import phishing, malicious_url, deepfake, impersonation, account_takeover, cyber_threat, email_parser, qr_analyzer, known_contact_impersonation, financial_impersonation, brand_impersonation, teacher_university_impersonation, senior_management_impersonation, government_impersonation, financial_impersonation, known_contact_impersonation, known_contact_impersonation
 
 
 def _try_decode_qr(file_path: str) -> str | None:
@@ -24,6 +24,7 @@ def run_scan(
     text_input: str | None, url_input: str | None,
     file_path: str | None, file_name: str | None,
     extra_field_values: dict | None,
+    db=None, user_id: str | None = None,
 ) -> dict:
     extra_field_values = extra_field_values or {}
 
@@ -38,9 +39,24 @@ def run_scan(
         reply_to = None
         target_text = text_input or ""
 
-        # Fix: previously, if the user uploaded a .eml/.msg/.txt file
-        # instead of pasting text, the file was saved to disk but never
-        # actually read for analysis. Now it's really parsed.
+        # Email Analysis -> full Email Intelligence Pipeline: headers/SPF/DKIM/DMARC,
+        # every link, attachment and QR image, all 6 impersonation detectors,
+        # account-takeover signals, fused into one verdict.
+        if subtopic_id == "email-analysis":
+            from app.email_pipeline import analyze_email
+            from app.email_pipeline.store import record_email
+            raw = target_text
+            if file_path and not target_text:
+                with open(file_path, "rb") as f:
+                    raw = f.read()
+            result = analyze_email(raw, db=db, user_id=user_id, sender=sender or "")
+            if db is not None and user_id:
+                try:
+                    record_email(db, user_id, result, source="upload" if file_path else "paste")
+                except Exception:
+                    pass  # history is best-effort; never fail the scan over it
+            return result
+
         if not target_text and file_path:
             try:
                 with open(file_path, "rb") as f:
@@ -61,13 +77,40 @@ def run_scan(
         return result | {"_target": file_name or "uploaded media", "_target_type": "file"}
 
     if module_id == "impersonation":
-        result = impersonation.analyze_identity(text_input or "", extra_field_values, subtopic_title)
         target = (text_input or "")[:80] or "identity submission"
+        if subtopic_id == "contact-impersonation":
+            # Personal to the user (their own saved contacts) — not a generic
+            # trained model. See known_contact_impersonation.py for why.
+            result = known_contact_impersonation.analyze_known_contact_message(
+                text_input or "", extra_field_values, subtopic_title, db=db, user_id=user_id,
+            )
+        elif subtopic_id == "financial-impersonation":
+            result = financial_impersonation.analyze_financial_impersonation(
+                text_input or "", extra_field_values, subtopic_title,
+            )
+        elif subtopic_id == "brand-impersonation":
+            result = brand_impersonation.analyze_brand_impersonation(
+                text_input or "", extra_field_values, subtopic_title,
+            )
+        elif subtopic_id == "teacher-impersonation":
+            result = teacher_university_impersonation.analyze_teacher_university_impersonation(
+                text_input or "", extra_field_values, subtopic_title,
+            )
+        elif subtopic_id == "management-impersonation":
+            result = senior_management_impersonation.analyze_senior_management_impersonation(
+                text_input or "", extra_field_values, subtopic_title,
+            )
+        elif subtopic_id == "government-impersonation":
+            result = government_impersonation.analyze_government_impersonation(
+                text_input or "", extra_field_values, subtopic_title,
+            )
+        else:
+            result = impersonation.analyze_identity(text_input or "", extra_field_values, subtopic_title)
         return result | {"_target": target, "_target_type": "identity"}
 
     if module_id == "credential":
         fields = dict(extra_field_values)
-        result = account_takeover.analyze_event(fields, subtopic_title)
+        result = account_takeover.analyze_event(fields, subtopic_title, text=text_input or "")
         target = text_input[:80] if text_input else "account security event"
         return result | {"_target": target, "_target_type": "identity" if subtopic_id != "password-spraying" and subtopic_id != "session-activity" and subtopic_id != "behavior-changes" else "text"}
 

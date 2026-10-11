@@ -9,6 +9,11 @@ os.environ["ENVIRONMENT"] = "development"
 os.environ["UPLOAD_DIR"] = f"{_tmpdir}/uploads"
 os.environ["REPORTS_DIR"] = f"{_tmpdir}/reports"
 os.environ["CORS_ORIGINS"] = "http://localhost:5173"
+os.environ["RATE_LIMIT_ENABLED"] = "false"   # tests sign up many users from one "IP"
+# Never send real Telegram / email / WhatsApp alerts while testing, whatever is in .env.
+for _k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "ALERT_EMAIL_TO",
+           "WHATSAPP_TO", "CALLMEBOT_APIKEY", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM"):
+    os.environ[_k] = ""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,7 +30,8 @@ def client():
 def auth_client(client):
     import uuid
     email = f"user_{uuid.uuid4().hex[:8]}@example.com"
-    r = client.post("/api/auth/register", json={"name": "Test User", "email": email, "password": "TestPass123"})
+    from helpers import register_user
+    r = register_user(client, {"name": "Test User", "email": email, "password": "TestPass123"})
     assert r.status_code == 201
     client._test_email = email
     return client

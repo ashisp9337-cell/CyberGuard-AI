@@ -35,6 +35,7 @@ class User(Base):
 
     scans = relationship("Scan", back_populates="user", cascade="all, delete-orphan")
     settings = relationship("UserSettings", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    known_contacts = relationship("KnownContact", back_populates="user", cascade="all, delete-orphan")
 
 
 class PasswordResetToken(Base):
@@ -45,6 +46,28 @@ class PasswordResetToken(Base):
     token_hash: Mapped[str] = mapped_column(String, unique=True, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     used: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class EmailOTP(Base):
+    """A one-time code sent by email: for SIGNUP (prove the email is yours before an
+    account exists) or LOGIN (second step after the password). Only a hash of the
+    code is stored; the id doubles as the unguessable challenge id the browser holds."""
+    __tablename__ = "email_otps"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    purpose: Mapped[str] = mapped_column(String, index=True)          # "signup" | "login"
+    email: Mapped[str] = mapped_column(String, index=True)
+    user_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True, index=True)
+    name: Mapped[str | None] = mapped_column(String, nullable=True)  # signup: the name typed in step 1
+    code_hash: Mapped[str] = mapped_column(String)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    resends: Mapped[int] = mapped_column(Integer, default=0)
+    remember_me: Mapped[bool] = mapped_column(Boolean, default=True)
+    verified: Mapped[bool] = mapped_column(Boolean, default=False)   # code was correct
+    consumed: Mapped[bool] = mapped_column(Boolean, default=False)   # finished or cancelled
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
@@ -142,3 +165,76 @@ class Report(Base):
     file_path: Mapped[str] = mapped_column(String, default="")
     size_kb: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+
+class KnownContact(Base):
+    """
+    A user's own personally-trusted contacts (a boss, a professor, a
+    relative, their bank), used by the Friend/Relative/Known Contact
+    Impersonation detector to check whether a message claiming to be from
+    them actually matches what's known about them. This is inherently
+    per-user data - one person's "Mom" is meaningless to another user.
+    """
+    __tablename__ = "known_contacts"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: gen_id("CNT"))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
+    display_name: Mapped[str] = mapped_column(String)
+    role_label: Mapped[str] = mapped_column(String, default="")
+    authorized_email: Mapped[str] = mapped_column(String, default="")
+    authorized_domain: Mapped[str] = mapped_column(String, default="")
+    typical_hours_start: Mapped[int] = mapped_column(Integer, default=0)
+    typical_hours_end: Mapped[int] = mapped_column(Integer, default=23)
+    high_risk_requests_allowed: Mapped[bool] = mapped_column(Boolean, default=False)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+    user = relationship("User", back_populates="known_contacts")
+
+# ---------------------------------------------------------------------------
+# Email Intelligence Pipeline
+# ---------------------------------------------------------------------------
+class EmailRecord(Base):
+    """One analysed email: who sent it, how it authenticated, and the fused verdict."""
+    __tablename__ = "email_records"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: gen_id("EML"))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
+    scan_id: Mapped[str | None] = mapped_column(String, ForeignKey("scans.id"), nullable=True, index=True)
+    message_id: Mapped[str] = mapped_column(String, default="", index=True)
+    source: Mapped[str] = mapped_column(String, default="upload")  # upload | paste | imap | gmail | graph
+    from_address: Mapped[str] = mapped_column(String, default="", index=True)
+    from_domain: Mapped[str] = mapped_column(String, default="", index=True)
+    from_display_name: Mapped[str] = mapped_column(String, default="")
+    subject: Mapped[str] = mapped_column(Text, default="")
+    spf: Mapped[str] = mapped_column(String, default="unknown")
+    dkim: Mapped[str] = mapped_column(String, default="unknown")
+    dmarc: Mapped[str] = mapped_column(String, default="unknown")
+    originating_ip: Mapped[str] = mapped_column(String, default="")
+    link_count: Mapped[int] = mapped_column(Integer, default=0)
+    attachment_count: Mapped[int] = mapped_column(Integer, default=0)
+    category: Mapped[str] = mapped_column(String, default="")
+    risk_score: Mapped[int] = mapped_column(Integer, default=0)
+    classification: Mapped[str] = mapped_column(String, default="safe")
+    mitre: Mapped[list] = mapped_column(JSON, default=list)
+    components: Mapped[list] = mapped_column(JSON, default=list)
+    details: Mapped[dict] = mapped_column(JSON, default=dict)   # parsed summary: links, attachments, claims
+    action_taken: Mapped[str] = mapped_column(String, default="none")  # none | quarantined | released ...
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+
+
+class SenderHistory(Base):
+    """Per-user memory of senders: lets the pipeline spot first-time senders and trust known-good ones."""
+    __tablename__ = "sender_history"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: gen_id("SND"))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
+    sender_address: Mapped[str] = mapped_column(String, index=True)
+    sender_domain: Mapped[str] = mapped_column(String, index=True)
+    message_count: Mapped[int] = mapped_column(Integer, default=0)
+    safe_count: Mapped[int] = mapped_column(Integer, default=0)
+    malicious_count: Mapped[int] = mapped_column(Integer, default=0)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)

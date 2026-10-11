@@ -96,14 +96,48 @@ BRAND_DOMAINS = {
     "chase": {"chase.com", "jpmorganchase.com"},
     "wellsfargo": {"wellsfargo.com"},
     "bankofamerica": {"bankofamerica.com"},
-    "hdfcbank": {"hdfcbank.com", "hdfcbank.net"},
-    "icicibank": {"icicibank.com"},
-    "axisbank": {"axisbank.com"},
-    "onlinesbi": {"onlinesbi.sbi", "onlinesbi.com", "sbi.co.in", "sbicard.com"},
-    "paytm": {"paytm.com"},
+    "hdfcbank": {"hdfcbank.com", "hdfcbank.net", "hdfc.bank.in"},
+    "icicibank": {"icicibank.com", "icici.bank.in"},
+    "axisbank": {"axisbank.com", "axis.bank.in"},
+    "onlinesbi": {"onlinesbi.sbi", "onlinesbi.com", "sbi.co.in", "sbicard.com", "sbi.bank.in"},
+    "paytm": {"paytm.com", "paytmbank.com", "paytmmoney.com"},
     "phonepe": {"phonepe.com"},
     "flipkart": {"flipkart.com"},
+    # --- more Indian brands that phishing targets (short names only match as a whole word) -------
+    "sbi": {"onlinesbi.sbi", "onlinesbi.com", "sbi.co.in", "sbicard.com", "sbi.bank.in", "sbilife.co.in",
+            "sbimf.com", "sbigeneral.in", "yonobusiness.sbi", "yonosbi.com"},
+    "hdfc": {"hdfcbank.com", "hdfcbank.net", "hdfc.com", "hdfclife.com", "hdfcergo.com", "hdfcfund.com",
+             "hdfcsec.com", "hdfc.bank.in"},
+    "icici": {"icicibank.com", "icicidirect.com", "icicilombard.com", "iciciprulife.com", "icici.bank.in"},
+    "kotak": {"kotak.com", "kotaksecurities.com", "kotaklife.com", "kotak.bank.in"},
+    "irctc": {"irctc.co.in", "irctc.com", "irctctourism.com"},
+    "airtel": {"airtel.in", "airtel.com"},
+    "jio": {"jio.com", "jiomart.com", "jiocinema.com", "jiosaavn.com"},
+    "uidai": {"uidai.gov.in"},
+    "aadhaar": {"uidai.gov.in"},
+    "incometax": {"incometax.gov.in", "incometaxindia.gov.in"},
+    "epfo": {"epfindia.gov.in"},
+    "indiapost": {"indiapost.gov.in"},
+    "npci": {"npci.org.in"},
+    "bhim": {"bhimupi.org.in"},
+    "bput": {"bput.ac.in"},
+    "myntra": {"myntra.com"},
+    "swiggy": {"swiggy.com"},
+    "zomato": {"zomato.com"},
 }
+
+# Nicknames that clearly mean a brand (matched as whole words only).
+BRAND_ALIASES = {
+    "m365": "microsoft", "o365": "microsoft", "office365": "microsoft", "msoffice": "microsoft",
+    "onedrive": "microsoft", "sharepoint": "microsoft", "outlook": "microsoft", "hotmail": "microsoft",
+    "icloud": "apple", "appleid": "apple", "gmail": "google", "gdrive": "google", "fb": "facebook",
+    "insta": "instagram", "yono": "sbi", "sbionline": "sbi", "netflx": "netflix", "amzn": "amazon",
+    "phonepay": "phonepe", "gpay": "google", "paytmbank": "paytm",
+}
+
+# Only government / regulated registrars can hand out names under these suffixes, so a brand word
+# there is not impersonation (e.g. uidai.gov.in; Indian banks are moving to <bank>.bank.in).
+CONTROLLED_SUFFIXES = (".gov.in", ".nic.in", ".bank.in", ".gov")
 
 SENSITIVE_WORDS = (
     "login", "signin", "verify", "secure", "account", "update", "confirm", "password",
@@ -113,6 +147,7 @@ SENSITIVE_WORDS = (
 REDIRECT_PARAMS = {
     "url", "redirect", "redirect_uri", "redirecturl", "next", "continue", "return",
     "returnurl", "return_to", "target", "dest", "destination", "goto", "link", "u",
+    "q", "r", "to", "out", "uri", "adurl", "rurl", "redir",   # only counts when the value is a full link
 }
 
 _LEET = str.maketrans({"0": "o", "1": "l", "3": "e", "5": "s", "@": "a", "$": "s"})
@@ -156,12 +191,16 @@ def _leet_normalize(token: str) -> str:
 
 
 def _within_one_edit(a: str, b: str) -> bool:
+    """One typo apart: one letter changed, added, removed, or two neighbours swapped (hdfcbnak)."""
     if a == b:
         return True
     if abs(len(a) - len(b)) > 1:
         return False
     if len(a) == len(b):
-        return sum(x != y for x, y in zip(a, b)) == 1
+        diff = [i for i, (x, y) in enumerate(zip(a, b)) if x != y]
+        if len(diff) == 2 and diff[1] == diff[0] + 1 and a[diff[0]] == b[diff[1]] and a[diff[1]] == b[diff[0]]:
+            return True
+        return len(diff) == 1
     short, long_ = (a, b) if len(a) < len(b) else (b, a)
     i = 0
     while i < len(short) and short[i] == long_[i]:
@@ -186,11 +225,17 @@ def _token_matches_brand(token: str, brand: str, allow_substring: bool) -> bool:
 def brand_in_host(host: str) -> str | None:
     """Returns the brand name if the host uses a brand word but is not one of that brand's domains."""
     reg = registered_domain(host)
+    if host.endswith(CONTROLLED_SUFFIXES):
+        return None
     tokens = [t for t in re.split(r"[^a-z0-9]+", host) if t]
     for brand, official in BRAND_DOMAINS.items():
         if reg in official or host in official:
             continue
         if any(_token_matches_brand(t, brand, allow_substring=True) for t in tokens):
+            return brand
+    for t in tokens:                                  # m365-login.top -> microsoft
+        brand = BRAND_ALIASES.get(t)
+        if brand and reg not in BRAND_DOMAINS.get(brand, ()) and host not in BRAND_DOMAINS.get(brand, ()):
             return brand
     return None
 
@@ -263,4 +308,4 @@ def extract_features_v2(url: str) -> list:
         round(sum(c.isupper() for c in path_and_query) / max(len(path_and_query), 1), 4),
         1.0 if any(ord(c) > 127 for c in raw) else 0.0,
         float(len(reg)), float(len(subdomain)),
-    ]
+    ]

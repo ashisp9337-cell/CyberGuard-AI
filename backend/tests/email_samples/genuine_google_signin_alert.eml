@@ -1,0 +1,22 @@
+Received: from mx.google.com by mx.example.in with ESMTPS id x1; Tue, 06 Oct
+ 2026 10:01:00 +0000
+Received: from mail.sender.example ([209.85.220.41]) by mx.google.com with
+ ESMTP id y2; Tue, 06 Oct 2026 10:00:58 +0000
+Authentication-Results: mx.google.com; spf=pass
+ smtp.mailfrom=accounts.google.com; dkim=pass header.d=accounts.google.com;
+ dmarc=pass header.from=accounts.google.com
+From: Google <no-reply@accounts.google.com>
+To: ashis@example.com
+Subject: Security alert
+Date: Tue, 06 Oct 2026 10:00:57 +0000
+Message-ID: <179137081213.6437.17731988842822092662@sender.example>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+New sign-in on Windows
+ashis@example.com
+We noticed a new sign-in to your Google Account on a Windows device. If this =
+was you, you don't need to do anything. If not, we'll help you secure your ac=
+count.
+Check activity: https://myaccount.google.com/notifications

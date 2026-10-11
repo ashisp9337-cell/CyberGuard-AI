@@ -1,6 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user
+from app.db.database import get_db
 from app.db.models import User
 from app.schemas.chat import ChatMessageRequest, ChatMessageResponse
 from app.services.chat_service import send_message, reset_session, ChatUnavailableError
@@ -9,9 +11,9 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
 @router.post("", response_model=ChatMessageResponse)
-def chat(body: ChatMessageRequest, user: User = Depends(get_current_user)):
+def chat(body: ChatMessageRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
-        reply = send_message(user.id, body.message)
+        reply = send_message(user.id, body.message, db)
     except ChatUnavailableError as e:
         raise HTTPException(status_code=503, detail={"error": {"code": "CHAT_UNAVAILABLE", "message": str(e)}})
     return ChatMessageResponse(reply=reply)

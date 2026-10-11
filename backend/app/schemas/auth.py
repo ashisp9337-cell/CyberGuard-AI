@@ -48,3 +48,35 @@ class AuthUserOut(BaseModel):
 
 class AuthResultOut(BaseModel):
     user: AuthUserOut
+
+
+# ---- OTP signup / login ---------------------------------------------------
+class SignupStartRequest(BaseModel):
+    name: str
+    email: EmailStr
+    turnstileToken: Optional[str] = None
+
+    @field_validator("name")
+    @classmethod
+    def name_ok(cls, v):
+        v = v.strip()
+        if not v:
+            raise ValueError("Name is required.")
+        if len(v) > 80:
+            raise ValueError("Name is too long.")
+        return v
+
+
+class OTPVerifyRequest(BaseModel):
+    challengeId: str
+    code: str
+
+
+class SignupCompleteRequest(BaseModel):
+    signupToken: str
+    password: str
+
+
+class OTPResendRequest(BaseModel):
+    challengeId: str
+    purpose: str  # "signup" | "login"

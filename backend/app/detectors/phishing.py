@@ -171,11 +171,13 @@ def _link_destination_indicator(text: str, subtopic_id: str | None) -> dict | No
 
 
 def analyze_text(text: str, sender: str | None = None, subtopic_title: str = "Phishing Detection",
-                  subtopic_id: str | None = None, reply_to: str | None = None) -> dict:
+                  subtopic_id: str | None = None, reply_to: str | None = None,
+                  scan_links: bool = True) -> dict:
     text = (text or "").strip()
     rule_indicators = _rule_indicators(text, sender, reply_to)
 
-    link_indicator = _link_destination_indicator(text, subtopic_id) if text else None
+    # scan_links=False: the caller (e.g. the email pipeline) scores links itself
+    link_indicator = _link_destination_indicator(text, subtopic_id) if text and scan_links else None
     if link_indicator:
         rule_indicators.append(link_indicator)
 

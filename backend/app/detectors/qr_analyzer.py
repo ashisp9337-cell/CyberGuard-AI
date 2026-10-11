@@ -48,10 +48,11 @@ def _text_rule_result(p: Payload, subtopic_title: str, subtopic_id: str) -> dict
     )
 
 
-def _analyze_payload(text: str, subtopic_title: str, subtopic_id: str) -> tuple[Payload, dict, list[dict]]:
+def _analyze_payload(text: str, subtopic_title: str, subtopic_id: str,
+                     network: bool = True) -> tuple[Payload, dict, list[dict]]:
     p = classify_payload(text)
     if p.kind == "url":
-        base = malicious_url.analyze_url(p.url, subtopic_title, subtopic_id=subtopic_id)
+        base = malicious_url.analyze_url(p.url, subtopic_title, subtopic_id=subtopic_id, network=network)
         extra = url_context_indicators(p) + payload_indicators(p)
     elif p.kind == "text":
         base = _text_rule_result(p, subtopic_title, subtopic_id)
@@ -94,7 +95,7 @@ def _finalize(p: Payload, base: dict, extra: list[dict], *, decoder: str, n_code
 
 def analyze_qr(file_path: str | None, file_name: str | None,
                subtopic_title: str = "QR Code Phishing Detection",
-               subtopic_id: str = "qr-phishing") -> dict:
+               subtopic_id: str = "qr-phishing", network: bool = True) -> dict:
     if not file_path:
         raise QRDecodeError("No image was uploaded.")
 
@@ -109,7 +110,7 @@ def analyze_qr(file_path: str | None, file_name: str | None,
     n_codes = len(decoded.codes)
     best: tuple[Payload, dict] | None = None
     for code in decoded.codes[:MAX_CODES]:
-        p, base, extra = _analyze_payload(code.text, subtopic_title, subtopic_id)
+        p, base, extra = _analyze_payload(code.text, subtopic_title, subtopic_id, network=network)
         if n_codes > 1:
             extra = extra + [{
                 "label": "Several QR codes in one image",

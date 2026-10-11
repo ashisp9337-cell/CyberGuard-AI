@@ -1,0 +1,23 @@
+Received: from mx.google.com by mx.example.in with ESMTPS id x1; Tue, 06 Oct
+ 2026 10:01:00 +0000
+Received: from mail.sender.example ([185.220.101.4]) by mx.google.com with
+ ESMTP id y2; Tue, 06 Oct 2026 10:00:58 +0000
+Authentication-Results: mx.google.com; spf=pass smtp.mailfrom=gmail.com;
+ dkim=pass header.d=gmail.com; dmarc=pass header.from=gmail.com
+From: "Rajesh Kumar (CEO)" <rajesh.ceo.acme@gmail.com>
+To: priya@acme-industries.com
+Subject: RE: quick favour
+Date: Tue, 06 Oct 2026 10:00:57 +0000
+Message-ID: <179137081202.6437.14254795510087812382@sender.example>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+Priya,
+Are you at your desk? I need a quick favour and it's confidential. I'm in a b=
+oard meeting and can't take calls. Please buy 5 Google Play gift cards of Rs =
+5000 each for a client and send me photos of the codes within the hour. I'll =
+reimburse you today.
+
+Rajesh Kumar
+CEO, Acme Industries

@@ -1,0 +1,29 @@
+{
+  "model": "HistGradientBoosting (name features) + char 3-5-gram LogisticRegression, averaged",
+  "data": [
+    "phiusiil+phishing+url+dataset.zip",
+    "tranco_8PXYV-1m.csv.zip"
+  ],
+  "sources": [
+    "https://archive.ics.uci.edu/dataset/967/phiusiil+phishing+url+dataset (CC BY 4.0)",
+    "https://tranco-list.eu/"
+  ],
+  "scope": "registered domain name only (scheme, www, path, page content NOT used -- see header)",
+  "trained_at": "2026-10-11T23:01:47+00:00",
+  "metrics": {
+    "held_out_domains": 84582,
+    "held_out_phishing": 8351,
+    "roc_auc": 0.7828,
+    "pr_auc": 0.4593,
+    "phishing_share": 0.0987,
+    "alert_threshold": 0.3207,
+    "phishing_caught_at_threshold": 0.2655,
+    "legit_flagged_at_threshold": 0.01,
+    "unseen_popular_sites_flagged": {
+      "top_10k": 0.0132,
+      "10k_100k": 0.0147,
+      "100k_1M": 0.0141
+    },
+    "unseen_indian_in_sites_flagged": 0.0031
+  }
+}

@@ -46,23 +46,41 @@ def overview(user: User = Depends(get_current_user), db: Session = Depends(get_d
 
 @router.get("/activity")
 def activity(days: int = 14, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    since = datetime.now(timezone.utc) - timedelta(days=days)
-    scans = db.query(Scan).filter(Scan.user_id == user.id, Scan.created_at >= since).all()
+    """Threat detections per day, split by category.
+
+    Only scans that came back suspicious or worse are counted (a "safe" scan
+    is not a detection). The window ends TODAY, so today's scans are shown.
+    """
+    days = max(1, min(days, 90))
+    today = datetime.now(timezone.utc).date()
+    first_day = today - timedelta(days=days - 1)
+    since = datetime.combine(first_day, datetime.min.time(), tzinfo=timezone.utc)
+
+    scans = (db.query(Scan)
+             .filter(Scan.user_id == user.id, Scan.created_at >= since,
+                     Scan.classification.in_(["suspicious", "high_risk", "critical"]))
+             .all())
+
+    empty = {"phishing": 0, "impersonation": 0, "deepfake": 0, "accountTakeover": 0,
+             "suspiciousUrls": 0, "networkThreats": 0, "malware": 0}
     buckets: dict[str, dict] = {}
     for i in range(days):
-        d = (since + timedelta(days=i)).strftime("%b %d")
-        buckets[d] = {"label": d, "phishing": 0, "deepfake": 0, "accountTakeover": 0, "suspiciousUrls": 0, "networkThreats": 0, "malware": 0}
+        d = (first_day + timedelta(days=i)).strftime("%b %d")
+        buckets[d] = {"label": d, **empty}
+
+    key_map = {"phishing": "phishing", "impersonation": "impersonation", "deepfake": "deepfake",
+               "credential": "accountTakeover", "url-security": "suspiciousUrls", "cyber-threat": "networkThreats"}
     for s in scans:
         label = s.created_at.strftime("%b %d")
         if label not in buckets:
             continue
-        key_map = {"phishing": "phishing", "deepfake": "deepfake", "credential": "accountTakeover",
-                   "url-security": "suspiciousUrls", "cyber-threat": "networkThreats", "impersonation": "malware"}
         key = key_map.get(s.module_id)
+        # Malware is a cyber-threat subtopic, so give it its own series.
+        if s.module_id == "cyber-threat" and s.subtopic_id == "malware-detection":
+            key = "malware"
         if key:
             buckets[label][key] += 1
     return list(buckets.values())
-
 
 @router.get("/threat-distribution")
 def threat_distribution(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -86,3 +104,51 @@ def live_feed(limit: int = 20, user: User = Depends(get_current_user), db: Sessi
          "status": e.status, "timestamp": e.timestamp.isoformat(), "category": e.event_metadata.get("category", e.event_type)}
         for e in events
     ]
+
+
+
+@router.get("/top-targets")
+def top_targets(days: int = 30, limit: int = 6,
+                user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Most targeted services (organisations impersonated/attacked) and accounts.
+
+    Counts each threat scan (suspicious or worse) once per service/account
+    it involves, over the last `days` days.
+    """
+    from app.services.targets import services_for, accounts_for
+
+    days = max(1, min(days, 365))
+    limit = max(1, min(limit, 20))
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    scans = (db.query(Scan)
+             .filter(Scan.user_id == user.id, Scan.created_at >= since,
+                     Scan.classification.in_(["suspicious", "high_risk", "critical"]))
+             .order_by(Scan.created_at.desc())
+             .limit(2000)
+             .all())
+
+    services: dict[str, dict] = {}
+    accounts: dict[str, dict] = {}
+    for s in scans:
+        for svc in services_for(s):
+            row = services.setdefault(svc["name"], {"name": svc["name"], "category": svc["category"],
+                                                    "count": 0, "maxRisk": 0, "lastSeen": s.created_at.isoformat(),
+                                                    "modules": set()})
+            row["count"] += 1
+            row["maxRisk"] = max(row["maxRisk"], s.risk_score or 0)
+            row["modules"].add(MODULE_LABELS.get(s.module_id, s.module_id))
+        for acc in accounts_for(s):
+            row = accounts.setdefault(acc, {"name": acc, "count": 0, "maxRisk": 0,
+                                            "lastSeen": s.created_at.isoformat()})
+            row["count"] += 1
+            row["maxRisk"] = max(row["maxRisk"], s.risk_score or 0)
+
+    def top(rows: dict) -> list[dict]:
+        ranked = sorted(rows.values(), key=lambda r: (-r["count"], -r["maxRisk"], r["name"]))[:limit]
+        for r in ranked:
+            if "modules" in r:
+                r["modules"] = sorted(r["modules"])
+        return ranked
+
+    return {"days": days, "threatScans": len(scans), "services": top(services), "accounts": top(accounts)}
+

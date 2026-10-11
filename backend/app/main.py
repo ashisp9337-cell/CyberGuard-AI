@@ -6,15 +6,14 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.config import get_settings
 from app.db.database import Base, engine
 from app.db import models  # noqa: F401 — ensures models are registered before create_all
-from app.api.routes import auth, analysis, scans, dashboard, events, reports, settings as settings_route, threat_intelligence, monitoring, chat
+from app.api.routes import auth, analysis, scans, dashboard, events, reports, settings as settings_route, threat_intelligence, monitoring, chat, contacts, email as email_route, alerts as alerts_route, incidents as incidents_route, incidents as incidents_route
 
 settings = get_settings()
 
@@ -26,7 +25,7 @@ logger = logging.getLogger("cyberguard")
 if settings.DATABASE_URL.startswith("sqlite"):
     Base.metadata.create_all(bind=engine)
 
-limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+from app.core.rate_limit import limiter  # shared with routes (per-route limits)
 
 app = FastAPI(
     title="CyberGuard AI API",
@@ -103,3 +102,7 @@ app.include_router(settings_route.router)
 app.include_router(threat_intelligence.router)
 app.include_router(monitoring.router)
 app.include_router(chat.router)
+app.include_router(contacts.router)
+app.include_router(email_route.router)
+app.include_router(alerts_route.router)
+app.include_router(incidents_route.router)

@@ -1,0 +1,416 @@
+{
+  "model": "Risk-Based Authentication risk score (Freeman et al. 2016 / Wiefling et al.) + attacker-source reputation",
+  "dataset": "rba-dataset.csv",
+  "dataset_source": "https://www.kaggle.com/datasets/dasgroup/rba-dataset (CC BY 4.0, Wiefling et al.)",
+  "logins": 31269264,
+  "training_logins": 25015411,
+  "period": [
+    "2020-02-03 12:43:30.772",
+    "2021-02-28 23:59:58.756"
+  ],
+  "accounts_in_training": 3741763,
+  "user_sample": 0.1,
+  "alert_rule": "alert when a login is riskier than 99% of normal logins on either side",
+  "not_used": "Round-Trip Time (missing for attack rows = label leak)",
+  "trained_at": "2026-10-11T21:55:32+00:00",
+  "metrics": {
+    "account_side": {
+      "what": "risk of a login compared with the account's own earlier logins (country/ASN/IP + device/OS/browser/UA)",
+      "normal_repeat_logins_used_for_calibration": 729980,
+      "simulated_attacker_naive": {
+        "description": "attacker has the password, logs in from a real attacker login's country/ASN/IP/device",
+        "pairs": 49581,
+        "roc_auc": 0.9439,
+        "caught_when_challenging_1pct_of_normal_logins": 0.5861,
+        "caught_when_challenging_5pct_of_normal_logins": 0.7719
+      },
+      "simulated_attacker_same_country": {
+        "description": "as above but the attacker uses the victim's own country (e.g. a local VPN)",
+        "pairs": 49572,
+        "roc_auc": 0.8788,
+        "caught_when_challenging_1pct_of_normal_logins": 0.3252,
+        "caught_when_challenging_5pct_of_normal_logins": 0.5189
+      },
+      "real_attack_ip_successful_logins_vs_normal": {
+        "note": "accounts with history, test period; attacker-list IPs that log in successfully often keep coming back, so they become part of the account's 'normal' history -- expect a weak result",
+        "roc_auc": 0.4121
+      }
+    },
+    "attacker_side": {
+      "what": "how much more common the login's country / ASN / device type is among attacker-list logins",
+      "test_logins": 2834961,
+      "attack_share": 0.106,
+      "roc_auc_all_logins": 0.8538,
+      "pr_auc_all_logins": 0.3415,
+      "roc_auc_successful_logins": 0.8825,
+      "at_alert_level_99th_percentile": {
+        "precision": 0.5841,
+        "recall": 0.1204,
+        "normal_logins_alerted": 0.0102
+      },
+      "roc_auc_attack_ips_never_seen_in_training": 0.7363
+    },
+    "account_takeover_rows": {
+      "rows": 141,
+      "rows_in_test_period": 0,
+      "rows_with_account_history": 87,
+      "account_side_percentiles": [
+        95.8,
+        91.3,
+        91.3,
+        0.0,
+        0.0,
+        99.8,
+        79.8,
+        99.3,
+        96.1,
+        95.3,
+        88.1,
+        91.3,
+        79.8,
+        99.6,
+        91.3,
+        87.2,
+        88.1,
+        96.3,
+        95.3,
+        79.8,
+        93.5,
+        79.8,
+        79.8,
+        98.2,
+        91.3,
+        79.8,
+        79.8,
+        0.0,
+        91.3,
+        0.0,
+        97.5,
+        79.8,
+        79.8,
+        0.0,
+        99.2,
+        98.1,
+        97.4,
+        99.3,
+        0.0,
+        0.0,
+        91.3,
+        0.0,
+        99.9,
+        97.5,
+        91.3,
+        97.5,
+        98.4,
+        97.5,
+        91.3,
+        99.5,
+        99.8,
+        99.4,
+        98.9,
+        98.9,
+        99.5,
+        91.3,
+        91.3,
+        99.8,
+        91.3,
+        99.7,
+        79.8,
+        99.5,
+        88.1,
+        98.9,
+        0.0,
+        99.0,
+        99.3,
+        94.2,
+        0.0,
+        0.0,
+        0.0,
+        99.5,
+        90.9,
+        79.8,
+        99.7,
+        0.0,
+        88.1,
+        94.2,
+        91.3,
+        91.3,
+        91.9,
+        99.7,
+        0.0,
+        95.8,
+        93.9,
+        79.8,
+        97.8
+      ],
+      "attacker_side_percentiles": [
+        0.0,
+        0.0,
+        99.5,
+        99.9,
+        38.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.4,
+        99.5,
+        99.7,
+        99.8,
+        0.0,
+        99.7,
+        81.2,
+        99.9,
+        99.8,
+        99.5,
+        99.5,
+        87.2,
+        99.2,
+        99.3,
+        99.5,
+        81.2,
+        99.5,
+        86.6,
+        99.5,
+        99.5,
+        81.2,
+        99.5,
+        87.5,
+        99.7,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.2,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        86.6,
+        99.2,
+        99.3,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        38.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        38.5,
+        0.0,
+        99.7,
+        99.7,
+        99.5,
+        0.0,
+        99.7,
+        99.5,
+        99.5,
+        99.5,
+        0.0,
+        99.8,
+        99.7,
+        99.5,
+        99.4,
+        99.7,
+        81.2,
+        81.2,
+        99.5,
+        0.0,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.4,
+        85.7,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.2,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        0.0,
+        87.2,
+        81.2,
+        99.5,
+        99.5,
+        99.7,
+        99.6,
+        87.5,
+        38.5,
+        38.5,
+        99.7,
+        99.5,
+        0.0,
+        99.5,
+        99.5,
+        38.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        99.5,
+        38.5,
+        99.2,
+        99.5,
+        99.4,
+        99.7,
+        99.5,
+        99.7,
+        99.5,
+        99.7,
+        99.5,
+        99.5
+      ],
+      "share_flagged_at_alert_level": 0.8085,
+      "note": "tables were built from the training period; takeover rows are too few to tune on, so all are reported"
+    },
+    "rule_check": {
+      "note": "share of 1-hour windows that involve an attacker-list IP, per threshold. If the share does not rise with the threshold, the data contains no burst pattern to tune on and the rules keep standard values.",
+      "failed_logins_from_one_ip_per_hour": {
+        ">=1": {
+          "windows": 8096843,
+          "attack_share": 0.137
+        },
+        ">=2": {
+          "windows": 2310606,
+          "attack_share": 0.1385
+        },
+        ">=3": {
+          "windows": 1037211,
+          "attack_share": 0.1259
+        },
+        ">=5": {
+          "windows": 345387,
+          "attack_share": 0.0978
+        },
+        ">=10": {
+          "windows": 68663,
+          "attack_share": 0.0575
+        },
+        ">=20": {
+          "windows": 27582,
+          "attack_share": 0.0403
+        },
+        ">=50": {
+          "windows": 7475,
+          "attack_share": 0.0029
+        }
+      },
+      "accounts_tried_from_one_ip_per_hour (spraying)": {
+        ">=1": {
+          "windows": 15003527,
+          "attack_share": 0.0909
+        },
+        ">=2": {
+          "windows": 1880455,
+          "attack_share": 0.1379
+        },
+        ">=3": {
+          "windows": 212437,
+          "attack_share": 0.1684
+        },
+        ">=5": {
+          "windows": 11915,
+          "attack_share": 0.0321
+        },
+        ">=10": {
+          "windows": 1577,
+          "attack_share": 0.0089
+        },
+        ">=20": {
+          "windows": 203,
+          "attack_share": 0.0296
+        },
+        ">=50": {
+          "windows": 36,
+          "attack_share": 0.1389
+        }
+      },
+      "failed_logins_on_one_account_per_hour (brute force)": {
+        ">=1": {
+          "windows": 3130290,
+          "attack_share": 0.1369
+        },
+        ">=2": {
+          "windows": 451776,
+          "attack_share": 0.1398
+        },
+        ">=3": {
+          "windows": 123770,
+          "attack_share": 0.1399
+        },
+        ">=5": {
+          "windows": 26208,
+          "attack_share": 0.1197
+        },
+        ">=10": {
+          "windows": 7961,
+          "attack_share": 0.0352
+        },
+        ">=20": {
+          "windows": 94,
+          "attack_share": 0.1489
+        },
+        ">=50": {
+          "windows": 3,
+          "attack_share": 0.0
+        }
+      },
+      "attempts_on_non_existent_accounts": {
+        "attempts": 10607007,
+        "attack_share": 0.1178,
+        "attack_share_on_real_accounts": 0.0795
+      }
+    }
+  },
+  "scenarios": {
+    "usual place, device and time (should be LOW)": {
+      "percentile": 0.0,
+      "flagged": false,
+      "reasons": []
+    },
+    "same account, new IP from the same provider (should stay LOW/MEDIUM)": {
+      "percentile": 0.0,
+      "flagged": false,
+      "reasons": []
+    },
+    "same account, new browser on the same computer (LOW/MEDIUM)": {
+      "percentile": 0.0,
+      "flagged": false,
+      "reasons": []
+    },
+    "same account, new country + network + device (should be HIGH)": {
+      "percentile": 99.9,
+      "flagged": true,
+      "reasons": [
+        "country never used by this account before (ru)",
+        "device type never used by this account before (mobile)"
+      ]
+    }
+  }
+}

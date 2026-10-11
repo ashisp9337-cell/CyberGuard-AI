@@ -17,7 +17,10 @@ import logging
 
 from google import genai
 from google.genai import types, errors
+from sqlalchemy.orm import Session
+
 from app.core.config import get_settings
+from app.services.chat_tools import build_tools
 
 settings = get_settings()
 logger = logging.getLogger("cyberguard.chat")
@@ -35,9 +38,16 @@ brand impersonation) and HOW to recognize and avoid them.
 Account Takeover, Malicious URL & Website Detection, Intelligent Cyber Threat \
 Detection), each with real trained ML models and rule-based detectors, real scan \
 history, dashboard, reports, and live monitoring.
-4. Keep answers concise and practical by default; go deeper only if asked.
-5. Never ask for or store passwords, API keys, or other credentials in this chat.
-6. If asked something outside cybersecurity/this platform, answer briefly if you \
+4. You have tools to look up the CURRENT USER'S OWN real data across the whole \
+platform: recent scans and their full details, overall security summary, threat \
+distribution by module, recent alerts/notifications, generated reports, current \
+settings, and basic account info. ALWAYS call the relevant tool when asked about \
+"my scans", "my alerts", "my reports", "my settings", "my account", or similar — \
+never guess, invent, or approximate this data from general knowledge. If a tool \
+returns no data (e.g. no scans yet), say so plainly rather than making something up.
+5. Keep answers concise and practical by default; go deeper only if asked.
+6. Never ask for or store passwords, API keys, or other credentials in this chat.
+7. If asked something outside cybersecurity/this platform, answer briefly if you \
 can, but gently steer back to what you're here for.
 
 You are talking to a real person who may be a student, developer, or security \
@@ -86,7 +96,7 @@ def _build_contents(user_id: str, message: str) -> list[dict]:
     return history
 
 
-def send_message(user_id: str, message: str) -> str:
+def send_message(user_id: str, message: str, db: Session) -> str:
     """Sends a message and returns the reply. Retries transient failures on
     the current model, then fails over to the next model in MODEL_CHAIN."""
     if not message or not message.strip():
@@ -99,10 +109,12 @@ def send_message(user_id: str, message: str) -> str:
         )
 
     contents = _build_contents(user_id, message.strip())
+    tools = build_tools(db, user_id)
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
         temperature=0.4,
         max_output_tokens=1024,
+        tools=tools,
     )
 
     last_error: Exception | None = None

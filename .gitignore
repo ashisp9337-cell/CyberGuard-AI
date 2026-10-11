@@ -9,6 +9,8 @@ backend/venv/
 backend/__pycache__/
 backend/**/__pycache__/
 backend/*.db
+backend/*.db.*
+backend/*.old-backup
 backend/.env
 backend/uploads/*
 !backend/uploads/.gitignore
@@ -17,3 +19,11 @@ backend/reports/*
 backend/app/ml/models/*.joblib
 backend/.pytest_cache/
 backend/htmlcov/
+backend/app/ml/training/data/rba-dataset*
+backend/app/ml/training/data/rba_*
+
+backend/app/ml/training/data/phiusiil*
+backend/app/ml/training/data/PhiUSIIL*
+backend/app/ml/training/data/tranco*
+backend/app/ml/training/data/top-1m*
+backend/app/ml/training/data/phishing-links*

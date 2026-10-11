@@ -1,0 +1,38 @@
+Received: from mx.google.com by mx.example.in with ESMTPS id x1; Tue, 06 Oct
+ 2026 10:01:00 +0000
+Received: from mail.sender.example ([185.220.101.4]) by mx.google.com with
+ ESMTP id y2; Tue, 06 Oct 2026 10:00:58 +0000
+Authentication-Results: mx.google.com; spf=fail
+ smtp.mailfrom=sbi-yono-kyc.com; dkim=none header.d=sbi-yono-kyc.com;
+ dmarc=fail header.from=sbi-yono-kyc.com
+From: "State Bank of India" <alerts@sbi-yono-kyc.com>
+To: ashis@example.com
+Subject: Urgent: Your YONO account will be blocked today - complete KYC
+Date: Tue, 06 Oct 2026 10:00:57 +0000
+Message-ID: <179137081202.6437.1441731246411617021@sender.example>
+Reply-To: sbi.kyc.helpdesk@gmail.com
+X-Mailer: PHPMailer 6.8
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============4484828553049204682=="
+
+--===============4484828553049204682==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+Dear Customer,
+Your SBI YONO account will be blocked today as your KYC is pending. Update PA=
+N immediately: https://sbi-yono-kyc.web.app/update
+State Bank of India
+
+--===============4484828553049204682==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>Dear Customer,</p><p>Your <b>SBI YONO</b> account will be bloc=
+ked today as your KYC is pending.</p><p>Login here to update PAN: <a href=3D"=
+https://sbi-yono-kyc.web.app/update">https://www.onlinesbi.sbi/kyc</a></p><p>=
+State Bank of India</p></body></html>
+
+--===============4484828553049204682==--

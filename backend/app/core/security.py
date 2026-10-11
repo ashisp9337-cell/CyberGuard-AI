@@ -60,6 +60,8 @@ def create_access_token(user_id: str) -> str:
 def decode_access_token(token: str) -> Optional[str]:
     try:
         payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        if payload.get("typ"):   # short-lived purpose tokens (e.g. signup) are never a login session
+            return None
         return payload.get("sub")
     except JWTError:
         return None
