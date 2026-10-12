@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user
 from app.db.database import get_db
 from app.db.models import KnownContact, User
+from app.services import audit
 from app.schemas.contacts import ContactCreate, ContactUpdate
 
 router = APIRouter(prefix="/api/contacts", tags=["contacts"])
@@ -27,7 +28,8 @@ def list_contacts(user: User = Depends(get_current_user), db: Session = Depends(
 
 
 @router.post("", status_code=201)
-def create_contact(body: ContactCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def create_contact(body: ContactCreate, request: Request, user: User = Depends(get_current_user),
+                   db: Session = Depends(get_db)):
     contact = KnownContact(
         user_id=user.id,
         display_name=body.displayName.strip(),
@@ -40,13 +42,16 @@ def create_contact(body: ContactCreate, user: User = Depends(get_current_user), 
         notes=body.notes.strip(),
     )
     db.add(contact)
+    audit.log(db, action="contact.create", user=user, request=request, target=contact.display_name,
+              detail={"email": contact.authorized_email, "domain": contact.authorized_domain})
     db.commit()
     db.refresh(contact)
     return _to_out(contact)
 
 
 @router.put("/{contact_id}")
-def update_contact(contact_id: str, body: ContactUpdate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def update_contact(contact_id: str, body: ContactUpdate, request: Request, user: User = Depends(get_current_user),
+                   db: Session = Depends(get_db)):
     contact = db.query(KnownContact).filter(KnownContact.id == contact_id, KnownContact.user_id == user.id).first()
     if not contact:
         raise HTTPException(status_code=404, detail={"error": {"code": "CONTACT_NOT_FOUND", "message": "Contact not found."}})
@@ -66,16 +71,20 @@ def update_contact(contact_id: str, body: ContactUpdate, user: User = Depends(ge
         contact.high_risk_requests_allowed = body.highRiskRequestsAllowed
     if body.notes is not None:
         contact.notes = body.notes.strip()
+    audit.log(db, action="contact.update", user=user, request=request, target=contact.display_name,
+              detail={k: v for k, v in body.model_dump(exclude_none=True).items() if k != "notes"})
     db.commit()
     db.refresh(contact)
     return _to_out(contact)
 
 
 @router.delete("/{contact_id}", status_code=204)
-def delete_contact(contact_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def delete_contact(contact_id: str, request: Request, user: User = Depends(get_current_user),
+                   db: Session = Depends(get_db)):
     contact = db.query(KnownContact).filter(KnownContact.id == contact_id, KnownContact.user_id == user.id).first()
     if not contact:
         raise HTTPException(status_code=404, detail={"error": {"code": "CONTACT_NOT_FOUND", "message": "Contact not found."}})
+    audit.log(db, action="contact.delete", user=user, request=request, target=contact.display_name)
     db.delete(contact)
     db.commit()
-    return None
+    return None

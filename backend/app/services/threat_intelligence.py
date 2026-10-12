@@ -49,10 +49,22 @@ async def check_abuseipdb(ip: str) -> dict:
         return {"provider": "abuseipdb", "status": "error", "reason": str(e)}
 
 
+def _urlhaus_headers() -> dict | None:
+    """URLhaus (abuse.ch) needs a free Auth-Key since 2025: https://auth.abuse.ch/ . No key -> skip the lookup."""
+    key = (settings.URLHAUS_API_KEY or "").strip()
+    return {"Auth-Key": key} if key else None
+
+
+_URLHAUS_OFF = {"provider": "urlhaus", "status": "unavailable", "reason": "URLHAUS_API_KEY not configured"}
+
+
 async def check_urlhaus(url: str) -> dict:
+    headers = _urlhaus_headers()
+    if headers is None:
+        return dict(_URLHAUS_OFF)
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post("https://urlhaus-api.abuse.ch/v1/url/", data={"url": url})
+            resp = await client.post("https://urlhaus-api.abuse.ch/v1/url/", data={"url": url}, headers=headers)
             resp.raise_for_status()
             data = resp.json()
             return {"provider": "urlhaus", "status": "ok", "query_status": data.get("query_status"),
@@ -88,9 +100,12 @@ def check_virustotal_url_sync(url: str, timeout: float = 4.0) -> dict:
 
 
 def check_urlhaus_sync(url: str, timeout: float = 4.0) -> dict:
+    headers = _urlhaus_headers()
+    if headers is None:
+        return dict(_URLHAUS_OFF)
     try:
         with httpx.Client(timeout=timeout) as client:
-            resp = client.post("https://urlhaus-api.abuse.ch/v1/url/", data={"url": url})
+            resp = client.post("https://urlhaus-api.abuse.ch/v1/url/", data={"url": url}, headers=headers)
             resp.raise_for_status()
             data = resp.json()
             return {"provider": "urlhaus", "status": "ok", "query_status": data.get("query_status"),

@@ -27,3 +27,5 @@ backend/app/ml/training/data/PhiUSIIL*
 backend/app/ml/training/data/tranco*
 backend/app/ml/training/data/top-1m*
 backend/app/ml/training/data/phishing-links*
+backend/automation_state.json*
+backend/app/ml/training/data/youtube*

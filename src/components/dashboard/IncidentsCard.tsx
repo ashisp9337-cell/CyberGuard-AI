@@ -7,6 +7,7 @@ import {
   type Incident, type IncidentStatus, type IncidentSummary,
 } from "@/services/api/incidentsService";
 import { ICONS } from "@/lib/icons";
+import { MitreChips } from "@/components/mitre/MitreAttack";
 
 const STATUS_META: Record<IncidentStatus, { label: string; color: string }> = {
   open: { label: "Open", color: "var(--color-critical)" },
@@ -181,12 +182,20 @@ export function IncidentsCard() {
                   <SeverityBadge severity={item.severity} size="sm" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-white truncate" title={item.title}>{item.title}</p>
+                  <p className="text-sm font-medium text-white truncate" title={item.title}>
+                    {item.seenBefore && (
+                      <span className="mr-1.5 rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-red-300" title="Uses a link, domain, IP, sender or file already seen in an earlier threat">
+                        SEEN BEFORE
+                      </span>
+                    )}
+                    {item.title}
+                  </p>
                   <p className="text-xs text-slate-500 truncate font-mono" title={item.target}>{item.target}</p>
                   <p className="text-[10px] text-slate-500 mt-0.5">
                     Risk {item.riskScore} · {timeAgo(item.createdAt)}
                     {item.alertedVia.length > 0 && <> · Alerted via {item.alertedVia.join(", ")}</>}
                   </p>
+                  {item.mitre && item.mitre.length > 0 && <MitreChips techniques={item.mitre} />}
                 </div>
                 <select
                   aria-label="Incident status"

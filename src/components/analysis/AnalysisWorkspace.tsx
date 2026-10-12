@@ -12,6 +12,7 @@ import { useAppContext } from "@/context/AppContext";
 import { ICONS } from "@/lib/icons";
 import { generateId, formatBytes } from "@/lib/utils";
 import type { DetectionModule, SubtopicConfig, AnalysisResult, UploadedFileMeta, ScanHistoryEntry } from "@/types";
+import { createReport, downloadReportUrl } from "@/services/api/reportsService";
 
 type Phase = "form" | "scanning" | "result";
 
@@ -129,6 +130,7 @@ export function AnalysisWorkspace({ module: mod, subtopic }: { module: Detection
       severity: res.severity,
       date: res.detectionTime,
       status: res.classification === "critical" || res.classification === "high_risk" ? "flagged" : res.classification === "safe" ? "cleared" : "completed",
+      mitre: (res.mitreAttack ?? []).map((t) => t.id).slice(0, 4),
     };
     addScanToHistory(historyEntry);
 
@@ -222,7 +224,15 @@ export function AnalysisWorkspace({ module: mod, subtopic }: { module: Detection
           <ResultView
             result={result}
             onNewScan={resetForm}
-            onSave={() => notify({ variant: "success", title: "Report exported", description: `${result.scanId}.pdf` })}
+            onSave={async () => {
+              try {
+                const report = await createReport(`Scan report ${result.scanId}`, "PDF", [result.scanId]);
+                window.open(downloadReportUrl(report.id), "_blank");
+                notify({ variant: "success", title: "Report exported", description: "PDF with the verdict, indicators and MITRE ATT&CK techniques." });
+              } catch (err) {
+                notify({ variant: "critical", title: "Could not export the report", description: err instanceof Error ? err.message : "Please try again." });
+              }
+            }}
           />
         </motion.div>
       )}

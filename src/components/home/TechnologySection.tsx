@@ -8,6 +8,8 @@ const LAYERS = [
   { icon: ICONS.malware, label: "File & Malware Analysis" },
   { icon: ICONS.network, label: "Network & Log Analysis" },
   { icon: ICONS.gauge, label: "Risk Assessment" },
+  { icon: ICONS.target, label: "MITRE ATT&CK Mapping" },
+  { icon: ICONS.fingerprint, label: "Threat Memory (IOCs)" },
   { icon: ICONS.lightbulb, label: "Explainable Security Insights" },
 ];
 

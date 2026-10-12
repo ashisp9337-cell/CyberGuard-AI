@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    String, Boolean, Integer, Float, Text, DateTime, ForeignKey, JSON
+    String, Boolean, Integer, Float, Text, DateTime, ForeignKey, JSON, UniqueConstraint
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -238,3 +238,54 @@ class SenderHistory(Base):
     malicious_count: Mapped[int] = mapped_column(Integer, default=0)
     first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class LoginEvent(Base):
+    """Every sign-in attempt to CyberGuard itself, so the account-takeover engine can watch them live."""
+    __tablename__ = "login_events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: gen_id("LGN"))
+    email: Mapped[str] = mapped_column(String, index=True)
+    user_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True, index=True)
+    ip: Mapped[str] = mapped_column(String, default="", index=True)
+    user_agent: Mapped[str] = mapped_column(Text, default="")
+    success: Mapped[bool] = mapped_column(Boolean, default=False)
+    stage: Mapped[str] = mapped_column(String, default="password")   # password | otp
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+
+
+class IOC(Base):
+    """Indicator of Compromise: a URL, domain, IP, sender address or file hash seen in a risky scan.
+    If it shows up again later, the new scan is flagged as "seen before"."""
+    __tablename__ = "iocs"
+    __table_args__ = (UniqueConstraint("user_id", "ioc_type", "value", name="uq_iocs_user_type_value"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: gen_id("IOC"))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
+    ioc_type: Mapped[str] = mapped_column(String, index=True)        # url | domain | ip | email | sha256
+    value: Mapped[str] = mapped_column(Text, index=True)
+    status: Mapped[str] = mapped_column(String, default="active")    # active | allowlisted
+    times_seen: Mapped[int] = mapped_column(Integer, default=1)
+    max_risk: Mapped[int] = mapped_column(Integer, default=0)
+    modules: Mapped[list] = mapped_column(JSON, default=list)        # which modules found it
+    first_scan_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_scan_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+
+
+class AuditLog(Base):
+    """Who did what, when and from where (sign-ins, settings, incident and quarantine actions ...)."""
+    __tablename__ = "audit_logs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: gen_id("AUD"))
+    user_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True, index=True)
+    actor: Mapped[str] = mapped_column(String, default="")           # email of who did it (or "system")
+    action: Mapped[str] = mapped_column(String, index=True)          # e.g. auth.login, incident.status
+    target: Mapped[str] = mapped_column(Text, default="")
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    ip: Mapped[str] = mapped_column(String, default="")
+    user_agent: Mapped[str] = mapped_column(Text, default="")
+    success: Mapped[bool] = mapped_column(Boolean, default=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)

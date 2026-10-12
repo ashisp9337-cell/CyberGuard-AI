@@ -84,8 +84,14 @@ def build_alert(scan: dict) -> dict:
     top = sorted(top, key=lambda i: -i.get("weight", 0))[:3]
     actions = [a for a in scan.get("responseActions", []) if a.get("priority") == "immediate"][:3] \
         or scan.get("responseActions", [])[:3]
-    mitre = scan.get("mitre") or sorted({i.get("mitre") for i in scan.get("indicators", [])
-                                          if i.get("triggered") and i.get("mitre")})
+    mitre_ids = scan.get("mitre") or sorted({t for i in scan.get("indicators", []) if i.get("triggered")
+                                             for t in ([i["mitre"]] if isinstance(i.get("mitre"), str) else (i.get("mitre") or []))})
+    try:
+        from app.services.mitre import brief as _mitre_brief
+        mitre = [f"{d['id']} {d['name']}" if d["name"] != "MITRE ATT&CK technique" else d["id"]
+                 for d in _mitre_brief([m for m in mitre_ids if isinstance(m, str)][:6])]
+    except Exception:
+        mitre = [m for m in mitre_ids if isinstance(m, str)]
     link = f"{s.APP_BASE_URL.rstrip('/')}/scan-history"
 
     subject = f"[CYBERGUARD {level}] {scan.get('threatType', 'Threat')} — risk {scan.get('riskScore')}"
@@ -99,7 +105,7 @@ def build_alert(scan: dict) -> dict:
     if actions:
         lines += ["", "Do now:"] + [f"• {a['title']}" for a in actions]
     if mitre:
-        lines += ["", "MITRE ATT&CK: " + ", ".join(mitre[:6])]
+        lines += ["", "MITRE ATT&CK:"] + [f"• {m}" for m in mitre[:6]]
     lines += ["", f"Scan ID: {scan.get('id', '')}", link]
     text = "\n".join(lines)
 

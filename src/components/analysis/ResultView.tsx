@@ -10,6 +10,8 @@ import { ICONS } from "@/lib/icons";
 import type { AnalysisResult, ResponseAction } from "@/types";
 import { useToast } from "@/context/ToastContext";
 import { escalateScan } from "@/services/api/incidentsService";
+import { MitreAttackCard, MitreIdChip } from "@/components/mitre/MitreAttack";
+import { ResultExtras } from "@/components/analysis/ResultExtras";
 
 const PRIORITY_META: Record<ResponseAction["priority"], { label: string; color: string; bg: string }> = {
   immediate: { label: "Now", color: "var(--color-critical)", bg: "var(--color-critical-bg)" },
@@ -17,7 +19,7 @@ const PRIORITY_META: Record<ResponseAction["priority"], { label: string; color: 
   normal: { label: "Later", color: "var(--color-info)", bg: "var(--color-info-bg)" },
 };
 
-export function ResultView({ result, onNewScan, onSave }: { result: AnalysisResult; onNewScan: () => void; onSave?: () => void }) {
+export function ResultView({ result, onNewScan, onSave, newScanLabel = "Run Another Scan" }: { result: AnalysisResult; onNewScan: () => void; onSave?: () => void; newScanLabel?: string }) {
   const { notify } = useToast();
   const [escalation, setEscalation] = useState<"idle" | "sending" | "done">("idle");
 
@@ -40,6 +42,8 @@ export function ResultView({ result, onNewScan, onSave }: { result: AnalysisResu
   }
   const meta = CLASSIFICATION_META[result.classification];
   const triggered = result.indicators.filter((i) => i.triggered).sort((a, b) => b.weight - a.weight);
+  const mitre = result.mitreAttack ?? [];
+  const mitreById = new Map(mitre.map((t) => [t.id, t]));
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="space-y-5">
@@ -97,11 +101,24 @@ export function ResultView({ result, onNewScan, onSave }: { result: AnalysisResu
               <div className="min-w-0">
                 <p className="text-sm font-medium text-white">{ind.label}</p>
                 <p className="text-xs text-slate-500 mt-0.5">{ind.description}</p>
+                {ind.mitre && ind.mitre.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {ind.mitre.map((id) => (
+                      <MitreIdChip key={id} t={mitreById.get(id) ?? { id, name: "MITRE ATT&CK technique", explanation: "See the MITRE ATT&CK mapping below." }} />
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           ))}
         </CardBody>
       </Card>
+
+      {/* MITRE ATT&CK techniques, explained */}
+      <MitreAttackCard techniques={mitre} />
+
+      {/* Seen before, engine breakdown, email details, model assessment */}
+      <ResultExtras result={result} />
 
       {/* Auto-quarantine banner */}
       {result.quarantine?.status === "quarantined" && (
@@ -156,11 +173,13 @@ export function ResultView({ result, onNewScan, onSave }: { result: AnalysisResu
 
       <div className="flex flex-wrap gap-3">
         <Button variant="primary" onClick={onNewScan}>
-          <ICONS.scan size={15} /> Run Another Scan
+          <ICONS.scan size={15} /> {newScanLabel}
         </Button>
-        <Button variant="secondary" onClick={onSave}>
-          <ICONS.download size={15} /> Export Report
-        </Button>
+        {onSave && (
+          <Button variant="secondary" onClick={onSave}>
+            <ICONS.download size={15} /> Export Report
+          </Button>
+        )}
         <Button variant="ghost" onClick={handleEscalate} disabled={escalation !== "idle"}>
           <ICONS.send size={15} />{" "}
           {escalation === "done" ? "Escalated to Team ✓" : escalation === "sending" ? "Escalating…" : "Escalate to Team"}

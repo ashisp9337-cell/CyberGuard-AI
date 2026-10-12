@@ -2,6 +2,7 @@
 // that moves open -> investigating -> resolved (or false positive).
 import { apiClient } from "./client";
 import { API_CONFIG } from "./config";
+import type { MitreTechnique } from "@/types";
 
 export type IncidentStatus = "open" | "investigating" | "resolved" | "false_positive";
 
@@ -19,6 +20,8 @@ export interface Incident {
   resolvedAt: string | null;
   history: { from: string; status: IncidentStatus; by: string; at: string; note: string }[];
   alertedVia: string[];
+  seenBefore?: boolean;
+  mitre?: MitreTechnique[];
 }
 
 export interface IncidentSummary {

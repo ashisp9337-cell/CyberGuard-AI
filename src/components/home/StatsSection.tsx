@@ -5,11 +5,12 @@ export function StatsSection() {
   const moduleCount = DETECTION_MODULES.length;
   const capabilityCount = DETECTION_MODULES.reduce((sum, m) => sum + m.subtopics.length, 0);
 
+  // Real figures: dataset sizes from the training scripts, technique count from backend app/services/mitre.py.
   const stats = [
-    { value: `${moduleCount}+`, label: "Security Domains" },
-    { value: `${capabilityCount}+`, label: "Threat Analysis Capabilities" },
-    { value: "AI", label: "Assisted Analysis" },
-    { value: "Modular", label: "Security Architecture" },
+    { value: `${moduleCount}`, label: `Detection modules · ${capabilityCount} checks` },
+    { value: "≈31M", label: "Real logins behind account-takeover detection" },
+    { value: "235,795", label: "Labelled URLs behind the URL model" },
+    { value: "32", label: "MITRE ATT&CK techniques explained" },
   ];
 
   return (

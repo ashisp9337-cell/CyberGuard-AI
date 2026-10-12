@@ -12,7 +12,7 @@ from app.db.database import get_db
 from app.db.models import User, Scan, DetectedIndicatorRow, RecommendationRow, ThreatEvent
 from app.schemas.analysis import RunScanRequest
 from app.services.analysis_service import run_scan
-from app.services import response_playbook, notifier, subtopic_router
+from app.services import response_playbook, notifier, subtopic_router, scan_store
 
 router = APIRouter(prefix="/api/analysis", tags=["analysis"])
 settings = get_settings()
@@ -104,35 +104,10 @@ async def scan(
     # Threat-specific response actions (quarantine, block IP, revoke session, report ...).
     response_playbook.apply(result, moduleId, subtopicId, _playbook_text(urlInput, textInput, target))
 
-    scan_row = Scan(
-        user_id=user.id, module_id=moduleId, subtopic_id=subtopicId, subtopic_title=subtopicTitle,
-        input_type=target_type, target=str(target)[:500], input_metadata=extra_fields,
-        status="completed", risk_score=result["riskScore"], classification=result["classification"],
-        severity=result["severity"], confidence=result["confidenceScore"],
-        threat_type=result["threatType"], analysis_engine=result["analysisEngine"],
-        explanation=result["explanation"], result=result, completed_at=datetime.now(timezone.utc),
+    scan_row = scan_store.save_result(
+        db, user_id=user.id, module_id=moduleId, subtopic_id=subtopicId, subtopic_title=subtopicTitle,
+        result=result, target=str(target), target_type=target_type, metadata=extra_fields, source="scan",
     )
-    db.add(scan_row)
-    db.flush()
-
-    for ind in result["indicators"]:
-        db.add(DetectedIndicatorRow(
-            scan_id=scan_row.id, label=ind["label"], severity=ind["severity"],
-            description=ind["description"], weight=ind["weight"], triggered=ind["triggered"],
-        ))
-    for i, rec in enumerate(result["recommendations"]):
-        db.add(RecommendationRow(scan_id=scan_row.id, recommendation=rec, priority=i))
-
-    # Feed Live Monitoring / notifications: only notable scans become
-    # threat events (a "safe" result shouldn't page anyone).
-    if result["classification"] != "safe":
-        db.add(ThreatEvent(
-            user_id=user.id, event_type=moduleId, source="scan", severity=result["severity"],
-            title=f"{result['threatType']} — {result['classification'].replace('_', ' ').title()}",
-            description=result["explanation"][:500],
-            event_metadata={"target": scan_row.target, "riskScore": result["riskScore"], "category": moduleId, "scanId": scan_row.id},
-            status="active", timestamp=datetime.now(timezone.utc),
-        ))
 
     db.commit()
     db.refresh(scan_row)
@@ -149,8 +124,10 @@ async def scan(
         "analysisEngine": result["analysisEngine"], "threatType": result["threatType"],
         "severity": result["severity"], "indicators": [
             {"id": i["id"], "label": i["label"], "description": i["description"], "severity": i["severity"],
-             "weight": i["weight"], "triggered": i["triggered"]} for i in result["indicators"]
+             "weight": i["weight"], "triggered": i["triggered"], "mitre": scan_store.indicator_mitre(i)}
+            for i in result["indicators"]
         ], "explanation": result["explanation"], "recommendations": result["recommendations"],
         "responseActions": result.get("responseActions", []),
         "quarantine": result.get("quarantine"), "routing": routing, "status": "completed",
+        **scan_store.detail_fields(result),
     }

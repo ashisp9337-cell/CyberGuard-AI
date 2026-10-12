@@ -4,6 +4,7 @@ import { TrustBar } from "@/components/home/TrustBar";
 import { ProblemSection } from "@/components/home/ProblemSection";
 import { SolutionSection } from "@/components/home/SolutionSection";
 import { ModuleGrid } from "@/components/home/ModuleGrid";
+import { CapabilitiesSection } from "@/components/home/CapabilitiesSection";
 import { HowItWorks } from "@/components/home/HowItWorks";
 import { DashboardPreview } from "@/components/home/DashboardPreview";
 import { WhyCyberGuard } from "@/components/home/WhyCyberGuard";
@@ -24,6 +25,7 @@ export default function HomePage() {
         <ProblemSection />
         <SolutionSection />
         <ModuleGrid />
+        <CapabilitiesSection />
         <HowItWorks />
         <DashboardPreview />
         <WhyCyberGuard />

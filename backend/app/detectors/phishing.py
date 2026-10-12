@@ -70,11 +70,13 @@ CREDENTIAL_WORDS = [
     "password", "otp", "one-time code", "one-time password", "pin", "cvv",
     "login credentials", "ssn", "social security", "security question",
     "date of birth", "account number", "routing number", "card number",
+    "bank details", "account details", "upi pin", "aadhaar number",
 ]
 MONEY_WORDS = [
     "wire transfer", "gift card", "bitcoin", "crypto", "claim your prize",
     "you have won", "lottery", "refund", "tax rebate", "unclaimed funds",
     "inheritance", "cashapp", "venmo", "western union", "processing fee",
+    "double your money", "guaranteed returns", "guaranteed profit", "send funds",
 ]
 KNOWN_BRANDS = [
     "paypal", "microsoft", "amazon", "apple", "bank", "google", "netflix",

@@ -1,14 +1,14 @@
 """Incident workflow: list incidents, see counts, change status (open -> investigating -> resolved)."""
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user
 from app.db.database import get_db
 from app.db.models import User, Scan, ThreatEvent
-from app.services import incidents as inc, notifier
+from app.services import audit, incidents as inc, notifier
 
 router = APIRouter(prefix="/api/incidents", tags=["incidents"])
 
@@ -49,7 +49,7 @@ def incident_summary(user: User = Depends(get_current_user), db: Session = Depen
 
 
 @router.patch("/{event_id}")
-def update_incident(event_id: str, body: StatusChange,
+def update_incident(event_id: str, body: StatusChange, request: Request,
                     user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     event = db.get(ThreatEvent, event_id)
     # 404 (not 403) for someone else's incident, so ids can't be probed.
@@ -59,13 +59,16 @@ def update_incident(event_id: str, body: StatusChange,
         inc.change_status(event, body.status, by=user.email, note=body.note)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={"error": {"code": "INVALID_STATUS", "message": str(exc)}})
+    audit.log(db, action="incident.status", user=user, request=request, target=event.title,
+              detail={"incidentId": event.id, "to": body.status, "note": body.note[:200]})
     db.commit()
     db.refresh(event)
     return inc.to_dict(event)
 
 
 @router.post("/bulk")
-def bulk_update(body: BulkStatusChange, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def bulk_update(body: BulkStatusChange, request: Request, user: User = Depends(get_current_user),
+                db: Session = Depends(get_db)):
     """Set many incidents to one status at once (Select all -> Resolve, etc.)."""
     if body.status not in inc.STATUSES:
         raise HTTPException(status_code=422, detail={"error": {"code": "INVALID_STATUS",
@@ -81,6 +84,8 @@ def bulk_update(body: BulkStatusChange, user: User = Depends(get_current_user), 
         if inc.state(e)["status"] != body.status:
             inc.change_status(e, body.status, by=user.email, note=body.note)
             changed += 1
+    audit.log(db, action="incident.bulk", user=user, request=request, target=f"{changed} incident(s)",
+              detail={"to": body.status, "matched": len(targets), "changed": changed})
     db.commit()
     return {"matched": len(targets), "changed": changed, "status": body.status,
             "summary": inc.summary(_incident_events(db, user))}
@@ -119,7 +124,7 @@ def _send_escalation(event_id: str, scan_id: str, by: str, note: str) -> None:
 
 
 @router.post("/escalate")
-def escalate(body: EscalateRequest, background_tasks: BackgroundTasks,
+def escalate(body: EscalateRequest, background_tasks: BackgroundTasks, request: Request,
              user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """'Escalate to Team' on a scan result: make it an incident and alert the security team."""
     scan = db.get(Scan, body.scanId)
@@ -150,6 +155,8 @@ def escalate(body: EscalateRequest, background_tasks: BackgroundTasks,
     meta = dict(event.event_metadata or {})
     meta["escalated"] = {"by": user.email, "at": datetime.now(timezone.utc).isoformat(), "note": body.note[:500]}
     event.event_metadata = meta
+    audit.log(db, action="incident.escalate", user=user, request=request, target=scan.target,
+              detail={"scanId": scan.id, "incidentId": event.id, "note": body.note[:200]})
     db.commit()
     db.refresh(event)
 

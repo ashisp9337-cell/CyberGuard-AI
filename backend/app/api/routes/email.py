@@ -10,14 +10,14 @@ Dashboard, Reports) and, when not safe, as a ThreatEvent (Live Monitoring).
 """
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.dependencies import get_current_user
 from app.db.database import get_db
 from app.db.models import User, Scan, DetectedIndicatorRow, RecommendationRow, ThreatEvent, EmailRecord
-from app.email_pipeline import analyze_email
+from app.services.email_ingest import process_email
 from app.services import response_playbook, notifier, notifier
 from app.email_pipeline.store import record_email
 from app.email_pipeline import quarantine
@@ -54,40 +54,7 @@ async def analyze(
         raise HTTPException(status_code=422, detail={"error": {"code": "NO_INPUT",
                                                                "message": "Provide a .eml file or paste the email."}})
 
-    result = analyze_email(raw, db=db, user_id=user.id, sender=sender or "", subject=subject or "")
-    target = result.pop("_target", "email")
-    result.pop("_target_type", None)
-    quarantine.decide(result)          # auto-quarantine decision (before the playbook, so it can say so)
-    response_playbook.apply(result, "phishing", "email-analysis", str(target))
-
-    scan = Scan(
-        user_id=user.id, module_id="phishing", subtopic_id="email-analysis", subtopic_title="Email Analysis",
-        input_type="email", target=str(target)[:500], input_metadata={"source": source},
-        status="completed", risk_score=result["riskScore"], classification=result["classification"],
-        severity=result["severity"], confidence=result["confidenceScore"], threat_type=result["threatType"],
-        analysis_engine=result["analysisEngine"], explanation=result["explanation"], result=result,
-        completed_at=datetime.now(timezone.utc),
-    )
-    db.add(scan)
-    db.flush()
-    for ind in result["indicators"]:
-        db.add(DetectedIndicatorRow(scan_id=scan.id, label=ind["label"], severity=ind["severity"],
-                                    description=ind["description"], weight=ind["weight"], triggered=ind["triggered"]))
-    for i, rec in enumerate(result["recommendations"]):
-        db.add(RecommendationRow(scan_id=scan.id, recommendation=rec, priority=i))
-
-    rec = record_email(db, user.id, result, scan_id=scan.id, source=source)
-
-    if result["classification"] != "safe":
-        is_ato = result.get("category", "").startswith("Possible account takeover")
-        db.add(ThreatEvent(
-            user_id=user.id, event_type="credential" if is_ato else "phishing", source="email-pipeline",
-            severity=result["severity"], title=f"{result['category']} — {result['classification'].replace('_', ' ').title()}",
-            description=result["explanation"][:500],
-            event_metadata={"target": scan.target, "riskScore": result["riskScore"], "scanId": scan.id,
-                            "mitre": result.get("mitre", []), "from": result["email"].get("from_address", "")},
-            status="active", timestamp=datetime.now(timezone.utc),
-        ))
+    scan, rec, result = process_email(db, user.id, raw, source=source, sender=sender or "", subject=subject or "")
     db.commit()
     db.refresh(scan)
     if result["riskScore"] >= notifier.get_settings().ALERT_MIN_SCORE:
@@ -141,7 +108,7 @@ def list_quarantine(status: str = "quarantined", limit: int = 20,
 
 
 @router.post("/records/{record_id}/action")
-def quarantine_action(record_id: str, body: QuarantineAction,
+def quarantine_action(record_id: str, body: QuarantineAction, request: Request,
                       user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     r = db.query(EmailRecord).filter(EmailRecord.id == record_id, EmailRecord.user_id == user.id).first()
     if not r:
@@ -150,6 +117,9 @@ def quarantine_action(record_id: str, body: QuarantineAction,
         quarantine.change(r, body.action, by=user.email, note=body.note)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={"error": {"code": "INVALID_ACTION", "message": str(exc)}})
+    from app.services import audit
+    audit.log(db, action="quarantine.action", user=user, request=request, target=(r.subject or "")[:200],
+              detail={"emailRecordId": r.id, "action": body.action, "from": r.from_address})
     db.commit()
     db.refresh(r)
     return quarantine.to_dict(r)

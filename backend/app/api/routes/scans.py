@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import get_current_user
 from app.db.database import get_db
 from app.db.models import User, Scan
+from app.services import mitre, scan_store
 
 router = APIRouter(prefix="/api/scans", tags=["scans"])
 
@@ -17,6 +18,7 @@ def _to_history_entry(s: Scan) -> dict:
         "threatType": s.threat_type, "moduleId": s.module_id, "riskScore": s.risk_score,
         "severity": s.severity, "date": s.created_at.isoformat() if s.created_at else "",
         "status": status_map.get(s.classification, "completed"),
+        "mitre": list(((s.result or {}).get("mitre") or []))[:4],
     }
 
 
@@ -43,6 +45,14 @@ def get_scan(scan_id: str, user: User = Depends(get_current_user), db: Session =
     s = db.query(Scan).filter(Scan.id == scan_id, Scan.user_id == user.id).first()
     if not s:
         raise HTTPException(status_code=404, detail={"error": {"code": "NOT_FOUND", "message": "Scan not found."}})
+    res = dict(s.result or {})
+    if "mitreDetails" not in res and res.get("indicators"):
+        # scans saved before MITRE mapping existed: map them now (read-only, nothing is written back)
+        try:
+            mitre.annotate(s.module_id, s.subtopic_id, res)
+        except Exception:
+            pass
+    ind_mitre = {i.get("label"): scan_store.indicator_mitre(i) for i in res.get("indicators", []) if isinstance(i, dict)}
     return {
         "scanId": s.id, "moduleId": s.module_id, "subtopicId": s.subtopic_id,
         "subtopicTitle": s.subtopic_title, "target": s.target, "targetType": s.input_type,
@@ -50,9 +60,12 @@ def get_scan(scan_id: str, user: User = Depends(get_current_user), db: Session =
         "confidenceScore": s.confidence, "detectionTime": s.completed_at.isoformat() if s.completed_at else s.created_at.isoformat(),
         "analysisEngine": s.analysis_engine, "threatType": s.threat_type, "severity": s.severity,
         "indicators": [{"id": i.id, "label": i.label, "description": i.description, "severity": i.severity,
-                         "weight": i.weight, "triggered": i.triggered} for i in s.indicators],
+                         "weight": i.weight, "triggered": i.triggered, "mitre": ind_mitre.get(i.label, [])}
+                       for i in s.indicators],
         "explanation": s.explanation, "recommendations": [r.recommendation for r in sorted(s.recommendations, key=lambda r: r.priority)],
+        "responseActions": res.get("responseActions", []), "quarantine": res.get("quarantine"),
         "status": s.status,
+        **scan_store.detail_fields(res),
     }
 
 

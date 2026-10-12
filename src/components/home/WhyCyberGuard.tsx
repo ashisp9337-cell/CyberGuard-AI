@@ -2,11 +2,11 @@ import { ICONS } from "@/lib/icons";
 import { Reveal, SectionHeading } from "@/components/home/Reveal";
 
 const FEATURES = [
-  { icon: ICONS.brain, title: "AI-Assisted Analysis", desc: "Intelligent analysis designed to identify suspicious patterns and emerging threat indicators." },
+  { icon: ICONS.brain, title: "Trained on Real Data", desc: "Models learn from public research datasets: 31 million real logins and 235,795 labelled URLs, not invented examples." },
   { icon: ICONS.eye, title: "Explainable Detection", desc: "Understand why an item was flagged with clear indicators and risk explanations." },
   { icon: ICONS.layers, title: "Multi-Layer Security", desc: "Combine file, URL, communication, multimedia, behavioral, and network analysis." },
-  { icon: ICONS.dashboard, title: "Unified Visibility", desc: "View threats, scans, alerts, and security activity from a centralized dashboard." },
-  { icon: ICONS.workflow, title: "Scalable Architecture", desc: "Designed for future integration with machine learning models, threat intelligence services, and security APIs." },
+  { icon: ICONS.dashboard, title: "Remembers Every Attack", desc: "Bad links, domains, IPs, senders and files are remembered, so a repeat attack is caught faster and scored higher." },
+  { icon: ICONS.target, title: "Speaks the SOC Language", desc: "Findings are mapped to MITRE ATT&CK techniques and explained in plain words, so students and analysts understand them alike." },
   { icon: ICONS.zap, title: "Actionable Intelligence", desc: "Move beyond detection with clear risk levels and recommended next steps." },
 ];
 

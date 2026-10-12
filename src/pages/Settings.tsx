@@ -7,6 +7,8 @@ import { getSettings, updateSettings } from "@/services/api/settingsService";
 import { listContacts, createContact, deleteContact, type KnownContact } from "@/services/api/contactsService";
 import { ICONS } from "@/lib/icons";
 import { AlertChannelsCard } from "@/components/settings/AlertChannelsCard";
+import { AutomationCard } from "@/components/settings/AutomationCard";
+import { ActivityLogCard } from "@/components/settings/ActivityLogCard";
 
 function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
   return (
@@ -162,7 +164,11 @@ export default function Settings() {
           </CardBody>
         </Card>
 
+        <AutomationCard />
+
         <AlertChannelsCard />
+
+        <ActivityLogCard />
 
         <Card className="lg:col-span-2">
           <CardHeader title="Integration Settings" subtitle="Connect external tools and threat intelligence feeds" icon={<ICONS.server size={16} />} />

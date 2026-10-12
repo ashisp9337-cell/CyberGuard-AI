@@ -1,0 +1,53 @@
+{
+  "model": "TF-IDF (word 1-2 grams + character 3-5 grams) + logistic regression, source-weighted",
+  "data": {
+    "youtube_spam_collection": {
+      "rows": 1752,
+      "scam": 834,
+      "videos": 5,
+      "source": "https://archive.ics.uci.edu/dataset/380/youtube+spam+collection (CC BY 4.0)"
+    },
+    "sms_real_sample": {
+      "rows": 8000,
+      "scam": 4000,
+      "source": "phishing_sms_clean_v2.tsv"
+    },
+    "curated_dm": {
+      "rows": 2785,
+      "weight": 0.15,
+      "note": "hand-written, low weight, not used for testing"
+    }
+  },
+  "source_weights": {
+    "youtube-real": 0.45,
+    "sms-real": 0.4,
+    "curated-dm": 0.15
+  },
+  "tests": {
+    "youtube_unseen_video": {
+      "n": 318,
+      "scam": 140,
+      "accuracy": 0.9308,
+      "precision": 1.0,
+      "recall": 0.8429,
+      "f1": 0.9147,
+      "roc_auc": 0.991
+    },
+    "sms_holdout": {
+      "n": 1600,
+      "scam": 800,
+      "accuracy": 0.9306,
+      "precision": 0.8992,
+      "recall": 0.97,
+      "f1": 0.9333,
+      "roc_auc": 0.9779
+    },
+    "trap_set": {
+      "legit_flagged": 0,
+      "legit_total": 12,
+      "scams_caught": 8,
+      "scams_total": 8
+    }
+  },
+  "trained_at": "2026-10-12T15:28:26+00:00"
+}

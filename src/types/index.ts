@@ -68,6 +68,46 @@ export interface IndicatorTemplate {
 export interface DetectedIndicator extends IndicatorTemplate {
   id: string;
   triggered: boolean;
+  mitre?: string[]; // MITRE ATT&CK technique IDs this indicator is evidence of
+}
+
+// A MITRE ATT&CK technique, explained in plain language (backend app/services/mitre.py).
+export interface MitreTechnique {
+  id: string;
+  name: string;
+  tactic: string;
+  explanation: string;
+  url: string;
+  evidence?: string[];
+}
+
+export interface IocHit {
+  type: string;
+  value: string;
+  timesSeen: number;
+  maxRisk: number;
+}
+
+export interface EngineScore {
+  component: string;
+  engine: string;
+  score: number;
+  classification: string | null;
+  explanation: string;
+}
+
+export interface EmailSummary {
+  from: string;
+  displayName: string;
+  subject: string;
+  replyTo: string;
+  originatingIp: string;
+  spf: string;
+  dkim: string;
+  dmarc: string;
+  links: number;
+  attachments: number;
+  escalations: string[];
 }
 
 export interface ScanStage {
@@ -95,6 +135,13 @@ export interface AnalysisResult {
   responseActions?: ResponseAction[];
   quarantine?: { status: "quarantined" | "delivered"; auto: boolean; reason: string; at: string } | null;
   status: ScanStatus;
+  mitreAttack?: MitreTechnique[];
+  iocHits?: IocHit[];
+  modelAssessment?: { site: string; probability: number; threshold: number; flagged: boolean } | null;
+  engineBreakdown?: EngineScore[];
+  emailSummary?: EmailSummary;
+  category?: string | null;
+  parsedSignals?: Record<string, unknown> | null;
 }
 
 export interface ResponseAction {
@@ -177,6 +224,7 @@ export interface ScanHistoryEntry {
   severity: Severity;
   date: string;
   status: "completed" | "flagged" | "cleared" | "escalated";
+  mitre?: string[];
 }
 
 export interface NetworkEvent {

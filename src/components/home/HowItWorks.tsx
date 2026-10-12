@@ -2,10 +2,10 @@ import { ICONS } from "@/lib/icons";
 import { Reveal, SectionHeading } from "@/components/home/Reveal";
 
 const STEPS = [
-  { num: "01", title: "Collect", icon: ICONS.upload, desc: "Submit a file, URL, message, multimedia file, system log, or security event for analysis." },
-  { num: "02", title: "Analyze", icon: ICONS.scan, desc: "CyberGuard evaluates technical indicators, behavioral patterns, metadata, reputation signals, and other security features." },
-  { num: "03", title: "Assess", icon: ICONS.gauge, desc: "The platform generates a risk assessment based on detected indicators and analysis results." },
-  { num: "04", title: "Respond", icon: ICONS.send, desc: "Receive an explainable result, severity classification, and recommended security actions." },
+  { num: "01", title: "Collect", icon: ICONS.upload, desc: "Paste a message, link, email or log, upload a file, or let automatic protection pick it up from Gmail, Downloads and sign-ins." },
+  { num: "02", title: "Analyze", icon: ICONS.scan, desc: "Trained models and safety checks look at the text, sender, links, files and login history, and check memory for anything seen before." },
+  { num: "03", title: "Assess", icon: ICONS.gauge, desc: "A 0–100 risk score with every reason listed, mapped to the MITRE ATT&CK techniques the attacker is using." },
+  { num: "04", title: "Respond", icon: ICONS.send, desc: "Clear next steps, an incident to track, and alerts on Telegram, email and WhatsApp for serious threats." },
 ];
 
 export function HowItWorks() {

@@ -9,6 +9,7 @@ import { useAuth } from "@/context/AuthContext";
 const NAV_LINKS = [
   { label: "Platform", href: "#platform" },
   { label: "Solutions", href: "#solution" },
+  { label: "Capabilities", href: "#capabilities" },
   { label: "How It Works", href: "#how-it-works" },
   { label: "Technology", href: "#technology" },
   { label: "About", href: "#about" },

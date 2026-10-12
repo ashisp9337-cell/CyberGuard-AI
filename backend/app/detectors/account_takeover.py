@@ -422,7 +422,7 @@ def analyze_event(fields: dict, subtopic_title: str = "Credential Theft & Accoun
                       "medium": "Risk-based authentication model: unusual login - verify the user (e.g. OTP)",
                       "low": "Risk-based authentication model"}[level],
             "severity": "critical" if pct >= 99.9 else {"high": "high", "medium": "medium", "low": "low"}[level],
-            "description": (f"The RBA risk model (trained on 33M-login RBA dataset) rates the {who} as riskier than "
+            "description": (f"The RBA risk model (trained on the 31M-login RBA dataset) rates the {who} as riskier than "
                             f"{pct:.1f}% of normal logins ({'; '.join(sides) or 'no history or location/device data in the log'}). "
                             f"{ml['flagged']} of {ml['events']} logins are above the alert level ({ml['alert']:g}th percentile), "
                             f"{ml['elevatedCount']} above the verify level ({ml['medium']:g}th). "

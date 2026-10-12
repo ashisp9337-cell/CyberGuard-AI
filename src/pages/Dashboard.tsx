@@ -9,6 +9,8 @@ import { QuickActions } from "@/components/dashboard/QuickActions";
 import { TopTargetsCard } from "@/components/dashboard/TopTargetsCard";
 import { IncidentsCard } from "@/components/dashboard/IncidentsCard";
 import { QuarantineCard } from "@/components/dashboard/QuarantineCard";
+import { ProtectionStatusCard } from "@/components/dashboard/ProtectionStatusCard";
+import { MitreOverviewCard } from "@/components/mitre/MitreOverviewCard";
 import { fetchOverview, type DashboardOverview } from "@/services/api/dashboardService";
 import { listReports } from "@/services/api/reportsService";
 import { ICONS } from "@/lib/icons";
@@ -51,9 +53,11 @@ export default function Dashboard() {
         <div className="xl:col-span-2 space-y-5">
           <ThreatActivityChart />
           <IncidentsCard />
+          <MitreOverviewCard days={30} limit={5} compact />
           <QuickActions />
         </div>
         <div className="space-y-5">
+          <ProtectionStatusCard />
           <SecurityScoreCard />
           <ThreatDistributionChart />
           <TopTargetsCard />

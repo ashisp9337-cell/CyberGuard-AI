@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardBody } from "@/components/ui/Card";
 import { SeverityBadge } from "@/components/ui/Badge";
@@ -9,6 +9,7 @@ import { DETECTION_MODULES } from "@/data/modules";
 import { formatDate } from "@/lib/utils";
 import { ICONS } from "@/lib/icons";
 import type { Severity } from "@/types";
+import { ScanDetailModal } from "@/components/analysis/ScanDetailModal";
 
 const STATUS_META: Record<string, { label: string; color: string }> = {
   completed: { label: "Completed", color: "var(--color-info)" },
@@ -20,11 +21,11 @@ const STATUS_META: Record<string, { label: string; color: string }> = {
 export default function ScanHistory() {
   const { scanHistory } = useAppContext();
   const location = useLocation();
-  const navigate = useNavigate();
   const [search, setSearch] = useState((location.state as any)?.search ?? "");
   const [moduleFilter, setModuleFilter] = useState("all");
   const [severityFilter, setSeverityFilter] = useState<"all" | Severity>("all");
   const [sortDesc, setSortDesc] = useState(true);
+  const [openScan, setOpenScan] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     let rows = scanHistory.filter((r) => {
@@ -94,6 +95,7 @@ export default function ScanHistory() {
                   <th className="px-4 py-3 font-medium">Threat Type</th>
                   <th className="px-4 py-3 font-medium">Risk Score</th>
                   <th className="px-4 py-3 font-medium">Severity</th>
+                  <th className="px-4 py-3 font-medium" title="MITRE ATT&CK techniques">ATT&CK</th>
                   <th className="px-4 py-3 font-medium">Date</th>
                   <th className="px-4 py-3 font-medium">Status</th>
                   <th className="px-4 py-3 font-medium sr-only">Action</th>
@@ -107,13 +109,15 @@ export default function ScanHistory() {
                     <tr
                       key={r.scanId}
                       className="border-b border-default hover:bg-elevated transition-colors cursor-pointer"
-                      onClick={() => mod && navigate(`/modules/${mod.id}`)}
+                      onClick={() => setOpenScan(r.scanId)}
+                      title={mod ? `Open the full result (${mod.name})` : "Open the full result"}
                     >
                       <td className="px-4 py-3 mono text-xs text-slate-400">{r.scanId}</td>
                       <td className="px-4 py-3 text-slate-200 max-w-[200px] truncate mono text-xs">{r.target}</td>
                       <td className="px-4 py-3 text-slate-300">{r.threatType}</td>
                       <td className="px-4 py-3 font-mono text-slate-300">{r.riskScore}</td>
                       <td className="px-4 py-3"><SeverityBadge severity={r.severity} size="sm" /></td>
+                      <td className="px-4 py-3 text-[11px] mono text-slate-400 whitespace-nowrap">{r.mitre?.length ? r.mitre.slice(0, 2).join(", ") : "—"}</td>
                       <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">{formatDate(r.date)}</td>
                       <td className="px-4 py-3">
                         <span className="text-xs font-medium" style={{ color: statusMeta.color }}>{statusMeta.label}</span>
@@ -126,7 +130,7 @@ export default function ScanHistory() {
                 })}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-500">No scans match your filters.</td>
+                    <td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-500">No scans match your filters.</td>
                   </tr>
                 )}
               </tbody>
@@ -134,6 +138,7 @@ export default function ScanHistory() {
           </div>
         </CardBody>
       </Card>
+    {openScan && <ScanDetailModal scanId={openScan} onClose={() => setOpenScan(null)} />}
     </div>
   );
 }

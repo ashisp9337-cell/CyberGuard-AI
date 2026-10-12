@@ -76,6 +76,23 @@ class Settings(BaseSettings):
     # addresses -- see app/services/safe_fetch.py). Set false to never contact scanned sites.
     LIVE_PAGE_CHECKS: bool = True
 
+    # ---- Automatic protection (background watchers, see app/automation/) ----
+    AUTOMATION_ENABLED: bool = True        # master switch; each watcher also has an on/off in Settings
+    AUTOMATION_USER_EMAIL: str = ""        # CyberGuard account that receives automatic findings (default: first account)
+    # Gmail inbox (read-only IMAP). Defaults to the SMTP login used for email alerts.
+    IMAP_HOST: str = "imap.gmail.com"
+    IMAP_USER: str = ""
+    IMAP_PASSWORD: str = ""                # Gmail App Password (16 letters)
+    IMAP_FOLDER: str = "INBOX"
+    EMAIL_POLL_SECONDS: int = 60
+    EMAIL_BACKFILL: int = 5                # on first start, also check this many of the newest emails
+    # Downloads folder watcher (files are only read and hashed, never opened or run)
+    DOWNLOADS_DIR: str = ""                # default: <your user folder>/Downloads
+    DOWNLOADS_POLL_SECONDS: int = 30
+    DOWNLOADS_MAX_MB: int = 50
+    # Windows sign-in events (needs the backend terminal to run "as Administrator")
+    WINDOWS_EVENTS_POLL_SECONDS: int = 300
+
     UPLOAD_DIR: str = "./uploads"
     REPORTS_DIR: str = "./reports"
     MODELS_DIR: str = "./app/ml/models"

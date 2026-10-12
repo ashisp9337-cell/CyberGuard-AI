@@ -20,6 +20,8 @@ from app.schemas.auth import (
     SignupCompleteRequest, OTPResendRequest,
 )
 from app.services import otp as otp_service
+from app.automation import login_monitor
+from app.services import audit
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 settings = get_settings()
@@ -117,6 +119,7 @@ def signup_complete(body: SignupCompleteRequest, request: Request, response: Res
     db.flush()
     db.add(UserSettings(user_id=user.id))
     otp.consumed = True
+    audit.log(db, action="auth.signup", user=user, request=request)
     db.commit()
     db.refresh(user)
     _set_session_cookie(response, user.id)
@@ -139,6 +142,10 @@ async def login(body: SignInRequest, request: Request, db: Session = Depends(get
     email = body.email.strip().lower()
     user = db.query(User).filter(User.email == email).first()
     if not user or not user.password_hash or not verify_password(body.password, user.password_hash):
+        audit.log(db, action="auth.login_failed", user=user, actor=email, request=request, success=False,
+                  detail={"reason": "wrong password" if user else "no such account"})
+        login_monitor.record_attempt(db, email=email, user_id=user.id if user else None, request=request,
+                                     success=False, stage="password")
         raise _err("INVALID_CREDENTIALS", "Invalid email or password.", 401)
     # Password is right -- but no session yet. A code goes to the account's email first.
     try:
@@ -155,6 +162,13 @@ def login_verify(body: OTPVerifyRequest, request: Request, response: Response, d
     try:
         otp = otp_service.check(db, body.challengeId, "login", body.code)
     except otp_service.OTPError as e:
+        if e.code in ("OTP_WRONG", "OTP_TOO_MANY_ATTEMPTS"):          # the password was right, the code was not
+            row = _challenge_owner(db, body.challengeId)
+            if row is not None:
+                audit.log(db, action="auth.otp_failed", user=db.get(User, row.user_id) if row.user_id else None,
+                          actor=row.email, request=request, success=False)
+                login_monitor.record_attempt(db, email=row.email, user_id=row.user_id, request=request,
+                                             success=False, stage="otp")
         raise _otp_http(e)
     user = db.get(User, otp.user_id) if otp.user_id else None
     if user is None:
@@ -165,7 +179,17 @@ def login_verify(body: OTPVerifyRequest, request: Request, response: Response, d
     db.commit()
     db.refresh(user)
     _set_session_cookie(response, user.id, remember_me=otp.remember_me)
+    audit.log(db, action="auth.login", user=user, request=request, commit=True)
+    login_monitor.record_attempt(db, email=user.email, user_id=user.id, request=request, success=True, stage="otp")
     return AuthResultOut(user=_to_public(user))
+
+
+def _challenge_owner(db, challenge_id: str):
+    from app.db.models import EmailOTP
+    try:
+        return db.get(EmailOTP, challenge_id)
+    except Exception:
+        return None
 
 
 @router.post("/otp/resend")
@@ -180,7 +204,7 @@ def otp_resend(body: OTPResendRequest, request: Request, db: Session = Depends(g
 
 
 @router.post("/google")
-async def google_auth(body: GoogleAuthRequest, response: Response, db: Session = Depends(get_db)):
+async def google_auth(body: GoogleAuthRequest, request: Request, response: Response, db: Session = Depends(get_db)):
     try:
         idinfo = verify_google_credential(body.credential)
     except GoogleVerificationError as e:
@@ -202,6 +226,8 @@ async def google_auth(body: GoogleAuthRequest, response: Response, db: Session =
         user.last_login = datetime.now(timezone.utc)
         if not user.profile_image:
             user.profile_image = idinfo.get("picture")
+    db.flush()
+    audit.log(db, action="auth.google_login", user=user, request=request)
     db.commit()
     db.refresh(user)
 
@@ -240,7 +266,7 @@ def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/reset-password")
-def reset_password(body: ResetPasswordRequest, db: Session = Depends(get_db)):
+def reset_password(body: ResetPasswordRequest, request: Request, db: Session = Depends(get_db)):
     weak_reason = password_is_strong(body.newPassword)
     if weak_reason:
         raise _err("WEAK_PASSWORD", weak_reason, 422)
@@ -257,5 +283,6 @@ def reset_password(body: ResetPasswordRequest, db: Session = Depends(get_db)):
 
     user.password_hash = hash_password(body.newPassword)
     record.used = True
+    audit.log(db, action="auth.password_reset", user=user, request=request)
     db.commit()
     return {"success": True}

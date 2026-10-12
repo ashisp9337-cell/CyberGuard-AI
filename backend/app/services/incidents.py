@@ -67,7 +67,19 @@ def to_dict(event) -> dict:
         "resolvedAt": st["resolvedAt"],
         "history": st["history"],
         "alertedVia": sorted({a["channel"] for a in alerts if a.get("status") == "sent"}),
+        # True when this threat reuses a URL/domain/IP/sender/file already seen in an earlier threat
+        "seenBefore": int(meta.get("iocHits", 0) or 0) > 0,
+        # MITRE ATT&CK techniques behind this threat, each with a plain-language explanation
+        "mitre": _mitre_brief(meta.get("mitre") or []),
     }
+
+
+def _mitre_brief(ids) -> list:
+    from app.services import mitre
+    try:
+        return mitre.brief([i for i in ids if isinstance(i, str)][:6])
+    except Exception:
+        return []
 
 
 def summary(events: list) -> dict:
@@ -86,4 +98,4 @@ def summary(events: list) -> dict:
         "openCritical": sum(1 for e in events if e.severity == "critical" and state(e)["status"] == "open"),
         # Mean time to resolve: a standard SOC metric.
         "mttrMinutes": round(sum(resolve_minutes) / len(resolve_minutes), 1) if resolve_minutes else None,
-    }
+    }

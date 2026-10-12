@@ -1,4 +1,10 @@
 import logging
+import os
+from contextlib import asynccontextmanager
+
+# scikit-learn's helper asks Windows for the CPU core count with "wmic", which Windows 11 removed;
+# telling it the count up front avoids a harmless but noisy warning at startup.
+os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(os.cpu_count() or 1))
 import time
 import uuid
 
@@ -13,7 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.core.config import get_settings
 from app.db.database import Base, engine
 from app.db import models  # noqa: F401 — ensures models are registered before create_all
-from app.api.routes import auth, analysis, scans, dashboard, events, reports, settings as settings_route, threat_intelligence, monitoring, chat, contacts, email as email_route, alerts as alerts_route, incidents as incidents_route, incidents as incidents_route
+from app.api.routes import auth, analysis, scans, dashboard, events, reports, settings as settings_route, threat_intelligence, monitoring, chat, contacts, email as email_route, alerts as alerts_route, incidents as incidents_route, automation as automation_route, iocs as iocs_route, audit as audit_route, mitre as mitre_route
 
 settings = get_settings()
 
@@ -27,7 +33,18 @@ if settings.DATABASE_URL.startswith("sqlite"):
 
 from app.core.rate_limit import limiter  # shared with routes (per-route limits)
 
+@asynccontextmanager
+async def lifespan(_app):
+    # Automatic protection: background watchers (Gmail, sign-ins, Windows logons, Downloads). Off in tests.
+    from app.automation import manager
+    if settings.AUTOMATION_ENABLED:
+        manager.start_all()
+    yield
+    manager.stop_all()
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="CyberGuard AI API",
     description="Backend for the CyberGuard AI cyber threat, phishing & deepfake detection platform.",
     version="1.0.0",
@@ -85,6 +102,13 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     if settings.is_production:
         return JSONResponse(status_code=500, content={"error": {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."}})
     return JSONResponse(status_code=500, content={"error": {"code": "INTERNAL_ERROR", "message": str(exc)}})
+
+
+app.include_router(automation_route.router)
+app.include_router(iocs_route.router)
+app.include_router(audit_route.router)
+app.include_router(mitre_route.router)
+
 
 
 @app.get("/api/health")
