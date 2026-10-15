@@ -82,8 +82,7 @@ TITLES = {
 DETECTORS = {
     ("phishing", "email-analysis"): ("email_pipeline.analyze_email", "ok", ""),
     ("phishing", "sms-analysis"): ("phishing.analyze_text (phishing_sms.joblib)", "ok", ""),
-    ("phishing", "social-media-analysis"): ("phishing.analyze_text (phishing_social.joblib)", "ok",
-                                            "phishing_social.joblib is not on disk; analyze_text falls back to its default model"),
+    ("phishing", "social-media-analysis"): ("phishing.analyze_text (phishing_social.joblib)", "ok", ""),
     ("phishing", "qr-phishing"): ("qr_analyzer.analyze_qr", "ok", ""),
     ("phishing", "fraudulent-website"): ("malicious_url.analyze_url", "ok", ""),
     ("phishing", "malicious-url"): ("malicious_url.analyze_url", "ok", ""),
@@ -102,7 +101,7 @@ DETECTORS = {
         "brand-impersonation": "brand_impersonation.analyze_brand_impersonation",
         "contact-impersonation": "known_contact_impersonation.analyze_known_contact_message",
         "generic": "impersonation.analyze_identity (existing generic fallback)"}.items()},
-    **{("credential", s): ("account_takeover.analyze_event", "ok", "one shared detector for all credential subtopics")
+    **{("credential", s): ("account_takeover.analyze_event", "ok", f"own trained model for this subtopic: cred_{s}.joblib")
        for s in TITLES["credential"]},
     **{("url-security", s): ("malicious_url.analyze_url", "ok", "one shared detector for all URL subtopics")
        for s in TITLES["url-security"]},

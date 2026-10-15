@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { ApiError } from "@/services/api/client";
+import { AdminOnlyCard } from "@/components/settings/AdminOnlyCard";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { useToast } from "@/context/ToastContext";
 import { ICONS } from "@/lib/icons";
@@ -138,12 +140,19 @@ function WatcherRow({ w, onChange }: { w: WatcherStatus; onChange: (w: WatcherSt
 
 export function AutomationCard() {
   const [status, setStatus] = useState<AutomationStatus | null>(null);
+  const [adminOnly, setAdminOnly] = useState(false);
 
   useEffect(() => {
     let alive = true;
-    const load = () => getAutomationStatus().then((s) => alive && setStatus(s)).catch(() => {});
+    let timer = 0;
+    const load = () => getAutomationStatus().then((s) => alive && setStatus(s)).catch((e) => {
+      if (e instanceof ApiError && e.status === 403) {        // only the administrator manages this
+        setAdminOnly(true);
+        window.clearInterval(timer);
+      }
+    });
     load();
-    const timer = window.setInterval(load, 10000);          // live status every 10 s
+    timer = window.setInterval(load, 10000);          // live status every 10 s
     return () => {
       alive = false;
       window.clearInterval(timer);
@@ -152,6 +161,10 @@ export function AutomationCard() {
 
   function replace(w: WatcherStatus) {
     setStatus((s) => (s ? { ...s, watchers: s.watchers.map((x) => (x.name === w.name ? w : x)) } : s));
+  }
+
+  if (adminOnly) {
+    return <AdminOnlyCard title="Automatic Protection" what="Background checks of the Gmail inbox, Downloads folder and sign-ins" />;
   }
 
   return (

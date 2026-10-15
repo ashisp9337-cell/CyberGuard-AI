@@ -14,7 +14,7 @@ Security choices
   * Codes are compared in constant time.
 
 Delivery: by email through the SMTP settings in .env. In development, when the email
-cannot be sent, the code is printed in the backend window and returned as `devOtp`
+cannot be sent, the code is written only to the backend terminal (never sent to the browser),
 so the flow can still be tested. In production a failed send is an error instead.
 """
 import hashlib
@@ -84,11 +84,14 @@ def _deliver(otp: EmailOTP, code: str) -> dict:
         if s.is_production:
             raise OTPError("OTP_DELIVERY_FAILED",
                            "We could not send the verification email. Please try again in a moment.", 503)
-        # Development only: lets you test the flow while email is not working yet.
+        # Development only, email not working: the code goes to the SERVER CONSOLE, which only the person
+        # running CyberGuard can see. It is never sent back to the browser -- that would let anyone with
+        # a stolen password skip this second step, or sign up with an email address they don't own.
         logger.warning("[DEV] OTP for %s (%s): %s  -- email not sent: %s %s",
                        otp.email, otp.purpose, code, result["status"], result.get("error", ""))
-        print(f"[DEV] OTP for {otp.email} ({otp.purpose}): {code}")
-        extra.update(devOtp=code, deliveryNote=f"Email not sent ({result['status']}). Development mode shows the code here.")
+        extra.update(deliveryNote="The email could not be sent. In development the code is printed in the backend terminal.")
+        if s.dev_codes_allowed:        # automated tests only (EXPOSE_DEV_CODES); never in a real setup
+            extra["devOtp"] = code
     return extra
 
 

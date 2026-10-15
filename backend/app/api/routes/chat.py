@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user
+from app.core.rate_limit import limiter
 from app.db.database import get_db
 from app.db.models import User
 from app.schemas.chat import ChatMessageRequest, ChatMessageResponse
@@ -11,7 +12,8 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
 @router.post("", response_model=ChatMessageResponse)
-def chat(body: ChatMessageRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@limiter.limit("20/minute")
+def chat(request: Request, body: ChatMessageRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         reply = send_message(user.id, body.message, db)
     except ChatUnavailableError as e:

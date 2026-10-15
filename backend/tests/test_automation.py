@@ -29,7 +29,8 @@ def fresh_state(monkeypatch, tmp_path):
 
 
 # ---- API ---------------------------------------------------------------------------------------
-def test_status_lists_four_watchers_and_toggle_persists(auth_client, fresh_state):
+def test_status_lists_four_watchers_and_toggle_persists(admin_client, fresh_state):
+    auth_client = admin_client
     r = auth_client.get("/api/automation/status")
     assert r.status_code == 200
     names = {w["name"] for w in r.json()["watchers"]}
@@ -98,17 +99,23 @@ SAMPLES = os.path.join(os.path.dirname(__file__), "email_samples")
 
 
 class FakeIMAP:
-    mails = {}
+    mails = {}          # the inbox
+    spam = {}           # Gmail's Spam folder
     log = []
 
     def __init__(self, host, port, timeout=None):
         FakeIMAP.log.append(("connect", host, port))
+        self.box = {}
 
     def login(self, user, pw):
         FakeIMAP.log.append(("login", user, pw))
 
+    def list(self):
+        return "OK", [b'(\\HasNoChildren) "/" "INBOX"', b'(\\HasNoChildren \\Junk) "/" "[Gmail]/Spam"']
+
     def select(self, folder, readonly=False):
         FakeIMAP.log.append(("select", folder, readonly))
+        self.box = FakeIMAP.spam if "Spam" in folder else FakeIMAP.mails
         return "OK", [b"2"]
 
     def response(self, name):
@@ -119,9 +126,9 @@ class FakeIMAP:
         if cmd == "search":
             crit = args[-1]
             lo = int(crit.split()[1].split(":")[0]) if crit.startswith("UID") else 1
-            hits = [u for u in sorted(self.mails) if u >= lo] or [max(self.mails)]
+            hits = [u for u in sorted(self.box) if u >= lo] or ([max(self.box)] if self.box else [])
             return "OK", [b" ".join(str(u).encode() for u in hits)]
-        return "OK", [(b"1 (BODY[] {n}", self.mails[int(args[0])]), b")"]
+        return "OK", [(b"1 (BODY[] {n}", self.box[int(args[0])]), b")"]
 
     def logout(self):
         pass
@@ -137,6 +144,7 @@ def test_gmail_watcher_reads_new_mail_read_only_and_only_once(monkeypatch, fresh
     monkeypatch.setattr(email_ingest, "analyze_email", lambda raw, **kw: real(raw, **{**kw, "network": False}))
     with open(os.path.join(SAMPLES, "attack_sbi_kyc_spoof.eml"), "rb") as f:
         FakeIMAP.mails = {41: f.read()}
+    FakeIMAP.spam = {}
     FakeIMAP.log = []
     monkeypatch.setattr(imaplib, "IMAP4_SSL", FakeIMAP)
     s = get_settings()
@@ -153,6 +161,70 @@ def test_gmail_watcher_reads_new_mail_read_only_and_only_once(monkeypatch, fresh
     fetches = [e for e in FakeIMAP.log if e[:2] == ("uid", "fetch")]
     assert fetches and all(e[3] == "(BODY.PEEK[])" for e in fetches)            # never marks as read
     assert w.run_once()["checked"] == 1                                           # nothing new the 2nd time
+
+
+def test_gmail_watcher_also_checks_spam_folder(monkeypatch, fresh_state, auth_client):
+    """Gmail files many phishing emails under Spam; they must be checked too (read-only), each folder once."""
+    import imaplib
+
+    from app.automation import email_watcher
+    from app.core.config import get_settings
+    from app.services import email_ingest
+    real = email_ingest.analyze_email
+    monkeypatch.setattr(email_ingest, "analyze_email", lambda raw, **kw: real(raw, **{**kw, "network": False}))
+    with open(os.path.join(SAMPLES, "attack_sbi_kyc_spoof.eml"), "rb") as f:
+        phish = f.read()
+    FakeIMAP.mails, FakeIMAP.spam, FakeIMAP.log = {}, {9: phish}, []
+    monkeypatch.setattr(imaplib, "IMAP4_SSL", FakeIMAP)
+    s = get_settings()
+    monkeypatch.setattr(s, "IMAP_USER", "me@gmail.com")
+    monkeypatch.setattr(s, "IMAP_PASSWORD", "abcdefghijklmnop")
+    monkeypatch.setattr(s, "EMAIL_BACKFILL", 5)
+    w = email_watcher.EmailWatcher()
+    st = w.run_once()
+    assert st["lastError"] is None and st["checked"] == 1 and st["threats"] == 1
+    assert st["recent"][0]["item"].endswith("[Spam]")                              # user sees where it was
+    assert ("select", '"[Gmail]/Spam"', True) in FakeIMAP.log                     # read-only
+    fetches = [e for e in FakeIMAP.log if e[:2] == ("uid", "fetch")]
+    assert fetches and all(e[3] == "(BODY.PEEK[])" for e in fetches)
+    assert w.run_once()["checked"] == 1                                           # not checked twice
+
+    monkeypatch.setattr(s, "IMAP_SPAM_FOLDER", "off")                             # can be switched off
+    FakeIMAP.log = []
+    w.run_once()
+    assert not any(e[0] == "select" and "Spam" in e[1] for e in FakeIMAP.log)
+
+
+def test_gmail_watcher_skips_cyberguards_own_alert_emails(monkeypatch, fresh_state, auth_client):
+    """An alert email lands in the watched inbox; scanning it would raise another alert, forever."""
+    import imaplib
+    from email.message import EmailMessage
+
+    from app.automation import email_watcher
+    from app.core.config import get_settings
+    from app.services import email_ingest, notifier
+    s = get_settings()
+    monkeypatch.setattr(s, "SMTP_USER", "me@gmail.com")
+    m = EmailMessage()
+    m["From"], m["To"], m["Subject"] = "me@gmail.com", "me@gmail.com", "[CYBERGUARD CRITICAL] Bank impersonation - risk 100"
+    m["Message-ID"] = "<alert-1@gmail.com>"
+    m[notifier.OWN_MAIL_ID_HEADER] = "a1b2c3"
+    m[notifier.OWN_MAIL_HEADER] = notifier.own_mail_signature("a1b2c3")
+    m.set_content("URGENT: Your SBI account is suspended - verify KYC now http://sbi-kyc-verify-login.xyz/update "
+                  "Enter your account number, ATM PIN and OTP")
+    real = email_ingest.analyze_email
+    monkeypatch.setattr(email_ingest, "analyze_email", lambda raw, **kw: real(raw, **{**kw, "network": False}))
+    with open(os.path.join(SAMPLES, "attack_sbi_kyc_spoof.eml"), "rb") as f:
+        FakeIMAP.mails, FakeIMAP.spam, FakeIMAP.log = {50: m.as_bytes(), 51: f.read()}, {}, []
+    monkeypatch.setattr(imaplib, "IMAP4_SSL", FakeIMAP)
+    monkeypatch.setattr(s, "IMAP_USER", "me@gmail.com")
+    monkeypatch.setattr(s, "IMAP_PASSWORD", "abcdefghijklmnop")
+    monkeypatch.setattr(s, "EMAIL_BACKFILL", 5)
+    sent = []
+    monkeypatch.setattr(notifier, "alert_for_scan", lambda scan_id: sent.append(scan_id))
+    st = email_watcher.EmailWatcher().run_once()
+    assert st["lastError"] is None and st["checked"] == 1                      # only the real phishing email
+    assert len(sent) == 1 and "CYBERGUARD" not in st["recent"][0]["item"]
 
 
 def test_gmail_watcher_needs_setup_without_password(monkeypatch, fresh_state):

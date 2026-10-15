@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.dependencies import get_current_user
+from app.core.rate_limit import limiter
 from app.db.database import get_db
 from app.db.models import User, Scan, DetectedIndicatorRow, RecommendationRow, ThreatEvent, EmailRecord
 from app.services.email_ingest import process_email
@@ -29,7 +30,9 @@ EMAIL_EXTENSIONS = (".eml", ".txt")
 
 
 @router.post("/analyze")
+@limiter.limit("20/minute")
 async def analyze(
+    request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile | None = File(None),
     rawEmail: str | None = Form(None),
@@ -42,12 +45,15 @@ async def analyze(
         if not file.filename.lower().endswith(EMAIL_EXTENSIONS):
             raise HTTPException(status_code=400, detail={"error": {"code": "UNSUPPORTED_FILE_TYPE",
                                                                    "message": "Upload a .eml or .txt email file."}})
-        raw = await file.read()
+        raw = await file.read(settings.MAX_UPLOAD_MB * 1024 * 1024 + 1)   # never more than limit + 1 byte
         if len(raw) > settings.MAX_UPLOAD_MB * 1024 * 1024:
             raise HTTPException(status_code=413, detail={"error": {"code": "FILE_TOO_LARGE",
                                                                    "message": f"File exceeds {settings.MAX_UPLOAD_MB}MB limit."}})
         source = "upload"
     elif rawEmail and rawEmail.strip():
+        if len(rawEmail) > settings.MAX_TEXT_CHARS:
+            raise HTTPException(status_code=413, detail={"error": {"code": "INPUT_TOO_LARGE",
+                                "message": f"The pasted email is longer than {settings.MAX_TEXT_CHARS:,} characters."}})
         raw = rawEmail
         source = "paste"
     else:

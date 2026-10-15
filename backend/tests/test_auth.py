@@ -158,9 +158,21 @@ def test_signup_code_cannot_be_used_for_login(client):
 
 def test_production_without_email_refuses_instead_of_leaking_code(client, monkeypatch):
     from app.core.config import get_settings
+    from app.api.routes import auth as auth_routes
     monkeypatch.setattr(get_settings(), "ENVIRONMENT", "production")
-    r = _start(client, "prod@example.com")
+
+    async def captcha_passes(token, remote_ip=None):      # production requires CAPTCHA; pretend it passed
+        return True
+    monkeypatch.setattr(auth_routes, "verify_turnstile", captcha_passes)
+    r = client.post("/api/auth/signup/start", json={"name": "Alice", "email": "prod@example.com", "turnstileToken": "ok"})
     assert r.status_code == 503 and "devOtp" not in r.text
+
+
+def test_production_without_captcha_token_is_refused(client, monkeypatch):
+    from app.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "ENVIRONMENT", "production")
+    r = _start(client, "prod2@example.com")
+    assert r.status_code == 400 and r.json()["error"]["code"] == "CAPTCHA_FAILED"
 
 
 def test_email_with_code_is_sent_when_smtp_works(client, monkeypatch):

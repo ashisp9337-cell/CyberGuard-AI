@@ -4,16 +4,20 @@ import tempfile
 
 _tmpdir = tempfile.mkdtemp(prefix="cyberguard_test_")
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmpdir}/test.db"
-os.environ["JWT_SECRET"] = "test-secret"
+os.environ["JWT_SECRET"] = "test-secret-" + "x" * 40          # long enough to pass the startup check
 os.environ["ENVIRONMENT"] = "development"
 os.environ["UPLOAD_DIR"] = f"{_tmpdir}/uploads"
 os.environ["REPORTS_DIR"] = f"{_tmpdir}/reports"
 os.environ["CORS_ORIGINS"] = "http://localhost:5173"
 os.environ["RATE_LIMIT_ENABLED"] = "false"   # tests sign up many users from one "IP"
+os.environ["EXPOSE_DEV_CODES"] = "true"      # tests read the OTP / reset code from the response; NEVER set this in .env
+os.environ["ADMIN_EMAILS"] = ""
+os.environ["TURNSTILE_SECRET_KEY"] = ""
 os.environ["AUTOMATION_ENABLED"] = "false"   # never start the real Gmail/Windows/Downloads watchers in tests
 os.environ["AUTOMATION_STATE_FILE"] = f"{_tmpdir}/automation_state.json"
 # Never send real Telegram / email / WhatsApp alerts while testing, whatever is in .env.
-for _k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "ALERT_EMAIL_TO",
+for _k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM",
+           "IMAP_USER", "IMAP_PASSWORD", "AUTOMATION_USER_EMAIL", "ALERT_EMAIL_TO",
            "WHATSAPP_TO", "CALLMEBOT_APIKEY", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM"):
     os.environ[_k] = ""
 
@@ -37,3 +41,18 @@ def auth_client(client):
     assert r.status_code == 201
     client._test_email = email
     return client
+
+
+@pytest.fixture()
+def admin_client(auth_client):
+    """auth_client promoted to administrator (automation and alert-channel routes are admin-only)."""
+    from app.db.database import SessionLocal
+    from app.db.models import User
+    db = SessionLocal()
+    try:
+        u = db.query(User).filter(User.email == auth_client._test_email).first()
+        u.role = "admin"
+        db.commit()
+    finally:
+        db.close()
+    return auth_client

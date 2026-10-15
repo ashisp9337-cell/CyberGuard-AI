@@ -1,0 +1,54 @@
+{
+  "subtopic": "unusual-location",
+  "model": "HistGradientBoostingClassifier (scikit-learn)",
+  "features": [
+    "country_new",
+    "region_new",
+    "city_new",
+    "asn_new",
+    "ip_new",
+    "ip16_new",
+    "hist_ok",
+    "n_countries",
+    "n_asn",
+    "country_share",
+    "asn_share",
+    "hours_since_last",
+    "country_changed",
+    "fast_country_change",
+    "country_rate",
+    "asn_rate",
+    "country_freq",
+    "asn_freq"
+  ],
+  "dataset": "RBA login dataset (Wiefling et al., CC BY 4.0), subsets from extract_rba_subsets.py",
+  "label": "simulated attacker: real attacker IP/country/network on a real account",
+  "train_rows": 600000,
+  "train_positives": 299717,
+  "alert_threshold": 0.8415,
+  "verify_threshold": 0.6539,
+  "metrics": {
+    "test": {
+      "n": 356710,
+      "positives": 178355,
+      "roc_auc": 0.9836,
+      "pr_auc": 0.9838,
+      "caught_at_alert": 0.763,
+      "false_alarm_at_alert": 0.0099,
+      "caught_at_verify": 0.878,
+      "false_alarm_at_verify": 0.0518
+    },
+    "real_attacker_logins_vs_normal": {
+      "n": 53774,
+      "positives": 9167,
+      "roc_auc": 0.6251,
+      "pr_auc": 0.2773,
+      "caught_at_alert": 0.0572,
+      "false_alarm_at_alert": 0.0102,
+      "caught_at_verify": 0.1217,
+      "false_alarm_at_verify": 0.051
+    }
+  },
+  "trained_at": "2026-10-15T18:31:03+00:00",
+  "seconds": 76
+}

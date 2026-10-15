@@ -3,11 +3,12 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.dependencies import get_current_user
+from app.core.rate_limit import limiter
 from app.db.database import get_db
 from app.db.models import User, Scan, DetectedIndicatorRow, RecommendationRow, ThreatEvent
 from app.schemas.analysis import RunScanRequest
@@ -25,10 +26,10 @@ def _save_upload(file: UploadFile) -> tuple[str, str]:
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail={"error": {"code": "UNSUPPORTED_FILE_TYPE", "message": f"File type {ext} is not supported."}})
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    safe_name = f"{uuid.uuid4().hex}{ext}"
+    safe_name = f"{uuid.uuid4().hex}{ext}"       # never the user's file name: no path tricks possible
     path = os.path.join(settings.UPLOAD_DIR, safe_name)
-    content = file.file.read()
     max_bytes = settings.MAX_UPLOAD_MB * 1024 * 1024
+    content = file.file.read(max_bytes + 1)      # read at most one byte past the limit, never the whole upload
     if len(content) > max_bytes:
         raise HTTPException(status_code=413, detail={"error": {"code": "FILE_TOO_LARGE", "message": f"File exceeds {settings.MAX_UPLOAD_MB}MB limit."}})
     with open(path, "wb") as f:
@@ -36,6 +37,18 @@ def _save_upload(file: UploadFile) -> tuple[str, str]:
     os.chmod(path, 0o600)
     return path, file.filename or safe_name
 
+
+
+_FIELD_LIMITS = {"moduleId": 64, "subtopicId": 64, "subtopicTitle": 200, "urlInput": 4096, "extraFieldValues": 20_000}
+
+
+def _check_lengths(**fields) -> None:
+    """Reject oversized form fields with a clear 413 instead of spending CPU on them."""
+    limits = dict(_FIELD_LIMITS, textInput=settings.MAX_TEXT_CHARS)
+    for name, value in fields.items():
+        if value is not None and len(value) > limits[name]:
+            raise HTTPException(status_code=413, detail={"error": {"code": "INPUT_TOO_LARGE",
+                                "message": f"{name} is longer than {limits[name]:,} characters."}})
 
 
 def _playbook_text(url_input, text_input, target) -> str:
@@ -55,7 +68,9 @@ def _playbook_text(url_input, text_input, target) -> str:
     return f"{base} {t}".strip()
 
 @router.post("/scan")
+@limiter.limit("30/minute")
 async def scan(
+    request: Request,
     background_tasks: BackgroundTasks,
     moduleId: str = Form(...),
     subtopicId: str = Form(...),
@@ -67,12 +82,18 @@ async def scan(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    _check_lengths(moduleId=moduleId, subtopicId=subtopicId, subtopicTitle=subtopicTitle, textInput=textInput,
+                   urlInput=urlInput, extraFieldValues=extraFieldValues)
     extra_fields = {}
     if extraFieldValues:
         try:
             extra_fields = json.loads(extraFieldValues)
         except json.JSONDecodeError:
             extra_fields = {}
+        if not isinstance(extra_fields, dict):     # only {"field": "value"} is meaningful
+            extra_fields = {}
+        extra_fields = {str(k)[:100]: (v if isinstance(v, (str, int, float, bool)) or v is None else str(v))
+                        for k, v in list(extra_fields.items())[:50]}
 
     file_path, file_name = (None, None)
     if file is not None and file.filename:

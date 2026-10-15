@@ -18,6 +18,7 @@ backend/reports/*
 !backend/reports/.gitignore
 backend/app/ml/models/*.joblib
 backend/.pytest_cache/
+backend/.pytest_tmp/
 backend/htmlcov/
 backend/app/ml/training/data/rba-dataset*
 backend/app/ml/training/data/rba_*

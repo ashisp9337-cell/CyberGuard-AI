@@ -71,12 +71,11 @@ export function OtpStep({ challenge, verifyLabel, onVerify, onResend, onBack }: 
         </span>
       </div>
 
-      {current.devOtp && (
+      {current.delivered === false && (
         <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-3 text-left">
-          <p className="text-[11px] font-semibold text-amber-400 uppercase tracking-wide mb-1">Development mode</p>
+          <p className="text-[11px] font-semibold text-amber-400 uppercase tracking-wide mb-1">Email not sent</p>
           <p className="text-xs text-slate-400">
-            {current.deliveryNote ?? "Email is not set up."} Your code is{" "}
-            <span className="font-mono text-amber-300 text-sm">{current.devOtp}</span>
+            {current.deliveryNote ?? "The verification email could not be sent."} For safety the code is never shown here.
           </p>
         </div>
       )}

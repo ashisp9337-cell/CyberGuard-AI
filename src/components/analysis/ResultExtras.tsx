@@ -121,7 +121,7 @@ export function ResultExtras({ result }: { result: AnalysisResult }) {
         </Card>
       )}
 
-      {model && (
+      {model && typeof model.site === "string" && typeof model.probability === "number" && (   /* URL model only */
         <Card>
           <CardHeader title="AI Model Assessment" subtitle="Domain-name model trained on PhiUSIIL (235,795 URLs) and the Tranco top-1M list"
                       icon={<ICONS.brain size={16} />} />

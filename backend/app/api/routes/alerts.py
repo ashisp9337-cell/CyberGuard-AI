@@ -1,7 +1,8 @@
-"""Alert channels: see what is configured and send a test alert."""
-from fastapi import APIRouter, Depends
+"""Alert channels: see what is configured and send a test alert. ADMIN ONLY (they message the owner's phone/email)."""
+from fastapi import APIRouter, Depends, Request
 
-from app.core.dependencies import get_current_user
+from app.core.dependencies import require_admin
+from app.core.rate_limit import limiter
 from app.db.models import User
 from app.services import notifier
 
@@ -9,13 +10,14 @@ router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
 
 @router.get("/status")
-def status(user: User = Depends(get_current_user)):
+def status(user: User = Depends(require_admin)):
     """Which channels are set up in .env, and the score that triggers an alert."""
     return notifier.channel_status()
 
 
 @router.post("/test")
-def send_test(user: User = Depends(get_current_user)):
+@limiter.limit("3/minute")
+def send_test(request: Request, user: User = Depends(require_admin)):
     """Send a sample alert to every configured channel, so you can check the setup."""
     message = notifier.build_alert({
         "id": "TEST-ALERT", "threatType": "Test alert (no real threat)", "classification": "high_risk",

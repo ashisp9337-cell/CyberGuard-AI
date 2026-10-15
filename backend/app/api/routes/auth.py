@@ -1,11 +1,12 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, Request, status
-from jose import jwt, JWTError
+import jwt
+from jwt import PyJWTError as JWTError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_current_user_optional, is_admin
 from app.core.security import (
     hash_password, verify_password, password_is_strong, create_access_token,
     generate_reset_token, hash_token, verify_google_credential, GoogleVerificationError,
@@ -31,8 +32,8 @@ def _err(code: str, message: str, status_code: int = 400):
     return HTTPException(status_code=status_code, detail={"error": {"code": code, "message": message}})
 
 
-def _set_session_cookie(response: Response, user_id: str, remember_me: bool = True):
-    token = create_access_token(user_id)
+def _set_session_cookie(response: Response, user: User, remember_me: bool = True):
+    token = create_access_token(user.id, user.session_version or 0)
     max_age = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60 if remember_me else None
     response.set_cookie(
         key=settings.COOKIE_NAME, value=token, httponly=True,
@@ -53,7 +54,10 @@ def _otp_http(e: "otp_service.OTPError"):
 
 
 async def _captcha_ok(token: str | None, request: Request):
-    if token and not await verify_turnstile(token, request.client.host if request.client else None):
+    """When Turnstile is configured the token is REQUIRED -- leaving it out must not skip the check."""
+    if not settings.TURNSTILE_SECRET_KEY and not settings.is_production:
+        return                                   # CAPTCHA not set up (local development)
+    if not token or not await verify_turnstile(token, request.client.host if request.client else None):
         raise _err("CAPTCHA_FAILED", "CAPTCHA verification failed.")
 
 
@@ -122,7 +126,7 @@ def signup_complete(body: SignupCompleteRequest, request: Request, response: Res
     audit.log(db, action="auth.signup", user=user, request=request)
     db.commit()
     db.refresh(user)
-    _set_session_cookie(response, user.id)
+    _set_session_cookie(response, user)
     return AuthResultOut(user=_to_public(user))
 
 
@@ -178,7 +182,7 @@ def login_verify(body: OTPVerifyRequest, request: Request, response: Response, d
     user.last_login = datetime.now(timezone.utc)
     db.commit()
     db.refresh(user)
-    _set_session_cookie(response, user.id, remember_me=otp.remember_me)
+    _set_session_cookie(response, user, remember_me=otp.remember_me)
     audit.log(db, action="auth.login", user=user, request=request, commit=True)
     login_monitor.record_attempt(db, email=user.email, user_id=user.id, request=request, success=True, stage="otp")
     return AuthResultOut(user=_to_public(user))
@@ -204,6 +208,7 @@ def otp_resend(body: OTPResendRequest, request: Request, db: Session = Depends(g
 
 
 @router.post("/google")
+@limiter.limit("10/minute")
 async def google_auth(body: GoogleAuthRequest, request: Request, response: Response, db: Session = Depends(get_db)):
     try:
         idinfo = verify_google_credential(body.credential)
@@ -231,41 +236,71 @@ async def google_auth(body: GoogleAuthRequest, request: Request, response: Respo
     db.commit()
     db.refresh(user)
 
-    _set_session_cookie(response, user.id)
+    _set_session_cookie(response, user)
     return AuthResultOut(user=_to_public(user))
 
 
 @router.get("/me")
-def me(user: User = Depends(get_current_user)):
-    return _to_public(user)
+def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return {**_to_public(user), "isAdmin": is_admin(user, db)}
 
 
 @router.post("/logout")
-def logout(response: Response):
-    response.delete_cookie(settings.COOKIE_NAME, path="/")
+def logout(response: Response, user: User | None = Depends(get_current_user_optional), db: Session = Depends(get_db)):
+    """Ends the session on this device AND every other device (old tokens stop working)."""
+    if user is not None:
+        user.session_version = int(user.session_version or 0) + 1
+        db.commit()
+    response.delete_cookie(settings.COOKIE_NAME, path="/", httponly=True, secure=settings.COOKIE_SECURE, samesite="lax")
     return {"success": True}
 
 
+RESET_MESSAGE = "If that email exists, a reset link has been sent."
+
+
+def _send_reset_email(email: str, raw_token: str) -> bool:
+    from app.services import notifier
+    link = f"{settings.APP_BASE_URL.rstrip('/')}/reset-password?token={raw_token}"
+    text = ("Someone asked to reset your CYBERGUARD password.\n\n"
+            f"Open this link within 1 hour to choose a new password:\n{link}\n\n"
+            "If this wasn't you, ignore this email -- your password stays the same.")
+    import html as _html
+    body = ('<div style="font-family:Arial,sans-serif;max-width:480px;color:#111">'
+            '<h2 style="margin:0 0 12px;color:#0891b2">CYBERGUARD</h2>'
+            '<p>Someone asked to reset your password. The link works for 1 hour:</p>'
+            f'<p><a href="{_html.escape(link)}" style="background:#0891b2;color:#fff;padding:9px 14px;'
+            'border-radius:6px;text-decoration:none">Reset password</a></p>'
+            '<p style="color:#666;font-size:12px">If this wasn\'t you, ignore this email.</p></div>')
+    result = notifier.send_mail([email], "Reset your CYBERGUARD password", text, body, channel="reset-email")
+    return result.get("status") == "sent"
+
+
 @router.post("/forgot-password")
-def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)):
+@limiter.limit("3/minute")
+def forgot_password(body: ForgotPasswordRequest, request: Request, db: Session = Depends(get_db)):
+    """The reset link is ONLY ever emailed. It is never returned in the response -- otherwise anyone
+    who knows an email address could take over that account."""
     email = body.email.strip().lower()
     user = db.query(User).filter(User.email == email).first()
-    # Always behave identically whether or not the account exists.
-    if user:
-        raw_token, token_hash = generate_reset_token()
-        expires = datetime.now(timezone.utc) + timedelta(hours=1)
-        db.add(PasswordResetToken(user_id=user.id, token_hash=token_hash, expires_at=expires))
-        db.commit()
-        if not settings.is_production:
-            # Development-only convenience: log instead of emailing.
-            print(f"[DEV] Password reset token for {email}: {raw_token}")
-            return {"message": "If that email exists, a reset link has been sent.", "devResetToken": raw_token}
-        # Production: integrate a real email provider here (SES/SendGrid/Postmark)
-        # and never return the token in the response.
-    return {"message": "If that email exists, a reset link has been sent."}
+    if not user:
+        return {"message": RESET_MESSAGE}          # identical answer whether or not the account exists
+    raw_token, token_hash = generate_reset_token()
+    expires = datetime.now(timezone.utc) + timedelta(hours=1)
+    db.add(PasswordResetToken(user_id=user.id, token_hash=token_hash, expires_at=expires))
+    db.commit()
+    sent = _send_reset_email(user.email, raw_token)
+    if not sent and not settings.is_production:
+        # Development, email not working: only the person running the server can see this line.
+        import logging
+        logging.getLogger("cyberguard").warning("[DEV] Password reset link for %s: %s/reset-password?token=%s",
+                                                email, settings.APP_BASE_URL.rstrip("/"), raw_token)
+    if settings.dev_codes_allowed:                  # automated tests only (EXPOSE_DEV_CODES)
+        return {"message": RESET_MESSAGE, "devResetToken": raw_token}
+    return {"message": RESET_MESSAGE}
 
 
 @router.post("/reset-password")
+@limiter.limit("5/minute")
 def reset_password(body: ResetPasswordRequest, request: Request, db: Session = Depends(get_db)):
     weak_reason = password_is_strong(body.newPassword)
     if weak_reason:
@@ -283,6 +318,11 @@ def reset_password(body: ResetPasswordRequest, request: Request, db: Session = D
 
     user.password_hash = hash_password(body.newPassword)
     record.used = True
+    # every other unused reset link for this account dies too, and every signed-in session ends
+    for other in db.query(PasswordResetToken).filter(PasswordResetToken.user_id == user.id,
+                                                     PasswordResetToken.used.is_(False)).all():
+        other.used = True
+    user.session_version = int(user.session_version or 0) + 1
     audit.log(db, action="auth.password_reset", user=user, request=request)
     db.commit()
     return {"success": True}

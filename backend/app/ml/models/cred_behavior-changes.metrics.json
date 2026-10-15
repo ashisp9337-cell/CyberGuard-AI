@@ -1,0 +1,49 @@
+{
+  "subtopic": "behavior-changes",
+  "model": "HistGradientBoostingClassifier (scikit-learn)",
+  "features": [
+    "hour_dev",
+    "hour_seen",
+    "hour_share",
+    "weekday_seen",
+    "gap_ratio",
+    "logins_24h",
+    "rate_ratio_24h",
+    "fail_rate_24h",
+    "fail_rate_change",
+    "n_changed",
+    "hist_ok",
+    "account_age_days",
+    "hour"
+  ],
+  "dataset": "RBA login dataset (Wiefling et al., CC BY 4.0), subsets from extract_rba_subsets.py",
+  "label": "simulated attacker: real attacker login at the attacker's real time of day",
+  "train_rows": 600000,
+  "train_positives": 300144,
+  "alert_threshold": 0.9412,
+  "verify_threshold": 0.7231,
+  "metrics": {
+    "test": {
+      "n": 238882,
+      "positives": 119441,
+      "roc_auc": 0.9659,
+      "pr_auc": 0.9656,
+      "caught_at_alert": 0.571,
+      "false_alarm_at_alert": 0.0098,
+      "caught_at_verify": 0.822,
+      "false_alarm_at_verify": 0.0486
+    },
+    "real_attacker_logins_vs_normal": {
+      "n": 34336,
+      "positives": 4401,
+      "roc_auc": 0.4371,
+      "pr_auc": 0.118,
+      "caught_at_alert": 0.0091,
+      "false_alarm_at_alert": 0.0098,
+      "caught_at_verify": 0.0545,
+      "false_alarm_at_verify": 0.0482
+    }
+  },
+  "trained_at": "2026-10-15T18:34:56+00:00",
+  "seconds": 78
+}

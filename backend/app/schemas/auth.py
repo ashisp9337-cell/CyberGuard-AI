@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class SignUpRequest(BaseModel):
@@ -19,13 +19,13 @@ class SignUpRequest(BaseModel):
 
 class SignInRequest(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(..., max_length=256)
     rememberMe: Optional[bool] = False
     turnstileToken: Optional[str] = None
 
 
 class GoogleAuthRequest(BaseModel):
-    credential: str
+    credential: str = Field(..., max_length=8192)
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -33,8 +33,8 @@ class ForgotPasswordRequest(BaseModel):
 
 
 class ResetPasswordRequest(BaseModel):
-    token: str
-    newPassword: str
+    token: str = Field(..., max_length=256)
+    newPassword: str = Field(..., max_length=256)
 
 
 class AuthUserOut(BaseModel):
@@ -68,15 +68,15 @@ class SignupStartRequest(BaseModel):
 
 
 class OTPVerifyRequest(BaseModel):
-    challengeId: str
-    code: str
+    challengeId: str = Field(..., max_length=128)
+    code: str = Field(..., max_length=12)
 
 
 class SignupCompleteRequest(BaseModel):
-    signupToken: str
-    password: str
+    signupToken: str = Field(..., max_length=4096)
+    password: str = Field(..., max_length=256)
 
 
 class OTPResendRequest(BaseModel):
-    challengeId: str
+    challengeId: str = Field(..., max_length=128)
     purpose: str  # "signup" | "login"

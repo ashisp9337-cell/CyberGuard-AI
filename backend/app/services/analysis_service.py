@@ -110,7 +110,7 @@ def run_scan(
 
     if module_id == "credential":
         fields = dict(extra_field_values)
-        result = account_takeover.analyze_event(fields, subtopic_title, text=text_input or "")
+        result = account_takeover.analyze_event(fields, subtopic_title, text=text_input or "", subtopic_id=subtopic_id)
         target = text_input[:80] if text_input else "account security event"
         return result | {"_target": target, "_target_type": "identity" if subtopic_id != "password-spraying" and subtopic_id != "session-activity" and subtopic_id != "behavior-changes" else "text"}
 

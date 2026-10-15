@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user
+from app.core.rate_limit import limiter
 from app.db.database import get_db
 from app.db.models import User, Scan, ThreatEvent
 from app.services import audit, incidents as inc, notifier
@@ -124,6 +125,7 @@ def _send_escalation(event_id: str, scan_id: str, by: str, note: str) -> None:
 
 
 @router.post("/escalate")
+@limiter.limit("10/minute")
 def escalate(body: EscalateRequest, background_tasks: BackgroundTasks, request: Request,
              user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """'Escalate to Team' on a scan result: make it an incident and alert the security team."""

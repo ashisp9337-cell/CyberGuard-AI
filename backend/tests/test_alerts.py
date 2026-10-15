@@ -103,7 +103,8 @@ def test_user_who_turned_alerts_off_gets_none(auth_client, telegram):
     assert telegram.sent == []
 
 
-def test_status_and_test_endpoint_without_config(auth_client):
+def test_status_and_test_endpoint_without_config(admin_client):
+    auth_client = admin_client
     st = auth_client.get("/api/alerts/status").json()
     assert st == {"telegram": False, "email": False, "whatsapp": False, "whatsappProvider": "callmebot",
                   "minScore": get_settings().ALERT_MIN_SCORE, "dedupMinutes": get_settings().ALERT_DEDUP_MINUTES}
@@ -162,6 +163,35 @@ def test_email_alert_is_html_goes_to_every_address_and_strips_app_password_space
     assert to == ["soc@example.com", "admin@example.com"]
     assert "CRITICAL" in msg["Subject"]
     assert msg.get_body(("html",)) is not None and msg.get_body(("plain",)) is not None
+
+
+def test_cyberguard_emails_are_signed_and_recognised_so_alerts_never_loop(smtp):
+    """Alerts go to the inbox the watcher reads; the watcher must recognise them and skip them."""
+    notifier.send_email(notifier.build_alert({"id": "S1", "threatType": "Bank / financial institution impersonation",
+                                              "classification": "critical", "severity": "critical", "riskScore": 100,
+                                              "target": "URGENT: Your SBI account is suspended - verify KYC now"}))
+    msg, _ = smtp.instances[0].sent[0]
+    raw = msg.as_bytes()
+    assert msg[notifier.OWN_MAIL_HEADER] and notifier.is_own_mail(raw)
+
+    forged = raw.replace(msg[notifier.OWN_MAIL_HEADER].encode(), b"0" * 40)          # attacker guesses a signature
+    assert not notifier.is_own_mail(forged)
+    other = (b"From: SBI <alerts@sbi-kyc-verify-login.xyz>\r\nSubject: URGENT: verify KYC\r\n"
+             b"Message-ID: <1@x>\r\n" + notifier.OWN_MAIL_HEADER.encode() + b": abc\r\n\r\nhi")
+    assert not notifier.is_own_mail(other)                                           # normal mail is scanned
+
+
+def test_old_unsigned_alert_from_own_address_is_recognised_but_spoofed_one_is_not(smtp):
+    old = b"From: me@gmail.com\r\nSubject: [CYBERGUARD CRITICAL] Phishing email - risk 90\r\n\r\nbody"
+    assert notifier.is_own_mail(old)
+    spoof = (b"Authentication-Results: mx.google.com; dmarc=fail header.from=gmail.com\r\n" + old)
+    assert not notifier.is_own_mail(spoof)
+    stranger = old.replace(b"me@gmail.com", b"attacker@gmail.com")
+    assert not notifier.is_own_mail(stranger)
+
+
+def test_alert_duplicates_are_blocked_for_a_day_by_default():
+    assert get_settings().ALERT_DEDUP_MINUTES >= 1440
 
 
 def test_email_port_465_uses_ssl_without_starttls(smtp, monkeypatch):
@@ -234,6 +264,7 @@ def test_whatsapp_twilio(monkeypatch):
     assert "AC1" in url and data["To"] == "whatsapp:+919876543210" and auth == ("AC1", "tok")
 
 
-def test_test_alert_endpoint_reports_all_three_channels(auth_client):
+def test_test_alert_endpoint_reports_all_three_channels(admin_client):
+    auth_client = admin_client
     res = auth_client.post("/api/alerts/test").json()
     assert {r["channel"] for r in res["results"]} == {"telegram", "email", "whatsapp"}

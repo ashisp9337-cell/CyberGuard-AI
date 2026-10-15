@@ -7,10 +7,10 @@ import { apiClient } from "@/services/api/client";
 export interface OtpChallenge {
   challengeId: string;
   sentTo: string;              // masked email, e.g. as****@gmail.com
-  delivered: boolean;          // false = email could not be sent (development mode shows devOtp)
+  delivered: boolean;          // false = email could not be sent (the code is then only in the backend terminal)
   expiresInSeconds: number;
   resendInSeconds: number;
-  devOtp?: string;             // DEVELOPMENT ONLY, when email is not working
+  devOtp?: string;             // automated backend tests only (EXPOSE_DEV_CODES); never sent in a real setup
   deliveryNote?: string;
 }
 

@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { ApiError } from "@/services/api/client";
+import { AdminOnlyCard } from "@/components/settings/AdminOnlyCard";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { useToast } from "@/context/ToastContext";
 import { getAlertStatus, sendTestAlert, type AlertChannelStatus, type AlertSendResult } from "@/services/api/alertsService";
@@ -22,9 +24,13 @@ export function AlertChannelsCard() {
   const [status, setStatus] = useState<AlertChannelStatus | null>(null);
   const [results, setResults] = useState<AlertSendResult[]>([]);
   const [sending, setSending] = useState(false);
+  const [adminOnly, setAdminOnly] = useState(false);
 
   useEffect(() => {
-    getAlertStatus().then(setStatus).catch(() => setStatus(null));
+    getAlertStatus().then(setStatus).catch((e) => {
+      setStatus(null);
+      if (e instanceof ApiError && e.status === 403) setAdminOnly(true);
+    });
   }, []);
 
   async function handleTest() {
@@ -44,6 +50,10 @@ export function AlertChannelsCard() {
     } finally {
       setSending(false);
     }
+  }
+
+  if (adminOnly) {
+    return <AdminOnlyCard title="Alert Channels" what="Telegram, email and WhatsApp alerts to the security team" />;
   }
 
   return (

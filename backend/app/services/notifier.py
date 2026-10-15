@@ -17,12 +17,15 @@ task), so a slow Telegram/SMTP server never makes a scan slower, and a
 failure is recorded instead of crashing anything.
 """
 import hashlib
+import hmac
 import html
 import logging
+import secrets
 import smtplib
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
-from email.utils import getaddresses
+from email.parser import BytesHeaderParser
+from email.utils import getaddresses, make_msgid, parseaddr
 
 import requests
 
@@ -172,6 +175,42 @@ def send_telegram(message: dict) -> dict:
         return _result("telegram", "failed", str(exc))
 
 
+# ---------------------------------------------------------------------------
+# CyberGuard's own emails (alerts, sign-in codes, reset links)
+# ---------------------------------------------------------------------------
+# Alerts usually go to the same Gmail inbox the email watcher reads. An alert email quotes the
+# phishing it reports, so without this the watcher would flag the alert itself and send another
+# alert about it, again and again. Every email CyberGuard sends carries a signature only this
+# server can make (HMAC with the server secret), and the watcher skips signed emails.
+OWN_MAIL_HEADER = "X-CyberGuard-Sig"
+OWN_MAIL_ID_HEADER = "X-CyberGuard-Id"
+OWN_SUBJECT_PREFIX = "[CYBERGUARD"
+
+
+def own_mail_signature(mail_id: str) -> str:
+    key = hashlib.sha256(b"cyberguard-own-mail|" + get_settings().JWT_SECRET.encode()).digest()
+    return hmac.new(key, (mail_id or "").strip().encode(), hashlib.sha256).hexdigest()[:40]
+
+
+def is_own_mail(raw: bytes) -> bool:
+    """True for an email that CyberGuard itself sent (so it must not be scanned and alerted on again)."""
+    try:
+        h = BytesHeaderParser().parsebytes(raw if isinstance(raw, bytes) else str(raw).encode())
+    except Exception:
+        return False
+    mid, sig = str(h.get(OWN_MAIL_ID_HEADER, "") or "").strip(), str(h.get(OWN_MAIL_HEADER, "") or "").strip()
+    if sig:                                  # signed: valid only with the right signature
+        return bool(mid) and hmac.compare_digest(sig, own_mail_signature(mid))
+    # Alerts sent before signatures existed: our own address + our alert subject, with no sign of spoofing.
+    s = get_settings()
+    ours = parseaddr(s.SMTP_FROM or s.SMTP_USER)[1].strip().lower()
+    sender = parseaddr(str(h.get("From", "") or ""))[1].strip().lower()
+    subject = " ".join(str(h.get("Subject", "") or "").split()).upper()
+    auth = " ".join(str(v) for v in (h.get_all("Authentication-Results") or [])).lower()
+    spoofed = any(f in auth for f in ("dmarc=fail", "spf=fail", "dkim=fail", "spf=softfail"))
+    return bool(ours) and sender == ours and subject.startswith(OWN_SUBJECT_PREFIX) and not spoofed
+
+
 def send_mail(to: list[str], subject: str, text: str, html: str | None = None, channel: str = "email") -> dict:
     """Send one email through the SMTP settings in .env (used by alerts and by OTP codes)."""
     if not (get_settings().SMTP_HOST and (get_settings().SMTP_FROM or get_settings().SMTP_USER)):
@@ -184,6 +223,11 @@ def send_mail(to: list[str], subject: str, text: str, html: str | None = None, c
     msg["Subject"] = subject
     msg["From"] = s.SMTP_FROM or s.SMTP_USER
     msg["To"] = ", ".join(to)
+    sender_domain = parseaddr(s.SMTP_FROM or s.SMTP_USER)[1].rpartition("@")[2] or None
+    msg["Message-ID"] = make_msgid(domain=sender_domain)
+    mail_id = secrets.token_hex(16)
+    msg[OWN_MAIL_ID_HEADER] = mail_id
+    msg[OWN_MAIL_HEADER] = own_mail_signature(mail_id)              # lets the watcher skip our own mail
     msg.set_content(text)
     if html:
         msg.add_alternative(html, subtype="html")

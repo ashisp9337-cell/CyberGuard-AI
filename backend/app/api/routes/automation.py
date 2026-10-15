@@ -1,11 +1,13 @@
-"""Automatic protection: see which watchers run, switch them on/off, or trigger a check now."""
+"""Automatic protection: see which watchers run, switch them on/off, or trigger a check now.
+ADMIN ONLY: the watchers read the owner's Gmail inbox, Downloads folder and Windows sign-ins."""
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from app.automation import manager
 from app.core.config import get_settings
-from app.core.dependencies import get_current_user
+from app.core.dependencies import require_admin
+from app.core.rate_limit import limiter
 from app.db.database import get_db
 from app.db.models import User
 from app.services import audit
@@ -25,12 +27,12 @@ def _get(name: str):
 
 
 @router.get("/status")
-def status(user: User = Depends(get_current_user)):
+def status(user: User = Depends(require_admin)):
     return {"enabled": get_settings().AUTOMATION_ENABLED, "watchers": manager.status()}
 
 
 @router.post("/{name}/toggle")
-def toggle(name: str, body: ToggleIn, request: Request, user: User = Depends(get_current_user),
+def toggle(name: str, body: ToggleIn, request: Request, user: User = Depends(require_admin),
            db: Session = Depends(get_db)):
     w = _get(name)
     w.set_enabled(body.enabled)
@@ -40,7 +42,8 @@ def toggle(name: str, body: ToggleIn, request: Request, user: User = Depends(get
 
 
 @router.post("/{name}/run")
-def run_now(name: str, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@limiter.limit("6/minute")
+def run_now(name: str, request: Request, user: User = Depends(require_admin), db: Session = Depends(get_db)):
     w = _get(name)
     w.run_once()
     audit.log(db, action="automation.run", user=user, request=request, target=w.title,

@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     TWILIO_AUTH_TOKEN: str = ""
     TWILIO_WHATSAPP_FROM: str = ""         # e.g. whatsapp:+14155238886 (Twilio sandbox number)
     ALERT_MIN_SCORE: int = 71         # 71+ = high risk and critical
-    ALERT_DEDUP_MINUTES: int = 10     # same threat on the same target is alerted once per window
+    ALERT_DEDUP_MINUTES: int = 1440   # same threat on the same target is alerted once per window (24 h)
     APP_BASE_URL: str = "http://localhost:5173"   # used for the "open in CYBERGUARD" link
     # Auto-quarantine: emails scoring this or more are held in quarantine automatically.
     AUTO_QUARANTINE: bool = True
@@ -84,6 +84,7 @@ class Settings(BaseSettings):
     IMAP_USER: str = ""
     IMAP_PASSWORD: str = ""                # Gmail App Password (16 letters)
     IMAP_FOLDER: str = "INBOX"
+    IMAP_SPAM_FOLDER: str = "[Gmail]/Spam"   # also checked (found automatically); "off" = inbox only
     EMAIL_POLL_SECONDS: int = 60
     EMAIL_BACKFILL: int = 5                # on first start, also check this many of the newest emails
     # Downloads folder watcher (files are only read and hashed, never opened or run)
@@ -92,6 +93,14 @@ class Settings(BaseSettings):
     DOWNLOADS_MAX_MB: int = 50
     # Windows sign-in events (needs the backend terminal to run "as Administrator")
     WINDOWS_EVENTS_POLL_SECONDS: int = 300
+
+    # ---- Security switches (all safe by default) ----
+    ADMIN_EMAILS: str = ""              # comma-separated admin accounts; empty = the automation owner (see dependencies.py)
+    ENABLE_API_DOCS: bool = False       # /docs, /redoc and /openapi.json; turn on only while developing
+    DEBUG: bool = False                 # true = show internal error messages in API responses (never in production)
+    EXPOSE_DEV_CODES: bool = False      # automated tests ONLY: echo OTP / reset codes in API responses. Never enable.
+    MAX_TEXT_CHARS: int = 200_000       # longest pasted text / email accepted by the scan endpoints
+    MAX_CHAT_CHARS: int = 4_000         # longest chat message sent to the AI guide
 
     UPLOAD_DIR: str = "./uploads"
     REPORTS_DIR: str = "./reports"
@@ -105,6 +114,36 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT.lower() == "production"
+
+    @property
+    def admin_email_list(self) -> List[str]:
+        return [e.strip().lower() for e in self.ADMIN_EMAILS.split(",") if e.strip()]
+
+    @property
+    def dev_codes_allowed(self) -> bool:
+        """Only the test suite turns this on; production can never echo codes."""
+        return self.EXPOSE_DEV_CODES and not self.is_production
+
+
+WEAK_JWT_SECRETS = {"dev-secret-change-me-in-production", "change-me-to-a-long-random-string", "secret", "changeme", ""}
+
+
+def security_problems(s: "Settings") -> list[str]:
+    """Settings that would make the app unsafe. Production refuses to start with any of them."""
+    problems = []
+    if s.JWT_SECRET in WEAK_JWT_SECRETS or len(s.JWT_SECRET) < 32:
+        problems.append("JWT_SECRET is missing, a known placeholder, or shorter than 32 characters "
+                        "(make one with: python -c \"import secrets; print(secrets.token_hex(32))\")")
+    if "*" in s.cors_origin_list:
+        problems.append("CORS_ORIGINS must list exact origins; '*' cannot be used with login cookies")
+    if s.is_production:
+        if not s.COOKIE_SECURE:
+            problems.append("COOKIE_SECURE must be true in production (HTTPS only)")
+        if s.EXPOSE_DEV_CODES:
+            problems.append("EXPOSE_DEV_CODES must never be enabled in production")
+        if s.DEBUG:
+            problems.append("DEBUG must be false in production")
+    return problems
 
 
 @lru_cache

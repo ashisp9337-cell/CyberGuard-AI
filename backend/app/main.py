@@ -16,7 +16,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.core.config import get_settings
+from app.core.config import get_settings, security_problems
 from app.db.database import Base, engine
 from app.db import models  # noqa: F401 — ensures models are registered before create_all
 from app.api.routes import auth, analysis, scans, dashboard, events, reports, settings as settings_route, threat_intelligence, monitoring, chat, contacts, email as email_route, alerts as alerts_route, incidents as incidents_route, automation as automation_route, iocs as iocs_route, audit as audit_route, mitre as mitre_route
@@ -25,6 +25,14 @@ settings = get_settings()
 
 logging.basicConfig(level=logging.INFO if not settings.is_production else logging.WARNING)
 logger = logging.getLogger("cyberguard")
+
+# Refuse to run in production with unsafe settings; warn loudly in development.
+_problems = security_problems(settings)
+if _problems:
+    if settings.is_production:
+        raise RuntimeError("Unsafe production settings: " + "; ".join(_problems))
+    for _p in _problems:
+        logger.warning("SECURITY: %s", _p)
 
 # For local/dev SQLite convenience only — production should use Alembic
 # migrations (see alembic/ and README "Database migrations").
@@ -43,21 +51,26 @@ async def lifespan(_app):
     manager.stop_all()
 
 
+_docs = settings.ENABLE_API_DOCS and not settings.is_production   # the API map is never public in production
 app = FastAPI(
     lifespan=lifespan,
     title="CyberGuard AI API",
     description="Backend for the CyberGuard AI cyber threat, phishing & deepfake detection platform.",
     version="1.0.0",
+    docs_url="/docs" if _docs else None,
+    redoc_url="/redoc" if _docs else None,
+    openapi_url="/openapi.json" if _docs else None,
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origin_list,
+    allow_origins=[o for o in settings.cors_origin_list if o != "*"],   # exact origins only (cookies are sent)
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+    max_age=600,
 )
 
 
@@ -75,9 +88,19 @@ async def request_logging(request: Request, call_next):
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     response = await call_next(request)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    h = response.headers
+    h["X-Content-Type-Options"] = "nosniff"
+    h["X-Frame-Options"] = "DENY"
+    h["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    h["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+    h["Cross-Origin-Opener-Policy"] = "same-origin"
+    ctype = h.get("content-type", "")
+    if ctype.startswith(("application/json", "text/event-stream")):
+        # API data: never rendered as a page, never cached (it holds private scan results)
+        h["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+        h["Cache-Control"] = "no-store"
+    if settings.COOKIE_SECURE:          # only behind HTTPS
+        h["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
 
 
@@ -93,15 +116,17 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    return JSONResponse(status_code=422, content={"error": {"code": "VALIDATION_ERROR", "message": "Invalid request.", "details": exc.errors()}})
+    # Only where and why -- never echo the submitted values back (they may be passwords or codes).
+    details = [{"loc": list(e.get("loc", [])), "msg": e.get("msg", ""), "type": e.get("type", "")} for e in exc.errors()]
+    return JSONResponse(status_code=422, content={"error": {"code": "VALIDATION_ERROR", "message": "Invalid request.", "details": details}})
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    logger.exception("Unhandled error")
-    if settings.is_production:
-        return JSONResponse(status_code=500, content={"error": {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."}})
-    return JSONResponse(status_code=500, content={"error": {"code": "INTERNAL_ERROR", "message": str(exc)}})
+    logger.exception("Unhandled error")          # full details stay in the server log
+    if settings.DEBUG and not settings.is_production:
+        return JSONResponse(status_code=500, content={"error": {"code": "INTERNAL_ERROR", "message": str(exc)}})
+    return JSONResponse(status_code=500, content={"error": {"code": "INTERNAL_ERROR", "message": "An unexpected error occurred."}})
 
 
 app.include_router(automation_route.router)
@@ -113,7 +138,7 @@ app.include_router(mitre_route.router)
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "environment": settings.ENVIRONMENT}
+    return {"status": "ok"}          # no environment/version details for anonymous callers
 
 
 app.include_router(auth.router)

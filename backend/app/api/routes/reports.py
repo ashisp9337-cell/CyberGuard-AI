@@ -1,12 +1,13 @@
 import os
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user
+from app.core.rate_limit import limiter
 from app.db.database import get_db
 from app.db.models import User, Scan, Report
 from app.services.report_service import generate_json_report, generate_csv_report, generate_pdf_report, save_report_file
@@ -15,9 +16,9 @@ router = APIRouter(prefix="/api/reports", tags=["reports"])
 
 
 class CreateReportRequest(BaseModel):
-    title: str = "CyberGuard Security Report"
-    format: str = "JSON"  # PDF | CSV | JSON
-    scanIds: list[str] | None = None
+    title: str = Field("CyberGuard Security Report", max_length=200)
+    format: str = Field("JSON", max_length=8)  # PDF | CSV | JSON
+    scanIds: list[str] | None = Field(None, max_length=1000)
 
 
 def _to_out(r: Report) -> dict:
@@ -28,7 +29,8 @@ def _to_out(r: Report) -> dict:
 
 
 @router.post("", status_code=201)
-def create_report(body: CreateReportRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def create_report(request: Request, body: CreateReportRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     q = db.query(Scan).filter(Scan.user_id == user.id)
     if body.scanIds:
         q = q.filter(Scan.id.in_(body.scanIds))

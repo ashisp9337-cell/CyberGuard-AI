@@ -7,6 +7,7 @@ import { getAutomationStatus, type AutomationStatus } from "@/services/api/autom
 import { getIocSummary, type IocSummary } from "@/services/api/iocService";
 import { getMitreSummary, type MitreSummary } from "@/services/api/mitreService";
 import { ICONS } from "@/lib/icons";
+import { ApiError } from "@/services/api/client";
 
 const STATE_COLOR: Record<string, string> = {
   active: "var(--color-safe)", off: "rgb(100 116 139)", "needs setup": "var(--color-warning)", error: "var(--color-critical)",
@@ -32,9 +33,12 @@ export function ProtectionStatusCard() {
   const [auto, setAuto] = useState<AutomationStatus | null>(null);
   const [iocs, setIocs] = useState<IocSummary | null>(null);
   const [mitre, setMitre] = useState<MitreSummary | null>(null);
+  const [autoAdminOnly, setAutoAdminOnly] = useState(false);
 
   useEffect(() => {
-    getAutomationStatus().then(setAuto).catch(() => {});
+    getAutomationStatus().then(setAuto).catch((e) => {
+      if (e instanceof ApiError && e.status === 403) setAutoAdminOnly(true);
+    });
     getIocSummary().then(setIocs).catch(() => {});
     getMitreSummary(30).then(setMitre).catch(() => {});
   }, []);
@@ -66,7 +70,9 @@ export function ProtectionStatusCard() {
 
         <div className="space-y-1.5">
           <p className="text-[10px] uppercase tracking-wide text-slate-500">Automatic protection · {checked} item(s) checked</p>
-          {watchers.length === 0 && <p className="text-xs text-slate-500">Status unavailable.</p>}
+          {watchers.length === 0 && (
+            <p className="text-xs text-slate-500">{autoAdminOnly ? "Managed by the CyberGuard administrator." : "Status unavailable."}</p>
+          )}
           {watchers.map((w) => (
             <div key={w.name} className="flex items-center gap-2.5 text-xs">
               <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: STATE_COLOR[w.state] ?? "rgb(100 116 139)" }} />

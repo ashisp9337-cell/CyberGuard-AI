@@ -13,6 +13,9 @@ from app.services.risk_scoring import classify_risk, severity_from_classificatio
 
 
 def run():
+    from app.core.config import get_settings
+    if get_settings().is_production:
+        raise SystemExit("Refusing to seed: ENVIRONMENT=production. The demo account has a published password.")
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:

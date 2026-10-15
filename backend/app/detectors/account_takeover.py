@@ -298,6 +298,152 @@ def model_assessment(text: str):
 
 
 # ---------------------------------------------------------------------------
+# Per-subtopic trained models (one model per credential subtopic, see
+# app/ml/training/train_credential_subtopics.py). Same features as training: credential_features.py
+# ---------------------------------------------------------------------------
+SUBTOPIC_MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ml", "models")
+_sub_cache: dict = {}
+SUBTOPIC_INFO = {
+    # subtopic: (short name used in the result, MITRE technique)
+    "failed-logins": ("Brute-force model", "T1110.001"),
+    "password-spraying": ("Password-spraying model", "T1110.003"),
+    "unusual-location": ("Unusual-location model", "T1078"),
+    "unknown-device": ("Unknown-device model", "T1078"),
+    "session-activity": ("Session-hijack model", "T1078"),
+    "behavior-changes": ("Behaviour-change model", "T1078"),
+}
+
+
+def _load_subtopic_model(subtopic: str):
+    path = os.path.join(SUBTOPIC_MODEL_DIR, f"cred_{subtopic}.joblib")
+    if subtopic not in SUBTOPIC_INFO or not os.path.exists(path):
+        _sub_cache.pop(subtopic, None)
+        return None
+    mtime = os.path.getmtime(path)
+    cached = _sub_cache.get(subtopic)
+    if not cached or cached[0] != mtime:
+        try:
+            import joblib
+            b = joblib.load(path)
+            ok = isinstance(b, dict) and b.get("kind") == "cyberguard-credential-subtopic" and b.get("subtopic") == subtopic
+            from app.detectors import credential_features as CF
+            ok = ok and list(b["features"]) == list(CF.SUBTOPICS[subtopic][0])   # features must match this code
+            b = {**b, "tables_obj": CF.Tables(b["tables"])} if ok else None
+        except Exception:
+            b = None
+        _sub_cache[subtopic] = (mtime, b)
+    return _sub_cache[subtopic][1]
+
+
+def _fmt_h(hours: float) -> str:
+    return f"{hours * 60:.0f} min" if hours < 1 else f"{hours:.1f} h" if hours < 48 else f"{hours / 24:.0f} days"
+
+
+def _subtopic_reasons(subtopic: str, e, f: dict) -> list[str]:
+    """Plain-language reasons from the features the model looked at (only the ones that point to an attack)."""
+    r = []
+    who = f"'{e.user}'" if e.user and e.user != "unknown-user" else "the account"
+    if subtopic == "failed-logins":
+        if f["fail_1h"] >= 2:
+            r.append(f"{int(f['fail_1h'])} failed attempts on {who} within one hour")
+        if f["consec_fail"] >= 3:
+            r.append(f"{int(f['consec_fail'])} failures in a row")
+        if f["success_after_fails"] >= 1:
+            r.append(f"a successful login right after {int(f['success_after_fails'])} failure(s)")
+        if f["ips_1h"] >= 2:
+            r.append(f"attempts came from {int(f['ips_1h'])} different IP addresses")
+        if f["att_1h"] >= 3 and f["min_gap_1h"] < 5:
+            r.append("attempts only seconds apart (an automated tool)")
+        if f["ip_new"] == 1:
+            r.append(f"IP {e.ip} was never used for a successful login on this account")
+    elif subtopic == "password-spraying":
+        if f["users_24h"] >= 2:
+            r.append(f"{int(f['users_24h'])} different accounts tried from {e.ip or 'one source'}")
+        if f["users_only_failed_24h"] >= 2:
+            r.append(f"{int(f['users_only_failed_24h'])} of them only failed")
+        if f["unknown_user_24h"] >= 1:
+            r.append(f"{int(f['unknown_user_24h'])} attempt(s) on accounts that do not exist")
+        if f["users_24h"] >= 3 and f["att_per_user_24h"] <= 2:
+            r.append("only 1-2 tries per account (low-and-slow, to avoid lockouts)")
+        if f["bot_ua"] == 1:
+            r.append("an automated tool's user agent")
+    elif subtopic == "unusual-location":
+        if f["country_new"] == 1:
+            r.append(f"country {e.country} never used by {who} before")
+        if f["asn_new"] == 1:
+            r.append(f"network AS{e.asn} never used before")
+        if f["ip16_new"] == 1:
+            r.append(f"IP range of {e.ip} never used before")
+        elif f["ip_new"] == 1:
+            r.append(f"IP {e.ip} never used before")
+        if f["fast_country_change"] == 1:
+            r.append(f"country changed within {_fmt_h(math.expm1(f['hours_since_last']))} of the previous login")
+    elif subtopic == "unknown-device":
+        from app.detectors.credential_features import parse_ua
+        b, bv, o, ov, d, bot = parse_ua(e.ua)
+        if f["is_bot"] == 1:
+            r.append("the user agent belongs to an automated tool, not a person's browser")
+        if f["ofam_new"] == 1 and o != "other":
+            r.append(f"operating system {o} never used by {who} before")
+        elif f["over_new"] == 1 and ov != "other":
+            r.append(f"{ov} never used before")
+        if f["bfam_new"] == 1 and b != "other":
+            r.append(f"browser {b} never used before")
+        elif f["ua_new"] == 1:
+            r.append("this exact browser/device was never seen before")
+        if f["dtype_new"] == 1:
+            r.append(f"device type '{d}' never used before")
+    elif subtopic == "session-activity":
+        if f["minutes_since_prev"] != -1:
+            r.append(f"a second login {math.expm1(f['minutes_since_prev']):.0f} min after the previous one")
+        if f["same_ip_prev"] == 0:
+            r.append("from a different IP address")
+        if f["same_country_prev"] == 0:
+            r.append(f"from a different country ({e.country})")
+        if f["same_ua_prev"] == 0:
+            r.append("with a different browser/device")
+        if f["ips_2h"] >= 3:
+            r.append(f"{int(f['ips_2h'])} IP addresses used within 2 hours")
+    elif subtopic == "behavior-changes":
+        if f["hour_dev"] >= 4:
+            r.append(f"login time is {f['hour_dev']:.0f} h away from this account's usual hours")
+        if f["weekday_seen"] == 0:
+            r.append("a weekday this account never logs in on")
+        if f["n_changed"] >= 2:
+            r.append(f"{int(f['n_changed'])} things changed at once (country, network, device...)")
+        if f["rate_ratio_24h"] >= 1.5:
+            r.append("far more logins in the last day than usual")
+        if f["fail_rate_change"] >= 0.3:
+            r.append("many more failed attempts than usual")
+    return r
+
+
+def subtopic_assessment(subtopic: str, text: str):
+    """Score a pasted log with the trained model of ONE credential subtopic; return its riskiest login."""
+    b = _load_subtopic_model(subtopic)
+    if b is None:
+        return None
+    from app.detectors import credential_features as CF
+    events = events_from_log(text)
+    if not events:
+        return None
+    rows = list(CF.score_events(subtopic, events, b["tables_obj"]))
+    if not rows:
+        return None
+    import numpy as np
+    probs = b["model"].predict_proba(np.array([x for _, x in rows], dtype=float))[:, 1]
+    top = float(probs.max())
+    i = max(j for j, p in enumerate(probs) if p >= top - 1e-9)       # the latest of the riskiest logins
+    e, x = rows[i]
+    feats = dict(zip(b["features"], x))
+    level = "high" if top >= b["thr_alert"] else "medium" if top >= b["thr_verify"] else "low"
+    return {"subtopic": subtopic, "probability": top, "level": level, "event": e, "features": feats,
+            "reasons": _subtopic_reasons(subtopic, e, feats), "scored": len(rows),
+            "flagged": int((probs >= b["thr_alert"]).sum()), "thrAlert": b["thr_alert"], "thrVerify": b["thr_verify"],
+            "trainedAt": b.get("trained_at")}
+
+
+# ---------------------------------------------------------------------------
 # Scoring
 # ---------------------------------------------------------------------------
 # Attack chains: a chain fires when ALL `needs` signals are present, and sets a minimum score.
@@ -319,7 +465,8 @@ _CHAINS = [
 ]
 
 
-def analyze_event(fields: dict, subtopic_title: str = "Credential Theft & Account Takeover", text: str = "") -> dict:
+def analyze_event(fields: dict, subtopic_title: str = "Credential Theft & Account Takeover", text: str = "",
+                  subtopic_id: str | None = None) -> dict:
     fields = fields or {}
     parsed = parse_log(text or "")
     ev = parsed["evidence"]
@@ -406,7 +553,31 @@ def analyze_event(fields: dict, subtopic_title: str = "Credential Theft & Accoun
 
     # Trained RBA risk model: can RAISE the risk (it compares each login with the account's own earlier
     # logins and with known attacker sources); it never lowers what the rules found.
-    ml = model_assessment(text) if text else None
+    sub = subtopic_assessment(subtopic_id, text) if (text and subtopic_id in SUBTOPIC_INFO) else None
+    ml = None if sub else (model_assessment(text) if text else None)
+    if sub:
+        name, technique = SUBTOPIC_INFO[subtopic_id]
+        e, p = sub["event"], sub["probability"]
+        who = f"login{' attempt' if not e.success else ''} for '{e.user}'" + (f" from {e.ip}" if e.ip else "")
+        level = sub["level"]
+        reasons = "; ".join(sub["reasons"]) or "the combination of signals in the log"
+        indicators.append({
+            "label": {"high": f"{name}: attack pattern detected", "medium": f"{name}: unusual - verify the user",
+                      "low": f"{name}: looks normal"}[level],
+            "severity": "critical" if level == "high" and p >= 0.9 else {"high": "high", "medium": "medium", "low": "low"}[level],
+            "description": (f"The trained {name.lower()} (gradient-boosted trees, trained on the 31M-login RBA dataset) "
+                            f"rates the riskiest {who} at {p * 100:.0f}% attack likelihood "
+                            f"(alert level {sub['thrAlert'] * 100:.0f}%, which only 1% of normal logins reach). "
+                            f"{sub['flagged']} of {sub['scored']} scored event(s) are above the alert level. "
+                            f"Main reasons: {reasons}."),
+            "weight": 0, "triggered": level != "low", "mitre": technique, "id": f"IND_{uuid.uuid4().hex[:12]}"})
+        if level == "high":
+            span = max(1 - sub["thrAlert"], 1e-6)
+            score = max(score, min(100, 71 + round(29 * (p - sub["thrAlert"]) / span)))
+        elif level == "medium":
+            span = max(sub["thrAlert"] - sub["thrVerify"], 1e-6)
+            score = max(score, min(70, 51 + round(19 * (p - sub["thrVerify"]) / span)))
+        triggered = [i for i in indicators if i["triggered"]]
     if ml:
         e, pct = ml["event"], ml["percentile"]
         reasons = "; ".join(ml["reasons"]) or "its combination of location, network and device"
@@ -451,10 +622,17 @@ def analyze_event(fields: dict, subtopic_title: str = "Credential Theft & Accoun
     result = build_result(
         indicators=indicators, base_score=score, confidence=confidence,
         engine_name="CYBERGUARD Account Takeover Engine — Log Parser + Attack-Chain Rules"
+                    + (f" + {SUBTOPIC_INFO[subtopic_id][0]} (RBA-dataset trained)" if sub else "")
                     + (" + RBA Risk Model (RBA-dataset trained)" if ml else ""),
         threat_type=subtopic_title, explanation=explanation,
     )
     result["parsedSignals"] = {k: v for k, v in parsed.items() if k != "evidence" and v}
+    if sub:
+        result["subtopicModel"] = {"subtopic": subtopic_id, "model": SUBTOPIC_INFO[subtopic_id][0],
+                                   "probability": round(sub["probability"], 4), "level": sub["level"],
+                                   "alertThreshold": round(sub["thrAlert"], 4), "verifyThreshold": round(sub["thrVerify"], 4),
+                                   "eventsScored": sub["scored"], "eventsFlagged": sub["flagged"],
+                                   "reasons": sub["reasons"], "trainedAt": sub["trainedAt"]}
     if ml:
         result["modelAssessment"] = {"percentile": round(ml["percentile"], 1), "level": ml["level"],
                                      "verifyPercentile": ml["medium"],

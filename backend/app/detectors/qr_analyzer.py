@@ -2,7 +2,7 @@
 QR code phishing analysis, end to end:
 
     image --decode--> payload text --classify--> kind (url / upi / wifi / sms / ...)
-          --analyse--> URL engine (+ trained url_qr model when present)
+          --analyse--> URL engine (rules + domain-name model + live checks)
                        or payload rules
           --merge----> QR-specific indicators --> one uniform result dict
 

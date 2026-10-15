@@ -9,7 +9,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
-from jose import jwt, JWTError
+import jwt
+from jwt import PyJWTError as JWTError
 from passlib.context import CryptContext
 from google.oauth2 import id_token as google_id_token
 from google.auth.transport import requests as google_requests
@@ -46,25 +47,42 @@ def password_is_strong(password: str) -> Optional[str]:
         return "Password must contain at least one lowercase letter."
     if not any(c.isdigit() for c in password):
         return "Password must contain at least one number."
+    if len(password.encode("utf-8")) > 72:   # bcrypt only uses the first 72 bytes
+        return "Password must be at most 72 bytes (about 72 characters)."
     return None
 
 
 # ---- Session JWTs (delivered as HTTP-only cookies) --------------------
 
-def create_access_token(user_id: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    payload = {"sub": user_id, "exp": expire, "iat": datetime.now(timezone.utc)}
+def create_access_token(user_id: str, session_version: int = 0) -> str:
+    """`sv` = the user's session version. Logout and password reset bump it, which ends every older session."""
+    now = datetime.now(timezone.utc)
+    payload = {"sub": user_id, "sv": int(session_version or 0), "iat": now,
+               "exp": now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)}
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
-def decode_access_token(token: str) -> Optional[str]:
+def decode_session(token: str) -> Optional[tuple[str, int]]:
+    """(user_id, session_version) for a valid login session token, else None."""
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
-        if payload.get("typ"):   # short-lived purpose tokens (e.g. signup) are never a login session
-            return None
-        return payload.get("sub")
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM],
+                             options={"require": ["exp", "sub"]})
     except JWTError:
         return None
+    if payload.get("typ"):   # short-lived purpose tokens (e.g. signup) are never a login session
+        return None
+    sub = payload.get("sub")
+    if not isinstance(sub, str) or not sub:
+        return None
+    try:
+        return sub, int(payload.get("sv", 0) or 0)
+    except (TypeError, ValueError):
+        return None
+
+
+def decode_access_token(token: str) -> Optional[str]:
+    session = decode_session(token)
+    return session[0] if session else None
 
 
 # ---- Password reset tokens ---------------------------------------------

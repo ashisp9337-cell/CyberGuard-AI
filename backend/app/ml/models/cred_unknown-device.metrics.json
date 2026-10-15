@@ -1,0 +1,58 @@
+{
+  "subtopic": "unknown-device",
+  "model": "HistGradientBoostingClassifier (scikit-learn)",
+  "features": [
+    "ua_new",
+    "bfam_new",
+    "bver_new",
+    "ofam_new",
+    "over_new",
+    "dtype_new",
+    "is_bot",
+    "is_mobile",
+    "hist_ok",
+    "n_ua",
+    "n_ofam",
+    "n_dtype",
+    "ua_share",
+    "ofam_share",
+    "hours_since_last",
+    "bfam_rate",
+    "ofam_rate",
+    "dtype_rate",
+    "ua_freq",
+    "bver_freq",
+    "bver_rate",
+    "over_rate"
+  ],
+  "dataset": "RBA login dataset (Wiefling et al., CC BY 4.0), subsets from extract_rba_subsets.py",
+  "label": "simulated attacker: real attacker user agent on a real account",
+  "train_rows": 600000,
+  "train_positives": 300144,
+  "alert_threshold": 0.8949,
+  "verify_threshold": 0.503,
+  "metrics": {
+    "test": {
+      "n": 356710,
+      "positives": 178355,
+      "roc_auc": 0.9142,
+      "pr_auc": 0.9194,
+      "caught_at_alert": 0.5428,
+      "false_alarm_at_alert": 0.0101,
+      "caught_at_verify": 0.6494,
+      "false_alarm_at_verify": 0.0517
+    },
+    "real_attacker_logins_vs_normal": {
+      "n": 53774,
+      "positives": 9167,
+      "roc_auc": 0.4113,
+      "pr_auc": 0.1561,
+      "caught_at_alert": 0.0172,
+      "false_alarm_at_alert": 0.0103,
+      "caught_at_verify": 0.0604,
+      "false_alarm_at_verify": 0.0517
+    }
+  },
+  "trained_at": "2026-10-15T18:32:28+00:00",
+  "seconds": 85
+}

@@ -1,0 +1,53 @@
+{
+  "subtopic": "failed-logins",
+  "model": "HistGradientBoostingClassifier (scikit-learn)",
+  "features": [
+    "att_1h",
+    "fail_1h",
+    "fail_ratio_1h",
+    "att_24h",
+    "fail_24h",
+    "consec_fail",
+    "success_after_fails",
+    "ips_1h",
+    "countries_1h",
+    "asn_1h",
+    "ua_1h",
+    "min_gap_1h",
+    "median_gap_1h",
+    "ip_new",
+    "hist_ok",
+    "hist_fail_rate",
+    "this_success",
+    "country_new",
+    "asn_new",
+    "ip16_new",
+    "ua_new",
+    "ofam_new",
+    "is_bot",
+    "country_rate",
+    "asn_rate",
+    "bver_rate",
+    "over_rate"
+  ],
+  "dataset": "RBA login dataset (Wiefling et al., CC BY 4.0), subsets from extract_rba_subsets.py",
+  "label": "real: login attempt from an attacker IP ('Is Attack IP')",
+  "train_rows": 600000,
+  "train_positives": 50525,
+  "alert_threshold": 0.8542,
+  "verify_threshold": 0.8177,
+  "metrics": {
+    "test": {
+      "n": 347380,
+      "positives": 29291,
+      "roc_auc": 0.8773,
+      "pr_auc": 0.3989,
+      "caught_at_alert": 0.1364,
+      "false_alarm_at_alert": 0.0098,
+      "caught_at_verify": 0.3225,
+      "false_alarm_at_verify": 0.049
+    }
+  },
+  "trained_at": "2026-10-15T18:42:57+00:00",
+  "seconds": 85
+}
