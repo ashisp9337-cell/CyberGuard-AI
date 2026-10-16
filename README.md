@@ -74,7 +74,9 @@ alembic upgrade head
 # phishing/URL detection can use a trained model; the app still runs and
 # falls back to rule-only detection without them, clearly labeled as such)
 python -m app.ml.training.train_phishing
-python -m app.ml.training.train_url
+python -m app.ml.training.train_url_domain        # URL domain-name model
+python -m app.ml.training.train_lookalike_domain   # needs: pip install dnstwist
+python -m app.ml.training.train_domain_spoofing    # needs: pip install wordfreq
 
 # Optional: seed demo data (demo@cyberguard.local / DemoPass123)
 python -m app.db.seed
@@ -122,7 +124,7 @@ Then `alembic upgrade head` as above — the same migration works on both engine
 docker compose up --build
 ```
 Starts Postgres, the backend (migrating on boot), and the frontend dev
-server. Train the ML models once via `docker compose exec backend python -m app.ml.training.train_phishing` (and `train_url`) — model files aren't baked into the image so retraining/updating them doesn't require a rebuild.
+server. Train the ML models once via `docker compose exec backend python -m app.ml.training.train_phishing` (and `train_url_domain`, `train_lookalike_domain`, `train_domain_spoofing`) — model files aren't baked into the image so retraining/updating them doesn't require a rebuild.
 
 ## Environment variables
 

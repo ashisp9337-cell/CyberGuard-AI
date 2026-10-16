@@ -16,7 +16,10 @@ import { createReport, downloadReportUrl } from "@/services/api/reportsService";
 
 type Phase = "form" | "scanning" | "result";
 
-const URL_PATTERN = /^https?:\/\/[^\s]+\.[^\s]{2,}/i;
+// Accepts a full link or a bare domain: https://example.com/login, example.com, www.example.com/x?y=1,
+// sub.example.co.in:8080, an IP address, punycode (xn--...) or Unicode look-alike names (pаypal.com).
+const URL_PATTERN =
+  /^(?:(?:https?|ftp):\/\/)?(?:[^\s/@]+@)?(?:(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?\.)+(?:\p{L}{2,63}|xn--[a-z0-9-]{1,59})|(?:\d{1,3}\.){3}\d{1,3}|\[[0-9a-f:.]+\])\.?(?::\d{1,5})?(?:[/?#]\S*)?$/iu;
 const MAX_TEXT_LEN = 8000;
 
 export function AnalysisWorkspace({ module: mod, subtopic }: { module: DetectionModule; subtopic: SubtopicConfig }) {
@@ -78,7 +81,7 @@ export function AnalysisWorkspace({ module: mod, subtopic }: { module: Detection
     if (needsFile && !file) return "Please upload a file to analyze.";
     if (needsUrl) {
       if (!urlValue.trim()) return "Please enter a URL to analyze.";
-      if (!URL_PATTERN.test(urlValue.trim())) return "Please enter a valid URL (e.g. https://example.com).";
+      if (!URL_PATTERN.test(urlValue.trim())) return "Please enter a website address or domain (e.g. example.com or https://example.com/login).";
     }
     if (needsText && !textValue.trim() && !(optionalFile && file)) return "Please paste content to analyze.";
     if (needsText && textValue.length > MAX_TEXT_LEN) return `Content is too long (max ${MAX_TEXT_LEN} characters).`;

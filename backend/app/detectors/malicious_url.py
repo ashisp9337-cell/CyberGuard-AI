@@ -259,6 +259,9 @@ def analyze_url(url: str, subtopic_title: str = "Malicious URL Analysis", subtop
         if settings.LIVE_PAGE_CHECKS:
             page_inds, evidence = _page_indicators(url)
             indicators += page_inds
+    sub = _subtopic_model(url, subtopic_id)
+    if sub:
+        indicators.append(sub["indicator"])
     rule_score = sum(i["weight"] for i in indicators if i["triggered"])
 
     # The domain-name model adds up to 40 points on top of the rules (it judges only the NAME, so it
@@ -266,6 +269,14 @@ def analyze_url(url: str, subtopic_title: str = "Malicious URL Analysis", subtop
     model_points = round(40 * ml["probability"]) if ml else 0
     blended = min(100, rule_score + model_points)
     confidence = min(95, 50 + min(rule_score, 40) + (abs(ml["probability"] - 0.5) * 20 if ml else 0))
+
+    # A subtopic's own trained model can only RAISE the score: alert level -> 71-100, verify level -> 51-70.
+    if sub and sub["level"] == "high":
+        span = max(1 - sub["thrAlert"], 1e-6)
+        blended = max(blended, min(100, 71 + round(29 * (sub["probability"] - sub["thrAlert"]) / span)))
+    elif sub and sub["level"] == "medium":
+        span = max(sub["thrAlert"] - sub["thrVerify"], 1e-6)
+        blended = max(blended, min(70, 51 + round(19 * (sub["probability"] - sub["thrVerify"]) / span)))
 
     # Verified official site (real host, not user-content hosting, no redirect to an untrusted
     # site): cap the score low (never zero).
@@ -295,6 +306,7 @@ def analyze_url(url: str, subtopic_title: str = "Malicious URL Analysis", subtop
         base_score=blended,
         confidence=confidence,
         engine_name="CYBERGUARD URL Engine — rules + live checks"
+                    + (f" + {sub['model']}" if sub else "")
                     + (" + domain-name model (PhiUSIIL + Tranco)" if ml else ""),
         threat_type=subtopic_title,
         explanation=explanation,
@@ -304,4 +316,80 @@ def analyze_url(url: str, subtopic_title: str = "Malicious URL Analysis", subtop
                                      "threshold": round(ml["threshold"], 4), "flagged": ml["flagged"]}
     if evidence:
         result["liveCheck"] = evidence
+    if sub:
+        result["subtopicModel"] = {k: sub[k] for k in ("subtopic", "model", "probability", "level", "domain",
+                                                       "brandDomain", "tricks", "trainedAt")}
+        result["subtopicModel"]["sameNameOtherEnding"] = bool(sub.get("sameNameOtherEnding"))
+        result["subtopicModel"].update(alertThreshold=round(sub["thrAlert"], 4), verifyThreshold=round(sub["thrVerify"], 4))
     return result
+
+
+# ---- per-subtopic trained models ---------------------------------------------------------------------
+def _lookalike(url: str):
+    from app.detectors import lookalike_domain
+    host = split_url(url)["host"]
+    a = lookalike_domain.assess(host) if host else None
+    if a is None or "thrAlert" not in a or a.get("noNearBrand") and a["probability"] < a["thrVerify"]:
+        return None                                 # a known / protected / government site, or nothing close
+    p, level, brand = a["probability"], a["level"], a.get("brandDomain")
+    tricks = ", ".join(a.get("tricks") or []) or "small changes to the name"
+    name = "Look-alike domain model"
+    if level == "high":
+        label = f"{name}: imitates {brand}"
+    elif level == "medium":
+        label = f"{name}: close to {brand} - check carefully"
+    else:
+        label = f"{name}: not a look-alike" + (f" (nearest well-known site: {brand})" if brand else "")
+    desc = (f"The trained look-alike model (gradient-boosted trees; protected list = the 10,000 most visited sites "
+            f"from Tranco + Indian banks and brands) rates '{a['domain']}' at {p * 100:.0f}%"
+            + (f" as an imitation of {brand}" if brand else "")
+            + f" (alert level {a['thrAlert'] * 100:.0f}%, which only 1% of real look-alike-but-genuine sites reach)."
+            + (f" Tricks found: {tricks}." if level != "low" and brand else "")
+            + (" The name is identical and only the ending differs; big brands own many of their country domains, "
+               "so check who registered this one (WHOIS / the brand's official site) before trusting it."
+               if a.get("sameNameOtherEnding") else ""))
+    ind = {"label": label, "description": desc, "weight": 0, "triggered": level != "low",
+           "severity": "critical" if level == "high" and p >= 0.95 else {"high": "high", "medium": "medium"}.get(level, "low"),
+           "mitre": "T1583.001", "id": f"IND_{uuid.uuid4().hex[:12]}"}
+    b = lookalike_domain.load_model() or {}
+    return {**a, "subtopic": "lookalike-domain", "model": "Look-alike domain model (Tranco + dnstwist trained)",
+            "indicator": ind, "trainedAt": b.get("trained_at"), "probability": round(p, 4)}
+
+
+def _spoofing(url: str):
+    from app.detectors import domain_spoofing
+    host = split_url(url)["host"]
+    a = domain_spoofing.assess(host) if host else None
+    if a is None or "thrAlert" not in a:
+        return None                     # no model, a known / brand-owned / government site, or no brand name inside
+    p, level, brand = a["probability"], a["level"], a.get("brandDomain")
+    name = "Domain spoofing model"
+    label = {"high": f"{name}: uses the {a['brand']} name on a domain {a['brand']} does not own",
+             "medium": f"{name}: carries the {a['brand']} name - check who owns it"}.get(
+        level, f"{name}: brand name looks incidental here")
+    signs = "; ".join(a.get("signs") or [])
+    desc = (f"The trained domain-spoofing model (gradient-boosted trees; trained on real domains: PhiUSIIL phishing "
+            f"vs Tranco + PhiUSIIL legitimate sites that also contain a brand name) rates '{a['domain']}' at "
+            f"{p * 100:.0f}% (alert level {a['thrAlert'] * 100:.0f}%, reached by under 1% of genuine domains that "
+            f"contain a brand name). What it saw: {signs}."
+            + (f" The real site is {brand}; open it yourself instead of using this link." if level != "low" else ""))
+    ind = {"label": label, "description": desc, "weight": 0, "triggered": level != "low",
+           "severity": "critical" if level == "high" and p >= 0.95 else {"high": "high", "medium": "medium"}.get(level, "low"),
+           "mitre": "T1583.001", "id": f"IND_{uuid.uuid4().hex[:12]}"}
+    b = domain_spoofing.load_model() or {}
+    return {**a, "subtopic": "domain-spoofing", "model": "Domain spoofing model (PhiUSIIL + Tranco trained)",
+            "indicator": ind, "trainedAt": b.get("trained_at"), "probability": round(p, 4),
+            "tricks": a.get("signs") or []}
+
+
+SUBTOPIC_MODELS = {"lookalike-domain": _lookalike, "domain-spoofing": _spoofing}
+
+
+def _subtopic_model(url: str, subtopic_id: str | None):
+    fn = SUBTOPIC_MODELS.get(subtopic_id or "")
+    if not fn:
+        return None
+    try:
+        return fn(url)
+    except Exception:          # a broken / missing model never breaks the scan
+        return None

@@ -2,9 +2,10 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-# scikit-learn's helper asks Windows for the CPU core count with "wmic", which Windows 11 removed;
-# telling it the count up front avoids a harmless but noisy warning at startup.
-os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(os.cpu_count() or 1))
+# scikit-learn's helper asks Windows for the number of PHYSICAL cores with "wmic", which Windows 11 removed,
+# and warns when that fails. It only skips the question when the limit is BELOW the logical core count, so
+# give it half the logical cores (= the physical cores on a normal hyper-threaded CPU).
+os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(max(1, (os.cpu_count() or 2) // 2)))
 import time
 import uuid
 

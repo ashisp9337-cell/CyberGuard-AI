@@ -112,7 +112,7 @@ def test_tampered_or_unsigned_tokens_rejected(client):
     import jwt as pyjwt
     register_user(client, {"name": "T", "email": _email(), "password": "TestPass123"})
     me = client.get("/api/auth/me").json()
-    forged = pyjwt.encode({"sub": me["id"], "sv": 0, "exp": 9999999999}, "wrong-secret", algorithm="HS256")
+    forged = pyjwt.encode({"sub": me["id"], "sv": 0, "exp": 9999999999}, "wrong-secret-" + "y" * 40, algorithm="HS256")
     client.cookies.set("cyberguard_session", forged)
     assert client.get("/api/auth/me").status_code == 401
     none_alg = pyjwt.encode({"sub": me["id"], "sv": 0, "exp": 9999999999}, None, algorithm="none")

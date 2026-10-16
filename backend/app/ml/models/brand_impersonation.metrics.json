@@ -1,0 +1,79 @@
+{
+  "topic": "brand",
+  "model": "TF-IDF (words 1-2 + characters 3-5) + Logistic Regression",
+  "trained_at": "2026-10-15T19:41:24+00:00",
+  "training_rows": {
+    "scam": 4565,
+    "genuine": 6269,
+    "real_scam_sms_added": 3867,
+    "real_genuine_on_topic": 1537,
+    "real_genuine_other": 3074,
+    "previous_dataset_rows_used": 3483
+  },
+  "label_cleaning": {
+    "dropped_genuine_looking_like_scam": 88,
+    "dropped_scam_looking_genuine": 13,
+    "on_topic_genuine_set_aside_train": 84,
+    "on_topic_genuine_set_aside_test": 16,
+    "on_topic_threshold": 0.8
+  },
+  "test": "held-out 20% of real SMS (never trained on); detector = model + rules, flagged at score >= 51",
+  "results": {
+    "old_model": {
+      "real genuine brand-related SMS": {
+        "n": 406,
+        "false_alarm_rate": 0.6552
+      },
+      "real brand-related scam SMS": {
+        "n": 991,
+        "caught_rate": 0.9889
+      },
+      "real genuine everyday SMS": {
+        "n": 3000,
+        "false_alarm_rate": 0.3543
+      }
+    },
+    "new_model": {
+      "real genuine brand-related SMS": {
+        "n": 406,
+        "false_alarm_rate": 0.1207
+      },
+      "real brand-related scam SMS": {
+        "n": 991,
+        "caught_rate": 0.9788
+      },
+      "real genuine everyday SMS": {
+        "n": 3000,
+        "false_alarm_rate": 0.0297
+      }
+    },
+    "old_detector": {
+      "real genuine brand-related SMS": {
+        "n": 406,
+        "false_alarm_rate": 0.2315
+      },
+      "real brand-related scam SMS": {
+        "n": 600,
+        "caught_rate": 0.775
+      },
+      "real genuine everyday SMS": {
+        "n": 600,
+        "false_alarm_rate": 0.0317
+      }
+    },
+    "new_detector": {
+      "real genuine brand-related SMS": {
+        "n": 406,
+        "false_alarm_rate": 0.0369
+      },
+      "real brand-related scam SMS": {
+        "n": 600,
+        "caught_rate": 0.8867
+      },
+      "real genuine everyday SMS": {
+        "n": 600,
+        "false_alarm_rate": 0.0083
+      }
+    }
+  }
+}

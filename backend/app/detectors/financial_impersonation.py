@@ -99,7 +99,9 @@ def analyze_financial_impersonation(text: str, extra_field_values: dict, subtopi
     if claimed:
         real_domains = [d.lower() for d in domains.get(claimed, [])]
         actual_domain = _domain_of(sender_email)
-        if sender_email and real_domains and actual_domain not in real_domains:
+        # the bank's own domain or a subdomain of it (alerts.hdfcbank.net) is genuine; look-alikes are not
+        own = bool(actual_domain) and any(actual_domain == d or actual_domain.endswith("." + d) for d in real_domains)
+        if sender_email and real_domains and not own:
             indicators.append(_ind(
                 True, "Sender domain does not match the claimed institution",
                 f"The message claims to be from {claimed.title()}, but '{actual_domain}' is not one of its "
@@ -164,4 +166,4 @@ def analyze_financial_impersonation(text: str, extra_field_values: dict, subtopi
         indicators=indicators, base_score=blended, confidence=confidence,
         engine_name=f"CYBERGUARD Impersonation Engine — {'TF-IDF+LogReg + Domain Lookup' if model_used else 'Rule-Based (model unavailable)'}",
         threat_type=subtopic_title, explanation=explanation,
-    )
+    )

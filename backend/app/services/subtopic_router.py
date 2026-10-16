@@ -103,7 +103,10 @@ DETECTORS = {
         "generic": "impersonation.analyze_identity (existing generic fallback)"}.items()},
     **{("credential", s): ("account_takeover.analyze_event", "ok", f"own trained model for this subtopic: cred_{s}.joblib")
        for s in TITLES["credential"]},
-    **{("url-security", s): ("malicious_url.analyze_url", "ok", "one shared detector for all URL subtopics")
+    **{("url-security", s): ("malicious_url.analyze_url", "ok",
+                             {"lookalike-domain": "shared URL engine + own trained model: lookalike_domain.joblib",
+                              "domain-spoofing": "shared URL engine + own trained model: domain_spoofing.joblib"}.get(
+                                 s, "one shared detector for all URL subtopics"))
        for s in TITLES["url-security"]},
     **{("cyber-threat", s): ("cyber_threat.analyze_event_text", "ok", "one shared rule engine for all subtopics")
        for s in TITLES["cyber-threat"]},

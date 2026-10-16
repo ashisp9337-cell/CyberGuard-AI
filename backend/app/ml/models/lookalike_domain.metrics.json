@@ -1,0 +1,381 @@
+{
+  "model": "HistGradientBoostingClassifier",
+  "features": [
+    "dist_raw",
+    "dist_skel",
+    "norm_dist_skel",
+    "len_brand",
+    "len_query",
+    "len_diff",
+    "same_tld",
+    "tld_common",
+    "brand_rank_log",
+    "skeleton_identical",
+    "non_ascii",
+    "mixed_script",
+    "is_idn",
+    "digit_lookalike",
+    "pair_lookalike",
+    "hyphen_only",
+    "transposition",
+    "omission",
+    "addition",
+    "repetition",
+    "keyboard_neighbour",
+    "vowel_swap",
+    "bitsquat",
+    "contains_brand",
+    "neighbours_within_1",
+    "query_digits",
+    "query_hyphens",
+    "prefix_match",
+    "suffix_match"
+  ],
+  "data": {
+    "protected_sites": 9098,
+    "allowlist": 100011,
+    "train_lookalikes": 186212,
+    "train_genuine": 103605,
+    "sources": [
+      "Tranco top-1M (tranco-list.eu)",
+      "dnstwist look-alike generator",
+      "PhiUSIIL Phishing URL Dataset (UCI, test only)"
+    ]
+  },
+  "thr_alert": 0.942996849598215,
+  "thr_verify": 0.6609630769702227,
+  "results": {
+    "heldout_sites_all": {
+      "n": 84318,
+      "positives": 53597,
+      "auc": 0.9931,
+      "avg_precision": 0.9959,
+      "caught_at_alert": 0.8439,
+      "false_alarms_at_alert": 0.0071,
+      "caught_at_verify": 0.951,
+      "false_alarms_at_verify": 0.0405
+    },
+    "heldout_sites_close_genuine_only": {
+      "n": 72241,
+      "positives": 53597,
+      "auc": 0.9887,
+      "avg_precision": 0.9959,
+      "caught_at_alert": 0.8439,
+      "false_alarms_at_alert": 0.0116,
+      "caught_at_verify": 0.951,
+      "false_alarms_at_verify": 0.0668
+    },
+    "caught_by_trick": {
+      "addition": {
+        "n": 3609,
+        "at_alert": 0.937,
+        "at_verify": 0.983
+      },
+      "bitsquatting": {
+        "n": 3596,
+        "at_alert": 0.888,
+        "at_verify": 0.959
+      },
+      "homoglyph": {
+        "n": 10829,
+        "at_alert": 0.956,
+        "at_verify": 0.977
+      },
+      "hyphenation": {
+        "n": 3622,
+        "at_alert": 0.988,
+        "at_verify": 0.995
+      },
+      "insertion": {
+        "n": 3613,
+        "at_alert": 0.908,
+        "at_verify": 0.978
+      },
+      "omission": {
+        "n": 3537,
+        "at_alert": 0.829,
+        "at_verify": 0.932
+      },
+      "repetition": {
+        "n": 3459,
+        "at_alert": 0.962,
+        "at_verify": 0.99
+      },
+      "replacement": {
+        "n": 3611,
+        "at_alert": 0.839,
+        "at_verify": 0.954
+      },
+      "transposition": {
+        "n": 3610,
+        "at_alert": 0.95,
+        "at_verify": 0.975
+      },
+      "vowel-swap": {
+        "n": 3430,
+        "at_alert": 0.936,
+        "at_verify": 0.97
+      },
+      "cyrillic": {
+        "n": 346,
+        "at_alert": 0.977,
+        "at_verify": 1.0
+      },
+      "plural": {
+        "n": 1420,
+        "at_alert": 0.901,
+        "at_verify": 0.975
+      },
+      "tld-swap": {
+        "n": 3487,
+        "at_alert": 0.11,
+        "at_verify": 0.796
+      },
+      "typo+other-ending": {
+        "n": 5428,
+        "at_alert": 0.648,
+        "at_verify": 0.873
+      }
+    },
+    "phiusiil_close_to_a_protected_site": {
+      "n": 37914,
+      "positives": 9480,
+      "auc": 0.5069,
+      "avg_precision": 0.2789,
+      "caught_at_alert": 0.0242,
+      "false_alarms_at_alert": 0.0062,
+      "caught_at_verify": 0.0643,
+      "false_alarms_at_verify": 0.0377
+    },
+    "phiusiil_within_one_edit": {
+      "n": 6614,
+      "positives": 1674,
+      "auc": 0.5794,
+      "avg_precision": 0.3664,
+      "caught_at_alert": 0.1249,
+      "false_alarms_at_alert": 0.034,
+      "caught_at_verify": 0.2969,
+      "false_alarms_at_verify": 0.1925
+    },
+    "phiusiil_within_one_edit_of_a_7plus_letter_name": {
+      "n": 1115,
+      "positives": 452,
+      "auc": 0.5721,
+      "avg_precision": 0.5559,
+      "caught_at_alert": 0.3031,
+      "false_alarms_at_alert": 0.1161,
+      "caught_at_verify": 0.6239,
+      "false_alarms_at_verify": 0.6184
+    },
+    "phiusiil_false_alarms_all_legit_domains": {
+      "legit_domains": 121457,
+      "alerts": 175,
+      "rate": 0.00144
+    },
+    "phiusiil_examples_caught": [
+      [
+        "system-ns.org",
+        0.982
+      ],
+      [
+        "webadv.co",
+        0.967
+      ],
+      [
+        "steamcommmunnnity.com",
+        0.975
+      ],
+      [
+        "googel.email",
+        0.997
+      ],
+      [
+        "maim.at",
+        0.97
+      ],
+      [
+        "steamcommunrity.com",
+        0.999
+      ],
+      [
+        "team-viewer.site",
+        0.988
+      ],
+      [
+        "us-news.online",
+        0.977
+      ],
+      [
+        "steamcommurity.ru",
+        0.987
+      ],
+      [
+        "lokalised.com",
+        0.994
+      ],
+      [
+        "purnhub.com",
+        0.99
+      ],
+      [
+        "metameask.com",
+        0.954
+      ],
+      [
+        "dyn-dns.co",
+        0.992
+      ],
+      [
+        "steamcomnmunity.su",
+        0.998
+      ],
+      [
+        "live2.de",
+        0.97
+      ],
+      [
+        "cissco.net",
+        0.947
+      ],
+      [
+        "steamcommuity.co.in",
+        0.98
+      ],
+      [
+        "adliiran.email",
+        0.986
+      ],
+      [
+        "xn--mtamask-98a.io",
+        1.0
+      ],
+      [
+        "metamask1.kred",
+        0.967
+      ],
+      [
+        "ip-info.org",
+        0.992
+      ],
+      [
+        "one-drive.org",
+        0.987
+      ],
+      [
+        "whaytsapp.com",
+        0.988
+      ],
+      [
+        "metamaisk.io",
+        0.991
+      ],
+      [
+        "dlen.ru",
+        0.993
+      ]
+    ],
+    "phiusiil_examples_false_alarms": [
+      [
+        "olly.com",
+        0.969
+      ],
+      [
+        "eirin.jp",
+        0.985
+      ],
+      [
+        "ycsports.com",
+        0.985
+      ],
+      [
+        "unit9.com",
+        0.986
+      ],
+      [
+        "smbnation.com",
+        0.989
+      ],
+      [
+        "ladyxeona.com",
+        0.998
+      ],
+      [
+        "macl.aero",
+        0.985
+      ],
+      [
+        "gailonline.com",
+        0.982
+      ],
+      [
+        "cani.cz",
+        0.983
+      ],
+      [
+        "national-geographic.cz",
+        0.995
+      ],
+      [
+        "nationalgeographic.lt",
+        0.968
+      ],
+      [
+        "gitenberg.org",
+        0.964
+      ],
+      [
+        "haber27.com",
+        0.979
+      ],
+      [
+        "vince.com",
+        0.95
+      ],
+      [
+        "translit.ca",
+        0.956
+      ],
+      [
+        "sngular.com",
+        0.945
+      ],
+      [
+        "cornix.io",
+        0.957
+      ],
+      [
+        "guinnessworldrecords.com.br",
+        0.968
+      ],
+      [
+        "iccr.org",
+        0.991
+      ],
+      [
+        "edhat.com",
+        0.976
+      ],
+      [
+        "checkpoints.com",
+        0.997
+      ],
+      [
+        "foootball.cc",
+        0.976
+      ],
+      [
+        "truli.com",
+        0.973
+      ],
+      [
+        "dattco.com",
+        0.975
+      ],
+      [
+        "microsort.com",
+        0.988
+      ]
+    ]
+  },
+  "trained_at": "2026-10-16T09:19:09+00:00"
+}

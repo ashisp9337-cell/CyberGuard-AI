@@ -1,0 +1,79 @@
+{
+  "topic": "government",
+  "model": "TF-IDF (words 1-2 + characters 3-5) + Logistic Regression",
+  "trained_at": "2026-10-15T19:39:12+00:00",
+  "training_rows": {
+    "scam": 1970,
+    "genuine": 4055,
+    "real_scam_sms_added": 1253,
+    "real_genuine_on_topic": 678,
+    "real_genuine_other": 2000,
+    "previous_dataset_rows_used": 2351
+  },
+  "label_cleaning": {
+    "dropped_genuine_looking_like_scam": 88,
+    "dropped_scam_looking_genuine": 13,
+    "on_topic_genuine_set_aside_train": 24,
+    "on_topic_genuine_set_aside_test": 6,
+    "on_topic_threshold": 0.8
+  },
+  "test": "held-out 20% of real SMS (never trained on); detector = model + rules, flagged at score >= 51",
+  "results": {
+    "old_model": {
+      "real genuine government-related SMS": {
+        "n": 164,
+        "false_alarm_rate": 0.9024
+      },
+      "real government-related scam SMS": {
+        "n": 283,
+        "caught_rate": 0.9823
+      },
+      "real genuine everyday SMS": {
+        "n": 3000,
+        "false_alarm_rate": 0.777
+      }
+    },
+    "new_model": {
+      "real genuine government-related SMS": {
+        "n": 164,
+        "false_alarm_rate": 0.0793
+      },
+      "real government-related scam SMS": {
+        "n": 283,
+        "caught_rate": 0.9647
+      },
+      "real genuine everyday SMS": {
+        "n": 3000,
+        "false_alarm_rate": 0.0193
+      }
+    },
+    "old_detector": {
+      "real genuine government-related SMS": {
+        "n": 164,
+        "false_alarm_rate": 0.2988
+      },
+      "real government-related scam SMS": {
+        "n": 283,
+        "caught_rate": 0.8304
+      },
+      "real genuine everyday SMS": {
+        "n": 600,
+        "false_alarm_rate": 0.0633
+      }
+    },
+    "new_detector": {
+      "real genuine government-related SMS": {
+        "n": 164,
+        "false_alarm_rate": 0.0122
+      },
+      "real government-related scam SMS": {
+        "n": 283,
+        "caught_rate": 0.8728
+      },
+      "real genuine everyday SMS": {
+        "n": 600,
+        "false_alarm_rate": 0.005
+      }
+    }
+  }
+}

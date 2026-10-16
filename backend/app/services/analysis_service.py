@@ -116,7 +116,7 @@ def run_scan(
 
     if module_id == "url-security":
         target = url_input or text_input or ""
-        result = malicious_url.analyze_url(target, subtopic_title)
+        result = malicious_url.analyze_url(target, subtopic_title, subtopic_id=subtopic_id)
         return result | {"_target": target, "_target_type": "url"}
 
     if module_id == "cyber-threat":

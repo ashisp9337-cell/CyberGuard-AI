@@ -19,6 +19,7 @@ If the model file is missing, falls back to rule-based-only scoring.
 from __future__ import annotations
 
 import os
+import re
 import uuid
 
 import joblib
@@ -54,9 +55,21 @@ def _domain_of(email: str) -> str:
     return email.strip().lower().rsplit("@", 1)[-1] if "@" in email else ""
 
 
+def _is_brand_domain(domain: str, real_domains) -> bool:
+    """netflix.com and its subdomains (account.netflix.com, mailer.netflix.com) are the brand's own."""
+    return bool(domain) and any(domain == d or domain.endswith("." + d) for d in real_domains)
+
+
 def _ind(triggered: bool, label: str, description: str, severity: str, weight: int) -> dict:
     return {"id": f"IND_{uuid.uuid4().hex[:12]}", "label": label, "description": description,
             "severity": severity, "weight": weight, "triggered": bool(triggered)}
+
+
+# The two most common brand scams: "your account/parcel is on hold" + "pay a small fee / update your card".
+_HOLD_RE = re.compile(r"\b(?:on hold|held|suspended|suspend|unpaid|outstanding fee|customs|re-?delivery|"
+                      r"could not be delivered|failed delivery|payment (?:failed|declined)|expired)\b", re.I)
+_PAY_DEMAND_RE = re.compile(r"\b(?:pay(?: now| the)?|fee|charge|update (?:your |ur |yr )?(?:card|payment|billing)|"
+                            r"card details|billing details|payment details)\b", re.I)
 
 
 def analyze_brand_impersonation(text: str, extra_field_values: dict, subtopic_title: str) -> dict:
@@ -69,7 +82,7 @@ def analyze_brand_impersonation(text: str, extra_field_values: dict, subtopic_ti
     if claimed_brands:
         claimed = claimed_brands[0]  # first-mentioned brand is treated as the claimed identity
         real_domains = {d.lower() for d in BRAND_DOMAINS.get(claimed, set())}
-        if sender_email and real_domains and actual_domain not in real_domains:
+        if sender_email and real_domains and not _is_brand_domain(actual_domain, real_domains):
             indicators.append(_ind(
                 True, "Sender domain does not match the claimed brand",
                 f"The message claims to be from {claimed.title()}, but '{actual_domain}' is not one of its "
@@ -98,6 +111,16 @@ def analyze_brand_impersonation(text: str, extra_field_values: dict, subtopic_ti
             "low", 6,
         ))
 
+    sender_verified = bool(claimed_brands and sender_email and _is_brand_domain(
+        actual_domain, {d.lower() for d in BRAND_DOMAINS.get(claimed_brands[0], set())}))
+    hold_scam = bool(_HOLD_RE.search(text) and _PAY_DEMAND_RE.search(text)) and not sender_verified
+    indicators.append(_ind(
+        hold_scam, "Account or parcel held until you pay",
+        "Says an account or delivery is on hold / unpaid and asks you to pay a fee or update card details -- "
+        "the most common brand-impersonation scam. Real companies show this inside their own app or website.",
+        "high", 25,
+    ))
+
     general = phishing._rule_indicators(text, sender=sender_email or None, reply_to=None) if text.strip() else []
     indicators.extend(general)
 
@@ -117,6 +140,10 @@ def analyze_brand_impersonation(text: str, extra_field_values: dict, subtopic_ti
     else:
         blended = min(rule_score, 100)
         confidence = 40 + min(rule_score, 50)
+
+    # "On hold + pay / update card" from a sender we could not verify as the brand: at least Suspicious.
+    if hold_scam and text.strip():
+        blended = max(blended, 55)
 
     for ind in indicators:
         ind.setdefault("id", f"IND_{uuid.uuid4().hex[:12]}")
@@ -142,4 +169,4 @@ def analyze_brand_impersonation(text: str, extra_field_values: dict, subtopic_ti
         indicators=indicators, base_score=blended, confidence=confidence,
         engine_name=f"CYBERGUARD Impersonation Engine — {'TF-IDF+LogReg (brand-masked) + Domain Lookup' if model_used else 'Rule-Based (model unavailable)'}",
         threat_type=subtopic_title, explanation=explanation,
-    )
+    )

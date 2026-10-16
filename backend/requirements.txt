@@ -35,3 +35,6 @@ pymupdf>=1.24       # renders PDF pages so QR codes inside PDFs can be scanned
 pyparsing>=3.1,<3.3  # oletools uses old pyparsing names; 3.3+ floods warnings
 anyio>=4.7,<5
 tldextract==5.4.0   # registered-domain parsing with the bundled (offline) Public Suffix List
+rapidfuzz>=3.9          # fast edit distance for the look-alike domain model
+# training only (not needed to run the app): pip install dnstwist wordfreq
+#   -> app/ml/training/train_lookalike_domain.py, train_domain_spoofing.py

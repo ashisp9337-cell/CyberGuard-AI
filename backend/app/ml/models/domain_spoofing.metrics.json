@@ -1,0 +1,376 @@
+{
+  "model": "HistGradientBoostingClassifier",
+  "features": [
+    "brand_len",
+    "brand_rank_log",
+    "brand_word_rank_log",
+    "label_len",
+    "rest_len",
+    "rest_share",
+    "brand_at_start",
+    "brand_at_end",
+    "left_cut",
+    "right_cut",
+    "brand_splits_word",
+    "n_tokens",
+    "security_words",
+    "rest_word_cover",
+    "rest_best_word_rank_log",
+    "n_hyphens",
+    "n_digits",
+    "tld_common",
+    "tld_share_log",
+    "tld_is_country",
+    "same_tld_as_brand",
+    "non_ascii",
+    "via_lookalike_letters",
+    "brands_found",
+    "rest_is_one_word",
+    "brand_phish_rate",
+    "brand_seen_log"
+  ],
+  "data": {
+    "protected_brand_names": 7054,
+    "allowlist": 100000,
+    "train_phishing": 1134,
+    "train_genuine": 13776,
+    "sources": [
+      "PhiUSIIL Phishing URL Dataset (UCI)",
+      "Tranco top-1M (tranco-list.eu)",
+      "wordfreq English word list"
+    ]
+  },
+  "thr_alert": 0.7274370525439786,
+  "thr_verify": 0.3598153820351506,
+  "results": {
+    "heldout_domains_all": {
+      "n": 4278,
+      "positives": 330,
+      "auc": 0.8656,
+      "avg_precision": 0.6679,
+      "caught_at_alert": 0.5242,
+      "false_alarms_at_alert": 0.0068,
+      "caught_at_verify": 0.6,
+      "false_alarms_at_verify": 0.0377
+    },
+    "heldout_domains_phiusiil_only": {
+      "n": 711,
+      "positives": 330,
+      "auc": 0.8169,
+      "avg_precision": 0.8509,
+      "caught_at_alert": 0.5242,
+      "false_alarms_at_alert": 0.0131,
+      "caught_at_verify": 0.6,
+      "false_alarms_at_verify": 0.0892
+    },
+    "heldout_domains_curated_brands": {
+      "n": 121,
+      "positives": 98,
+      "auc": 0.9232,
+      "avg_precision": 0.9835,
+      "caught_at_alert": 0.8776,
+      "false_alarms_at_alert": 0.2174,
+      "caught_at_verify": 0.949,
+      "false_alarms_at_verify": 0.6957
+    },
+    "heldout_tranco_genuine_false_alarms": {
+      "n": 3567,
+      "positives": 0,
+      "false_alarms_at_alert": 0.0062,
+      "false_alarms_at_verify": 0.0322
+    },
+    "examples_caught": [
+      [
+        "facebook-checkpoint-policy-violation-social-network10.ml",
+        "facebook",
+        1.0
+      ],
+      [
+        "facebook-checkpoint-policy-violation-social-network3.ml",
+        "facebook",
+        1.0
+      ],
+      [
+        "support-googles.ml",
+        "google",
+        1.0
+      ],
+      [
+        "eblagh1-adliran.ml",
+        "adliran",
+        1.0
+      ],
+      [
+        "eblagh1-adliran.ga",
+        "adliran",
+        1.0
+      ],
+      [
+        "metamask78.com",
+        "metamask",
+        1.0
+      ],
+      [
+        "metamask-2xevent.com",
+        "metamask",
+        1.0
+      ],
+      [
+        "shaparak-bamk-iran.ml",
+        "shaparak",
+        1.0
+      ],
+      [
+        "is-shaparak-ir.ga",
+        "shaparak",
+        1.0
+      ],
+      [
+        "shaparak-mi-ir.ml",
+        "shaparak",
+        1.0
+      ],
+      [
+        "metamaskp.com",
+        "metamask",
+        1.0
+      ],
+      [
+        "2x-metamask.com",
+        "metamask",
+        1.0
+      ],
+      [
+        "shaparak-mi-ir.cf",
+        "shaparak",
+        1.0
+      ],
+      [
+        "adliran-samane-ir.cf",
+        "adliran",
+        1.0
+      ],
+      [
+        "divar-appex.ml",
+        "divar",
+        1.0
+      ],
+      [
+        "cew-shaparak-ir.gq",
+        "shaparak",
+        1.0
+      ],
+      [
+        "updete-divari.ml",
+        "divar",
+        1.0
+      ],
+      [
+        "io-shaparak-c.cf",
+        "shaparak",
+        1.0
+      ],
+      [
+        "localizando-icloud.info",
+        "icloud",
+        1.0
+      ],
+      [
+        "mail-google.ml",
+        "google",
+        1.0
+      ]
+    ],
+    "examples_missed": [
+      [
+        "vodafoneplay.gg",
+        "vodafone",
+        0.0
+      ],
+      [
+        "dkb-information.de",
+        "infor",
+        0.001
+      ],
+      [
+        "claronetcombobrasil.com.br",
+        "claro",
+        0.001
+      ],
+      [
+        "securite-informatique.info",
+        "infor",
+        0.001
+      ],
+      [
+        "profit-domain.com",
+        "profi",
+        0.002
+      ],
+      [
+        "cosmeticsurgeryisb.pk",
+        "cosme",
+        0.002
+      ],
+      [
+        "novosti247.com",
+        "novosti",
+        0.002
+      ],
+      [
+        "infortelec.net",
+        "infor",
+        0.002
+      ],
+      [
+        "profiles-login.top",
+        "profi",
+        0.003
+      ],
+      [
+        "csgopolygon.cc",
+        "polygon",
+        0.003
+      ],
+      [
+        "postemoserize.org",
+        "poste",
+        0.004
+      ],
+      [
+        "inventerscorp.org",
+        "inven",
+        0.004
+      ],
+      [
+        "inforfnb.com",
+        "infor",
+        0.005
+      ],
+      [
+        "solutionsplayer.pk",
+        "splay",
+        0.005
+      ],
+      [
+        "roomifoods.pk",
+        "ifood",
+        0.006
+      ]
+    ],
+    "examples_false_alarms": [
+      [
+        "englishshaparak.com",
+        "shaparak",
+        0.984
+      ],
+      [
+        "docomo-icc.com",
+        "docomo",
+        0.966
+      ],
+      [
+        "baiduyun.xyz",
+        "baidu",
+        0.932
+      ],
+      [
+        "naverixq.com",
+        "naver",
+        0.932
+      ],
+      [
+        "divarkhaghazi.com",
+        "divar",
+        0.926
+      ],
+      [
+        "applecountryteam.com",
+        "apple",
+        0.926
+      ],
+      [
+        "niftyvaughanpxnew.com",
+        "nifty",
+        0.909
+      ],
+      [
+        "akseslogin-lotreonline.com",
+        "eonline",
+        0.892
+      ],
+      [
+        "leadertelegram.com",
+        "telegram",
+        0.891
+      ],
+      [
+        "mertking-turkiye2026.net",
+        "turkiye",
+        0.878
+      ],
+      [
+        "customerservice-macys.com",
+        "macys",
+        0.861
+      ],
+      [
+        "empoweredfreelancerhub.site",
+        "freelancer",
+        0.857
+      ],
+      [
+        "naveroxiq.online",
+        "naver",
+        0.854
+      ],
+      [
+        "sassa-status.web.za",
+        "sassa",
+        0.841
+      ],
+      [
+        "ameliaactivewear.com",
+        "ameli",
+        0.831
+      ],
+      [
+        "arubaito-next.com",
+        "aruba",
+        0.814
+      ],
+      [
+        "stabbingwestward.com",
+        "bing",
+        0.808
+      ],
+      [
+        "sheinassets.com",
+        "shein",
+        0.803
+      ],
+      [
+        "12agodatoto.site",
+        "agoda",
+        0.801
+      ],
+      [
+        "amazonwindows.co.uk",
+        "amazon",
+        0.792
+      ]
+    ],
+    "note": "Domains without a protected brand name are never flagged by this model; false-alarm rates above are among genuine domains that DO contain a brand name.",
+    "extra_independent_test": {
+      "n": 3365,
+      "positives": 1543,
+      "auc": 0.6657,
+      "avg_precision": 0.6552,
+      "caught_at_alert": 0.4835,
+      "false_alarms_at_alert": 0.1652,
+      "caught_at_verify": 0.5567,
+      "false_alarms_at_verify": 0.253
+    }
+  },
+  "trained_at": "2026-10-16T17:52:28+00:00"
+}

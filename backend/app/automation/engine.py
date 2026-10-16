@@ -41,7 +41,16 @@ def save_state(state: dict) -> None:
     tmp = STATE_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
-    os.replace(tmp, STATE_FILE)
+    # On Windows, antivirus / search indexing can hold a just-written file open for a moment, and then the
+    # swap fails with "Access is denied" (WinError 5). That is temporary, so wait briefly and try again.
+    for attempt in range(10):
+        try:
+            os.replace(tmp, STATE_FILE)
+            return
+        except PermissionError:
+            if attempt == 9:
+                raise
+            time.sleep(0.05 * (attempt + 1))
 
 
 def update_state(name: str, **values) -> dict:
