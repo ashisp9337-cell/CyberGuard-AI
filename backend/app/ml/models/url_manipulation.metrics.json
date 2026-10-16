@@ -1,0 +1,291 @@
+{
+  "model": "HistGradientBoostingClassifier",
+  "features": [
+    "url_len",
+    "path_len",
+    "query_len",
+    "fragment_len",
+    "host_is_ipv4",
+    "host_odd_ip",
+    "host_punycode",
+    "has_port",
+    "odd_port",
+    "userinfo_at",
+    "at_anywhere",
+    "path_depth",
+    "path_double_slash",
+    "dot_segments",
+    "encoded_dot_segments",
+    "pct_count",
+    "pct_ratio",
+    "double_encoding",
+    "encoded_alnum",
+    "encoded_slash_or_dot",
+    "params",
+    "redirect_param_with_url",
+    "embedded_url",
+    "longest_token",
+    "path_digit_ratio",
+    "path_entropy",
+    "query_entropy",
+    "base64_blob",
+    "hex_blob",
+    "exec_download",
+    "archive_download",
+    "script_page",
+    "special_chars",
+    "tilde",
+    "semicolon",
+    "uppercase_ratio",
+    "non_ascii",
+    "subdomain_count",
+    "host_len",
+    "host_dots",
+    "hidden_domain_in_host"
+  ],
+  "data": {
+    "links": 744813,
+    "malicious": 285062,
+    "train_malicious": 199392,
+    "train_benign": 320582,
+    "sources": [
+      "DEPHIDES (PhishTank + CommonCrawl, MIT)",
+      "Malicious URLs dataset (Kaggle sid321axn: ISCX-URL-2016, PhishTank, PhishStorm, malware domain lists)",
+      "PhiUSIIL Phishing URL Dataset (UCI, test only)"
+    ],
+    "normalisation": "scheme and leading www. removed (dataset collection shortcut)"
+  },
+  "thr_alert": 0.9132729123632847,
+  "thr_verify": 0.7627681735424545,
+  "results": {
+    "heldout_sites": {
+      "n": 149683,
+      "positives": 57229,
+      "auc": 0.8949,
+      "avg_precision": 0.8602,
+      "caught_at_alert": 0.3714,
+      "false_alarms_at_alert": 0.0103,
+      "caught_at_verify": 0.5725,
+      "false_alarms_at_verify": 0.0463
+    },
+    "heldout_sites_dephides": {
+      "n": 95125,
+      "positives": 38950,
+      "auc": 0.9581,
+      "avg_precision": 0.9502,
+      "caught_at_alert": 0.4319,
+      "false_alarms_at_alert": 0.0009,
+      "caught_at_verify": 0.6638,
+      "false_alarms_at_verify": 0.0111
+    },
+    "heldout_sites_kaggle": {
+      "n": 54558,
+      "positives": 18279,
+      "auc": 0.7456,
+      "avg_precision": 0.6402,
+      "caught_at_alert": 0.2422,
+      "false_alarms_at_alert": 0.025,
+      "caught_at_verify": 0.3779,
+      "false_alarms_at_verify": 0.1008
+    },
+    "examples_caught": [
+      [
+        "http://71.10.8.138:443/irs.gov/online_form/www.irs.gov/0,,id=96596,00.html",
+        1.0
+      ],
+      [
+        "http://110.42.10.141:1234/4.exe",
+        1.0
+      ],
+      [
+        "http://192.185.218.152/~imsn/libraries/domit/upmiy/logins/m.i.php?rand=13InboxLightaspxn.1774256418&fid.4.1252899642&fid",
+        1.0
+      ],
+      [
+        "http://61.193.163.213/icons/.ws/eBayISAPI.dll?SignIn&co_partnerId=2&pUserId=&siteid=0&pageType=&pa1=&i1=&bshowgif=&Using",
+        1.0
+      ],
+      [
+        "ftp://test:test@202.105.139.162/SignInNowAnswerQuestionSignIn-300073913466-ISAPIdllM2MContactitem300073913466RespondQues",
+        1.0
+      ],
+      [
+        "http://198.245.51.137/%7Emyaccoun/resolution.paypal.com/account/confirm/update/WEBSCR-640-20131004-1/552d1fc6ab23d98eb80",
+        1.0
+      ],
+      [
+        "http://198.245.51.137/%7Emyaccoun/resolution.paypal.com/account/confirm/update/WEBSCR-640-20131004-1/f170120abd6a398748b",
+        1.0
+      ],
+      [
+        "http://198.245.51.137/%7Emyaccoun/resolution.paypal.com/account/confirm/update/WEBSCR-640-20131004-1/1a989f258b6604c7da4",
+        1.0
+      ],
+      [
+        "http://198.245.51.137/%7Emyaccoun/resolution.paypal.com/account/confirm/update/WEBSCR-640-20131004-1/2592f3023ec40c3fdf3",
+        1.0
+      ],
+      [
+        "http://198.245.51.137/%7Emyaccoun/resolution.paypal.com/account/confirm/update/WEBSCR-640-20131004-1/84df880b4d1a60ae880",
+        1.0
+      ],
+      [
+        "http://180.92.173.207:89/pay/www.paypal.com/paypal/cgi-bin/webscrcmd=_login-run/webscrcmd=_account-run/webscr.htm",
+        1.0
+      ],
+      [
+        "http://66.153.104.106:8080/httpsiginin.ebay.com/eBayISAPI.dllSignIn&co_partnerId=2&pUserId=&siteid=0&pageType=&pa1=&i1=&",
+        1.0
+      ],
+      [
+        "http://81.17.16.122:44783/zeros6x.sh",
+        1.0
+      ],
+      [
+        "http://75.51.253.190:81/.paypal.com/webscr.php?cmd=_login-run",
+        1.0
+      ],
+      [
+        "http://180.92.173.207:89/www.paypal.com/paypal/cgi-bin/webscrcmd=_login-run/webscrcmd=_account-run/webscr.htm",
+        1.0
+      ]
+    ],
+    "examples_false_alarms": [
+      [
+        "69.89.31.128/~muirptao/?page_id=41",
+        0.999
+      ],
+      [
+        "69.89.31.128/~muirptao/?page_id=553",
+        0.999
+      ],
+      [
+        "69.89.31.128/~muirptao/?page_id=727",
+        0.999
+      ],
+      [
+        "69.89.31.128/~muirptao/?page_id=2540",
+        0.999
+      ],
+      [
+        "141.2.66.26/en/",
+        0.999
+      ],
+      [
+        "64.246.64.33/merge/tsnform.aspx?c=sportsnetwork&page=nhl/scores/final/W14733.htm",
+        0.998
+      ],
+      [
+        "formidable.typo3.ug/uploads/www.paypal.com.au/au/8a5d361ce3176a7552b63e130b6b7c99/webscr/cmd=_account.php?cmd=_login-pro",
+        0.997
+      ],
+      [
+        "formidable.typo3.ug/uploads/www.paypal.com.au/au/67548dae12f15d7888f05aba18e06641/webscr/cmd=_account.php?cmd=_login-pro",
+        0.997
+      ],
+      [
+        "formidable.typo3.ug/uploads/www.paypal.com.au/au/8e584b7500d0d3f34fcef0dc9a11bc20/webscr/cmd=_account.php?cmd=_login-pro",
+        0.997
+      ],
+      [
+        "208.112.56.188/merchant2/merchant.mvc?Screen=CTGY&Store_Code=BC&Category_Code=CP",
+        0.997
+      ],
+      [
+        "formidable.typo3.ug/uploads/www.paypal.com.au/au/67548dae12f15d7888f05aba18e06641/webscr/cmd=_account.php?cmd=_login-pro",
+        0.997
+      ],
+      [
+        "173.193.93.251/our_people/margaret-a-swimmer",
+        0.997
+      ],
+      [
+        "formidable.typo3.ug/uploads/www.paypal.com.au/au/8a5d361ce3176a7552b63e130b6b7c99/webscr/cmd=_account.php?cmd=_login-pro",
+        0.997
+      ],
+      [
+        "formidable.typo3.ug/uploads/www.paypal.com.au/au/67548dae12f15d7888f05aba18e06641/webscr/cmd=_account.php?cmd=_login-pro",
+        0.997
+      ],
+      [
+        "formidable.typo3.ug/uploads/www.paypal.com.au/au/67548dae12f15d7888f05aba18e06641/webscr/cmd=_account.php?cmd=_login-pro",
+        0.996
+      ]
+    ],
+    "examples_missed": [
+      [
+        "http://ncdi0923k.ml/tpayjl/p/login.jhtm.asp?spm=a230r.1.1.2.1khpp1&j_uid=79&f=top&redirecturl=http%3a%2f%2fs.taobao.com%",
+        0.001
+      ],
+      [
+        "eh.net/book_reviews/culture-misfortune-interpretive-history-textile-unionism-united-states",
+        0.006
+      ],
+      [
+        "'www.p3ptools.com/?category=products\\%23ezp3p'",
+        0.01
+      ],
+      [
+        "http://www.royal-search.com/?q=paypal.com&babsrc=HP_ss&s=web&rlz=0&sd=1&as=0&ac=0",
+        0.012
+      ],
+      [
+        "www.giac.org/paper/gsec/1811/develop-good-security-policies-tips-assessment-enforcement/102142",
+        0.012
+      ],
+      [
+        "eh.net/book_reviews/english-wool-market-c-1230-1327",
+        0.013
+      ],
+      [
+        "http://www.newsvideo99.com/music/x-plane-10-startup-cold-and-dark-boeing-747-400-united.html",
+        0.014
+      ],
+      [
+        "http://khosro.ir/eb1baynotice/eba1y-ac-count-not8ce-s4ecure-suspension-in-tko-notice-tkonumber-act-now70.html",
+        0.015
+      ],
+      [
+        "http://khosro.ir/eb1baynotice/eba1y-ac-count-not8ce-s4ecure-suspension-in-tko-notice-tkonumber-act-now80.html",
+        0.015
+      ],
+      [
+        "www.vtt.fi/virtual/estat/publications/vtt_btuo45-041224.pdf",
+        0.016
+      ]
+    ],
+    "tricks_in_test_links": {
+      "userinfo_at": {
+        "malicious": 24,
+        "benign": 0
+      },
+      "host_odd_ip": {
+        "malicious": 58,
+        "benign": 0
+      },
+      "double_encoding": {
+        "malicious": 25,
+        "benign": 166
+      },
+      "encoded_dot_segments": {
+        "malicious": 54,
+        "benign": 9
+      },
+      "redirect_param_with_url": {
+        "malicious": 48,
+        "benign": 306
+      },
+      "exec_download": {
+        "malicious": 790,
+        "benign": 11
+      }
+    },
+    "independent_phiusiil_phishing_links": {
+      "n": 28456,
+      "caught_at_alert": 0.1917,
+      "caught_at_verify": 0.4245
+    },
+    "note_phiusiil": "PhiUSIIL's legitimate URLs are bare homepages (no path), which this model does not judge, so false alarms are measured on the benign held-out links above."
+  },
+  "trained_at": "2026-10-16T19:29:00+00:00"
+}

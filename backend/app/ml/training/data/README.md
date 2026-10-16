@@ -7,6 +7,8 @@ put them back in this folder to retrain.
 |---|---|---|
 | `tranco_*-1m.csv.zip` | Tranco top-1M list (tranco-list.eu) | `train_url_domain.py` -> `url_domain_model`, `train_lookalike_domain.py` -> `lookalike_domain`, `train_domain_spoofing.py` -> `domain_spoofing` |
 | `phiusiil+phishing+url+dataset.zip` | PhiUSIIL Phishing URL Dataset (UCI) | `train_url_domain.py`, `train_lookalike_domain.py` (test only), `train_domain_spoofing.py` |
+| `dephides/small_dataset/*.txt` (not kept here, 45 MB) | DEPHIDES, github.com/ebubekirbbr/dephides (PhishTank + CommonCrawl, MIT) | `train_url_manipulation.py` -> `url_manipulation` |
+| `malicious_phish.csv` (not kept here, 45 MB) | Kaggle `sid321axn/malicious-urls-dataset` | `train_url_manipulation.py` (second source) |
 | `phishing_email_real.tsv` | real phishing / legitimate emails | `train_phishing.py` -> `phishing_email` |
 | `phishing_text_sample.tsv` | UCI SMS Spam Collection | `train_phishing.py` (default) -> `phishing_pipeline` (fallback text model) |
 | `phishing_sms.tsv`, `phishing_sms_clean_v2.tsv` | SMS phishing corpus | `train_sms_phishing.py` -> `phishing_sms`; impersonation retraining |
@@ -22,6 +24,7 @@ Training-only pip packages (not needed to run the app): `dnstwist` (look-alike d
 ```bash
 python -m app.ml.training.train_lookalike_domain
 python -m app.ml.training.train_domain_spoofing
+python -m app.ml.training.train_url_manipulation --data dephides/small_dataset/train.txt dephides/small_dataset/val.txt dephides/small_dataset/test.txt malicious_phish.csv
 python -m app.ml.training.train_credential_subtopics
 ```
 Every script prints its test results and writes `<model>.joblib` + `<model>.metrics.json` into `app/ml/models/`.

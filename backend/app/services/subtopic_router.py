@@ -105,7 +105,8 @@ DETECTORS = {
        for s in TITLES["credential"]},
     **{("url-security", s): ("malicious_url.analyze_url", "ok",
                              {"lookalike-domain": "shared URL engine + own trained model: lookalike_domain.joblib",
-                              "domain-spoofing": "shared URL engine + own trained model: domain_spoofing.joblib"}.get(
+                              "domain-spoofing": "shared URL engine + own trained model: domain_spoofing.joblib",
+                              "url-manipulation": "shared URL engine + own trained model: url_manipulation.joblib"}.get(
                                  s, "one shared detector for all URL subtopics"))
        for s in TITLES["url-security"]},
     **{("cyber-threat", s): ("cyber_threat.analyze_event_text", "ok", "one shared rule engine for all subtopics")

@@ -382,7 +382,33 @@ def _spoofing(url: str):
             "tricks": a.get("signs") or []}
 
 
-SUBTOPIC_MODELS = {"lookalike-domain": _lookalike, "domain-spoofing": _spoofing}
+def _manipulation(url: str):
+    from app.detectors import url_manipulation
+    a = url_manipulation.assess(url)
+    if a is None or (a.get("noPath") and not a["findings"]):
+        return None                     # no model, or a bare domain with nothing in the link to judge
+    p, level = a["probability"], a["level"]
+    name = "URL manipulation model"
+    label = {"high": f"{name}: the link's structure is manipulated",
+             "medium": f"{name}: unusual link structure - check carefully"}.get(level, f"{name}: link structure looks normal")
+    found = "; ".join(a["findings"]) or "no single trick, but the overall shape of the link"
+    desc = ("The trained URL-manipulation model (gradient-boosted trees on 745k real links: DEPHIDES PhishTank / "
+            "CommonCrawl + the Kaggle malicious-URL set; scheme and 'www.' ignored) "
+            + ("does not judge a bare domain; " if a.get("noPath") else f"rates this link at {p * 100:.0f}% "
+               f"(alert level {a['thrAlert'] * 100:.0f}%, reached by about 1% of normal links); ")
+            + f"what it found: {found}."
+            + (" '@' tricks and disguised IP addresses have no innocent use in a link, so this is always high."
+               if a.get("unambiguousTrick") else ""))
+    ind = {"label": label, "description": desc, "weight": 0, "triggered": level != "low",
+           "severity": "critical" if level == "high" and p >= 0.98 else {"high": "high", "medium": "medium"}.get(level, "low"),
+           "mitre": "T1027", "id": f"IND_{uuid.uuid4().hex[:12]}"}
+    b = url_manipulation.load_model() or {}
+    return {**a, "subtopic": "url-manipulation", "model": "URL manipulation model (DEPHIDES + Kaggle trained)",
+            "indicator": ind, "trainedAt": b.get("trained_at"), "probability": round(p, 4),
+            "domain": split_url(url)["host"], "brandDomain": None, "tricks": a["findings"]}
+
+
+SUBTOPIC_MODELS = {"lookalike-domain": _lookalike, "domain-spoofing": _spoofing, "url-manipulation": _manipulation}
 
 
 def _subtopic_model(url: str, subtopic_id: str | None):
