@@ -8,7 +8,6 @@ GET  /api/email/records/{id}   one analysed email with full component breakdown
 Every analysis is also saved as a normal Scan (so it appears in Scan History,
 Dashboard, Reports) and, when not safe, as a ThreatEvent (Live Monitoring).
 """
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.orm import Session
@@ -17,10 +16,9 @@ from app.core.config import get_settings
 from app.core.dependencies import get_current_user
 from app.core.rate_limit import limiter
 from app.db.database import get_db
-from app.db.models import User, Scan, DetectedIndicatorRow, RecommendationRow, ThreatEvent, EmailRecord
+from app.db.models import User, EmailRecord
 from app.services.email_ingest import process_email
-from app.services import response_playbook, notifier, notifier
-from app.email_pipeline.store import record_email
+from app.services import notifier
 from app.email_pipeline import quarantine
 from pydantic import BaseModel
 
@@ -63,7 +61,7 @@ async def analyze(
     scan, rec, result = process_email(db, user.id, raw, source=source, sender=sender or "", subject=subject or "")
     db.commit()
     db.refresh(scan)
-    if result["riskScore"] >= notifier.get_settings().ALERT_MIN_SCORE:
+    if result["riskScore"] >= notifier.ALERT_FLOOR:              # the user's alert sensitivity decides
         background_tasks.add_task(notifier.alert_for_scan, scan.id)
     return {"scanId": scan.id, "emailRecordId": rec.id, **result}
 
@@ -119,10 +117,29 @@ def quarantine_action(record_id: str, body: QuarantineAction, request: Request,
     r = db.query(EmailRecord).filter(EmailRecord.id == record_id, EmailRecord.user_id == user.id).first()
     if not r:
         raise HTTPException(status_code=404, detail={"error": {"code": "NOT_FOUND", "message": "Email record not found."}})
-    try:
-        quarantine.change(r, body.action, by=user.email, note=body.note)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail={"error": {"code": "INVALID_ACTION", "message": str(exc)}})
+    if body.action not in quarantine.ACTIONS:
+        raise HTTPException(status_code=422, detail={"error": {"code": "INVALID_ACTION",
+                                                               "message": f"action must be one of {', '.join(quarantine.ACTIONS)}"}})
+    mailbox = ((r.details or {}).get("quarantine") or {}).get("mailbox") or {}
+    if body.action == "release" and mailbox.get("status") == "moved":
+        # The email really sits in the Gmail quarantine label: move it back to the inbox FIRST, so the screen
+        # never says "released" while the email is still held in Gmail.
+        from app.automation import mailbox_quarantine
+        try:
+            info = mailbox_quarantine.release(mailbox.get("messageId") or r.message_id, mailbox.get("newUid", ""))
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail={"error": {"code": "MAILBOX_MOVE_FAILED",
+                                "message": f"Could not move the email back to your Gmail inbox: {str(exc)[:200]}"}})
+        mailbox_quarantine.record_move(r, info, action="mailbox-released", by=user.email)
+    elif body.action == "quarantine" and mailbox.get("status") == "released":
+        from app.automation import mailbox_quarantine
+        try:
+            info = mailbox_quarantine.requarantine(mailbox.get("messageId") or r.message_id)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail={"error": {"code": "MAILBOX_MOVE_FAILED",
+                                "message": f"Could not move the email to the Gmail quarantine label: {str(exc)[:200]}"}})
+        mailbox_quarantine.record_move(r, info, action="mailbox-quarantined", by=user.email)
+    quarantine.change(r, body.action, by=user.email, note=body.note)
     from app.services import audit
     audit.log(db, action="quarantine.action", user=user, request=request, target=(r.subject or "")[:200],
               detail={"emailRecordId": r.id, "action": body.action, "from": r.from_address})

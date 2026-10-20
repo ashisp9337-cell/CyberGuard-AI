@@ -60,7 +60,7 @@ export function AlertChannelsCard() {
     <Card className="lg:col-span-2">
       <CardHeader
         title="Alert Channels"
-        subtitle={status ? `Threats scoring ${status.minScore}+ are sent automatically to every channel that is set up` : "Where CYBERGUARD sends high-risk alerts"}
+        subtitle="Threats at your alert sensitivity (Alerts card above; balanced = risk 71+) are sent automatically to every channel that is set up"
         icon={<ICONS.bell size={16} />}
       />
       <CardBody>

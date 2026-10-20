@@ -84,6 +84,156 @@ KNOWN_BRANDS = [
     "chase", "wells fargo", "hdfc", "sbi", "icici",
 ]
 LINK_RE = re.compile(r"https?://\S+|www\.\S+")
+# Bare domains ("indiapost-track.cyou", "netflix-billing-help.com/pay") -- SMS scams rarely write http://.
+# Only common / abused endings, a letter in the name, and not part of an e-mail address.
+BARE_DOMAIN_RE = re.compile(
+    r"(?<![@\w.-])((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:com|in|net|org|co|info|biz|top|xyz|cyou|click|shop|"
+    r"online|site|live|club|vip|icu|app|link|me|io|help|support|store|tech|website|space|fun|buzz|rest|cfd|sbs|"
+    r"lol|mobi|ws|cc|ly|gd|to|tk|ml|ga|cf|gq|pw|cn|ru|su|id|pk|bd|ng)(?:/[^\s]*)?)(?![\w-])", re.I)
+
+
+ABUSED_TLDS = {"top", "xyz", "cyou", "click", "shop", "online", "site", "live", "club", "vip", "icu", "link", "help",
+               "support", "store", "website", "space", "fun", "buzz", "rest", "cfd", "sbs", "lol", "tk", "ml", "ga", "cf",
+               "gq", "pw", "su", "ws"}
+RISKY_HOST_WORDS = re.compile(r"(login|log-in|signin|verify|secure|update|account|billing|kyc|support|help|track|"
+                              r"redeliver|delivery|refund|reward|claim|bonus|wallet|unlock|appeal|confirm)", re.I)
+
+
+def risky_bare_domains(text: str) -> list[str]:
+    """Bare domains that LOOK risky on their own: abused ending, a hyphenated name, or phishing words in the name.
+    (A plain shop / short-link domain in a marketing SMS is not counted as a suspicious link by itself.)"""
+    out = []
+    for url in bare_domains(text):
+        host = url[7:].split("/")[0].lower()
+        labels = host.split(".")
+        if labels[-1] in ABUSED_TLDS or "-" in ".".join(labels[:-1]) or RISKY_HOST_WORDS.search(".".join(labels[:-1])):
+            out.append(url)
+    return out
+
+
+_OTP_GIVEN = re.compile(r"\b(otp|one[- ]time (password|code)|verification code|security code|code)\b[^.\n]{0,60}"
+                        r"\b(is|:)\s*\d{4,8}\b|\b\d{4,8}\b[^.\n]{0,15}\bis (your|the)( [a-z0-9&-]+){0,2} (otp|code|one[- ]time|verification code)", re.I)
+_DONT_SHARE = re.compile(r"\b(do not|don'?t|never) (share|disclose|tell)", re.I)
+_OTP_ASK = re.compile(r"\b(share|send|forward|tell|reply( with)?|enter|give)\b[^.\n]{0,25}\b(otp|code|pin)\b", re.I)
+
+
+def otp_notice(text: str) -> bool:
+    """A real one-time-code SMS GIVES you a code and says 'do not share it'; a scam ASKS you to share one.
+    True for a code delivery with that warning, no request and no link."""
+    t = text or ""
+    if not (_OTP_GIVEN.search(t) and _DONT_SHARE.search(t)) or LINK_RE.search(t) or risky_bare_domains(t):
+        return False
+    asks = [m for m in _OTP_ASK.finditer(t) if not _DONT_SHARE.search(t[max(0, m.start() - 12):m.end()])]
+    return not asks
+
+
+def bare_domains(text: str) -> list[str]:
+    """Untrusted bare domains in the text, as http:// links (trusted sites such as swiggy.com are left out)."""
+    from app.detectors import trusted_domains
+    out = []
+    for m in BARE_DOMAIN_RE.finditer(text or ""):
+        d = m.group(1).rstrip(".,;:)")
+        host = d.split("/")[0].lower()
+        if not re.search(r"[a-z]", host.split(".")[0]) or host.count(".") > 5:
+            continue
+        url = "http://" + d
+        if not trusted_domains.is_trusted(url) and url not in out:
+            out.append(url)
+    return out
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Scam PATTERNS (added 19 Oct, Phase 2 audit). Each pattern needs a COMBINATION of signals -- one word alone never
+# fires -- and sets a minimum score (the model-weighted blend could otherwise keep a textbook scam below 51).
+# ---------------------------------------------------------------------------------------------------------
+_P = lambda rx: re.compile(rx, re.I)  # noqa: E731
+_PARCEL = (_P(r"\b(parcel|package|shipment|consignment|courier|delivery|india ?post|speed ?post|fedex|dhl|blue ?dart|dtdc)\b"),
+           _P(r"(on hold|held|undeliver|could ?n[o']?t be delivered|incomplete address|address (is )?incomplete|failed (delivery|attempt)|"
+              r"re-?deliver|reschedul|customs|returned to sender|pending (delivery|payment))"),
+           _P(r"\b(pay|fee|charge|charges|duty|rs\.?|inr|₹|\$)\b|₹"))
+_INVEST = (_P(r"\b(crypto|bitcoin|btc|usdt|forex|trading|trade|invest(ment|ing)?|profits?|returns?|earn(ed|ing)?|income)\b"),
+           _P(r"\b(dm|inbox|telegram|whatsapp|message (him|her|me)|contact (him|her|me)|add (him|her|me))\b|(?<![\w.])@[a-z0-9_]{4,}"),
+           _P(r"(\$ ?\d|rs\.? ?\d|₹ ?\d|\d+ ?(k|lakh|lac)\b|per day|daily|weekly|guarantee|100 ?%|legit|risk[- ]free|"
+              r"double your)"))
+_TASK = (_P(r"\b(like|subscribe|rate|review|watch)\b[^.\n]{0,40}\b(videos?|products?|posts?|hotels?|apps?)\b"),
+         _P(r"\b(earn|income|salary|paid|commission)\b"),
+         _P(r"(registration|joining|activation|security) (fee|charge|amount|deposit)|\bfee\b"))
+_APPEAL = (_P(r"\b(account|page|channel|profile|handle)\b"),
+           _P(r"\b(deleted|disabled|deactivated|suspended|removed|banned|terminated|restricted)\b"),
+           _P(r"(copyright|violat|community (guidelines|standards)|infring|appeal|verify (your )?(account|identity)|blue ?tick|"
+              r"verification badge)"))
+_BILLING = (_P(r"\b(payment|billing|card|subscription|membership|order)\b"),
+            _P(r"(failed|declined|could ?n[o']?t (be )?process|unable to process|on hold|expired|unpaid|will be (cancel|suspend))"),
+            _P(r"\b(update|verify|confirm|re-?enter|add)\b[^.\n]{0,30}\b(billing|payment|card|details|method|information)\b"))
+_EMERG = (_P(r"(stuck|stranded|accident|in (the )?hospital|lost (my )?(phone|wallet|passport|bag)|card (is |got |was )?blocked|"
+             r"robbed|police station|emergency|urgent(ly)? need)"),
+          _P(r"\b(send|transfer|pay|need|lend)\b[^.\n]{0,40}(rs\.? ?\d|₹ ?\d|\$ ?\d|money|amount|gpay|google pay|phonepe|paytm|"
+             r"upi|account)"),
+          _P(r"\b(it'?s|this is|i am|i'm)\s+[a-z]+|\b(mum|mom|dad|bhai|bro|aunty|uncle|sis)\b|my (phone|number)"))
+_BEC = (_P(r"\b(ceo|cfo|md|managing director|director|chairman|president|boss|founder|partner)\b"),
+        _P(r"\b(wire|transfer|payment|remit|gift ?cards?|deposit|funds|invoice)\b"),
+        _P(r"(strictly confidential|keep (this|it) confidential|confidential (deal|matter|transaction|acquisition)|"
+           r"tell (no ?one|nobody)|do ?n[o']?t (tell|call|discuss|inform|share)|keep (this|it) (between us|quiet|secret)|"
+           r"be discreet|i'?m in a meeting|can'?t (talk|take calls))"))
+SCAM_PATTERNS = [
+    # (name, regexes that must ALL match, needs a link?, floor, description)
+    ("Parcel held - pay a fee", _PARCEL, False, 71,
+     "A parcel 'on hold' that you must pay a small fee to release: the most common delivery scam (India Post, FedEx, DHL ...)."),
+    ("Investment / crypto profit pitch", _INVEST, False, 71,
+     "Promises trading or crypto profits and pushes you to a private chat (Telegram / WhatsApp / DM): investment fraud."),
+    ("Paid task scam", _TASK, False, 71,
+     "Pays you to like / rate / review things but asks for a joining fee first: the 'task' scam."),
+    ("Fake account-violation appeal", _APPEAL, True, 71,
+     "Says your account will be deleted / was flagged and sends you to an outside link to 'appeal' or 'verify': credential phishing."),
+    ("Billing update request", _BILLING, True, 71,
+     "Payment 'failed' and you must update card / billing details through a link: card-detail phishing."),
+    ("Emergency money request", _EMERG, False, 71,
+     "Someone you know is 'stuck' / in trouble and needs money sent right now: the emergency scam (verify by calling them on "
+     "their usual number)."),
+    ("Secret payment request from an executive", _BEC, False, 75,
+     "A senior person asks for a payment and to keep it secret: CEO fraud / business e-mail compromise."),
+]
+
+
+# which patterns belong to which detector (a pattern raising an unrelated detector would mislabel the threat --
+# e.g. CEO fraud must stay "Business Email Compromise", not become "Brand impersonation")
+PATTERNS_FOR = {
+    "brand": ("Parcel held - pay a fee", "Fake account-violation appeal", "Billing update request", "Paid task scam"),
+    "financial": ("Investment / crypto profit pitch", "Billing update request"),
+    "management": ("Secret payment request from an executive",),
+    "teacher": ("Paid task scam",),
+    "contact": ("Emergency money request",),
+    "government": (),
+}
+
+
+def scam_patterns(text: str, topic: str | None = None) -> tuple[list[dict], int]:
+    """-> (indicators of the scam patterns that match, minimum score they justify). topic limits the patterns to the
+    ones that belong to that impersonation detector (None = all, for the SMS / social / message checks)."""
+    low = (text or "").lower()
+    if not low.strip():
+        return [], 0
+    has_link = bool(LINK_RE.search(text) or bare_domains(text))
+    # all parts of a pattern must appear CLOSE TOGETHER (one ~300-character window), so a long newsletter that
+    # mentions "director" in one paragraph and "funds" in another never matches
+    windows = [low[i:i + 300] for i in range(0, max(len(low) - 150, 1), 150)] or [low]
+    inds, floor = [], 0
+    allowed = PATTERNS_FOR.get(topic) if topic else None
+    for name, rxs, needs_link, fl, desc in SCAM_PATTERNS:
+        if allowed is not None and name not in allowed:
+            continue
+        hits = None
+        for w in windows:
+            found = [rx.search(w) for rx in rxs]
+            if all(found):
+                hits = found
+                break
+        if hits and (has_link or not needs_link):
+            ev = "; ".join(f'"{h.group(0).strip()[:30]}"' for h in hits)
+            inds.append({"label": f"Scam pattern: {name}", "description": f"{desc} Evidence: {ev}.", "severity": "critical",
+                         "weight": 0, "triggered": True})
+            floor = max(floor, fl)
+    return inds, floor
 GENERIC_GREETING_RE = re.compile(r"^\s*(dear (customer|user|member|sir/madam)|hello,)", re.I)
 MISSPELLINGS = ["verifiy", "recieve", "acount", "securty", "confimation", "immediatly", "informations", "kindly", "beneficery"]
 
@@ -100,12 +250,12 @@ def _rule_indicators(text: str, sender: str | None, reply_to: str | None = None)
         "Message pressures the recipient to act immediately ('act now', 'account will be suspended').",
         "high", 18)
 
-    cred_hit = any(w in lower for w in CREDENTIAL_WORDS)
+    cred_hit = any(w in lower for w in CREDENTIAL_WORDS) and not otp_notice(text)
     add(cred_hit, "Credential request",
         "Content asks the recipient for a password, OTP, PIN, or similar sensitive credential.",
         "critical", 25)
 
-    links = LINK_RE.findall(text)
+    links = LINK_RE.findall(text) + risky_bare_domains(text)
     add(len(links) > 0, "Suspicious embedded link",
         f"Message contains {len(links)} embedded link(s); verify destination before clicking.",
         "high", 20 if links else 0)
@@ -151,7 +301,7 @@ def _link_destination_indicator(text: str, subtopic_id: str | None) -> dict | No
     found in the email body, and fold the worst result into this scan.
     Checks at most 3 links to keep scan time bounded.
     """
-    links = LINK_RE.findall(text)[:3]
+    links = (LINK_RE.findall(text) + bare_domains(text))[:3]
     if not links:
         return None
     from app.detectors import malicious_url  # local import avoids a module-load cycle
@@ -182,6 +332,8 @@ def analyze_text(text: str, sender: str | None = None, subtopic_title: str = "Ph
     link_indicator = _link_destination_indicator(text, subtopic_id) if text and scan_links else None
     if link_indicator:
         rule_indicators.append(link_indicator)
+    pattern_inds, pattern_floor = scam_patterns(text) if text else ([], 0)
+    rule_indicators.extend(pattern_inds)
 
     rule_score = sum(i["weight"] for i in rule_indicators if i["triggered"])
 
@@ -222,6 +374,11 @@ def analyze_text(text: str, sender: str | None = None, subtopic_title: str = "Ph
         model_note = f" A trained classifier corroborated this with a phishing probability of {proba*100:.0f}%." if model_used else " (Trained model unavailable — indicators are rule-based only.)"
         explanation = f"Detected {len(triggered)} indicator(s), most notably: {names}.{model_note}"
 
+    if pattern_floor and text:
+        blended = max(blended, pattern_floor)
+        confidence = max(confidence, 80)
+    elif text and otp_notice(text):
+        blended = min(blended, 20)           # a genuine code delivery ("... is 482913. Do not share it")
     for ind in rule_indicators:
         ind["id"] = f"IND_{uuid.uuid4().hex[:12]}"
 

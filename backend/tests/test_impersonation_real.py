@@ -1,7 +1,6 @@
 """Retrained impersonation models: sender-domain matching, the brand 'held until you pay' rule, and wiring."""
 import os
 
-import joblib
 import pytest
 
 from app.detectors import brand_impersonation as B

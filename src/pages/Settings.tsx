@@ -8,6 +8,7 @@ import { listContacts, createContact, deleteContact, type KnownContact } from "@
 import { ICONS } from "@/lib/icons";
 import { AlertChannelsCard } from "@/components/settings/AlertChannelsCard";
 import { AutomationCard } from "@/components/settings/AutomationCard";
+import { FileQuarantineCard } from "@/components/settings/FileQuarantineCard";
 import { ActivityLogCard } from "@/components/settings/ActivityLogCard";
 
 function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
@@ -35,15 +36,9 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const [autoScan, setAutoScan] = useState(true);
-  const [realtimeMonitoring, setRealtimeMonitoring] = useState(true);
   const [sensitivity, setSensitivity] = useState("balanced");
   const [criticalAlerts, setCriticalAlerts] = useState(true);
-  const [warningAlerts, setWarningAlerts] = useState(true);
   const [dashboardNotifs, setDashboardNotifs] = useState(false);
-  const [siemEndpoint, setSiemEndpoint] = useState("");
-  const [threatFeedUrl, setThreatFeedUrl] = useState("");
-  const [webhookUrl, setWebhookUrl] = useState("");
 
   const [contacts, setContacts] = useState<KnownContact[]>([]);
   const [contactsLoading, setContactsLoading] = useState(true);
@@ -97,16 +92,9 @@ export default function Settings() {
   useEffect(() => {
     getSettings()
       .then((s) => {
-        setSensitivity(s.sensitivity);
+        setSensitivity(({ low: "conservative", high: "aggressive" } as Record<string, string>)[s.sensitivity] ?? s.sensitivity);
         setCriticalAlerts(s.notificationsEnabled);
         setDashboardNotifs(s.emailNotifications);
-        const integ = s.integrationSettings ?? {};
-        if (typeof integ.autoScan === "boolean") setAutoScan(integ.autoScan);
-        if (typeof integ.realtimeMonitoring === "boolean") setRealtimeMonitoring(integ.realtimeMonitoring);
-        if (typeof integ.warningAlerts === "boolean") setWarningAlerts(integ.warningAlerts);
-        if (typeof integ.siemEndpoint === "string") setSiemEndpoint(integ.siemEndpoint);
-        if (typeof integ.threatFeedUrl === "string") setThreatFeedUrl(integ.threatFeedUrl);
-        if (typeof integ.webhookUrl === "string") setWebhookUrl(integ.webhookUrl);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -119,7 +107,6 @@ export default function Settings() {
         sensitivity,
         notificationsEnabled: criticalAlerts,
         emailNotifications: dashboardNotifs,
-        integrationSettings: { autoScan, realtimeMonitoring, warningAlerts, siemEndpoint, threatFeedUrl, webhookUrl },
       });
       notify({ variant: "success", title: "Settings saved" });
     } catch (err) {
@@ -131,54 +118,39 @@ export default function Settings() {
 
   return (
     <div>
-      <PageHeader title="Settings" subtitle="Configure detection sensitivity, notifications, and platform integrations." />
+      <PageHeader title="Settings" subtitle="Alerts, automatic protection, alert channels, activity log and trusted contacts." />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <Card>
-          <CardHeader title="Security Settings" icon={<ICONS.shieldCheck size={16} />} />
+        <Card className="lg:col-span-2">
+          <CardHeader title="Alerts" subtitle="When CyberGuard tells you (and your alert channels) about a threat. Detection itself is never weakened."
+                      icon={<ICONS.bell size={16} />} />
           <CardBody>
-            <Toggle checked={autoScan} onChange={setAutoScan} label="Automatic Scanning" hint="Automatically scan new uploads and inbound content" />
-            <Toggle checked={realtimeMonitoring} onChange={setRealtimeMonitoring} label="Real-Time Monitoring" hint="Continuously monitor network and system activity" />
-            <div className="pt-4">
-              <label htmlFor="sensitivity" className="block text-sm font-medium text-white mb-1.5">AI Sensitivity</label>
+            <div className="pb-4">
+              <label htmlFor="sensitivity" className="block text-sm font-medium text-white mb-1.5">Alert sensitivity</label>
               <select
                 id="sensitivity"
                 value={sensitivity}
                 onChange={(e) => setSensitivity(e.target.value)}
                 className="w-full rounded-lg bg-elevated border border-strong px-3 py-2.5 text-sm text-white focus-ring"
               >
-                <option value="conservative">Conservative — fewer false positives</option>
-                <option value="balanced">Balanced — recommended</option>
-                <option value="aggressive">Aggressive — maximum detection</option>
+                <option value="conservative">Conservative — alert only for critical threats (risk 86+)</option>
+                <option value="balanced">Balanced — alert for high risk and critical (risk 71+), recommended</option>
+                <option value="aggressive">Aggressive — also alert for suspicious items (risk 51+)</option>
               </select>
+              <p className="text-xs text-slate-500 mt-1.5">Every scan is still analysed and saved the same way; this only decides which ones send an alert.</p>
             </div>
-          </CardBody>
-        </Card>
-
-        <Card>
-          <CardHeader title="Notification Settings" icon={<ICONS.bell size={16} />} />
-          <CardBody>
-            <Toggle checked={criticalAlerts} onChange={setCriticalAlerts} label="Critical Alerts" hint="Immediate notification for critical-severity threats" />
-            <Toggle checked={warningAlerts} onChange={setWarningAlerts} label="Warning Alerts" hint="Notify for medium and high severity findings" />
-            <Toggle checked={dashboardNotifs} onChange={setDashboardNotifs} label="Email Notifications" hint="Also send alerts by email (when email is set up below)" />
+            <Toggle checked={criticalAlerts} onChange={setCriticalAlerts} label="Send alerts" hint="Telegram / email / WhatsApp alerts for threats at the level above" />
+            <Toggle checked={dashboardNotifs} onChange={setDashboardNotifs} label="Email alerts" hint="Also send alerts by email (when email is set up below)" />
           </CardBody>
         </Card>
 
         <AutomationCard />
 
+        <FileQuarantineCard />
+
         <AlertChannelsCard />
 
         <ActivityLogCard />
-
-        <Card className="lg:col-span-2">
-          <CardHeader title="Integration Settings" subtitle="Connect external tools and threat intelligence feeds" icon={<ICONS.server size={16} />} />
-          <CardBody className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <TextInput label="API Key" placeholder="sk-••••••••••••••••" type="password" hint="Never persisted server-side — configure provider API keys via backend/.env instead" disabled />
-            <TextInput label="SIEM Integration Endpoint" placeholder="https://siem.yourcompany.com/ingest" value={siemEndpoint} onChange={(e) => setSiemEndpoint(e.target.value)} />
-            <TextInput label="Threat Intelligence Feed URL" placeholder="https://intel.cyberguard.ai/feed" value={threatFeedUrl} onChange={(e) => setThreatFeedUrl(e.target.value)} />
-            <TextInput label="External Security Tool Webhook" placeholder="https://hooks.yourcompany.com/security" value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} />
-          </CardBody>
-        </Card>
 
         <Card className="lg:col-span-2">
           <CardHeader

@@ -198,3 +198,58 @@ def test_startup_check_flags_unsafe_settings():
     good = Settings(JWT_SECRET="x" * 64, CORS_ORIGINS="https://cyberguard.example", ENVIRONMENT="production",
                     COOKIE_SECURE=True, EXPOSE_DEV_CODES=False, DEBUG=False)
     assert security_problems(good) == []
+
+
+# ---- 19 Oct audit fixes -------------------------------------------------------------------------
+def test_link_check_connects_only_to_the_address_it_checked(monkeypatch):
+    """DNS rebinding: the domain is resolved ONCE, checked, and the connection goes to exactly that address."""
+    import socket
+
+    from app.services import safe_fetch
+    lookups, connects = [], []
+    monkeypatch.setattr(socket, "getaddrinfo",
+                        lambda host, *a, **k: lookups.append(host) or [(socket.AF_INET, 1, 6, "", ("93.184.216.34", 0))])
+
+    def fake_get(url, ip):
+        connects.append((url, ip))
+        return 200, None, "text/html", b"<html><title>ok</title></html>"
+    monkeypatch.setattr(safe_fetch, "_get_pinned", fake_get)
+    r = safe_fetch.fetch("https://rebind.example.test/login")
+    assert r["status"] == "ok" and connects == [("https://rebind.example.test/login", "93.184.216.34")]
+    assert lookups == ["rebind.example.test"]                         # one lookup, no second chance to lie
+
+
+def test_link_check_refuses_a_domain_that_points_anywhere_private(monkeypatch):
+    import socket
+
+    from app.services import safe_fetch
+    monkeypatch.setattr(socket, "getaddrinfo", lambda host, *a, **k: [
+        (socket.AF_INET, 1, 6, "", ("93.184.216.34", 0)), (socket.AF_INET, 1, 6, "", ("10.0.0.5", 0))])
+    monkeypatch.setattr(safe_fetch, "_get_pinned", lambda url, ip: pytest.fail("must not connect"))
+    r = safe_fetch.fetch("http://mixed.example.test/")
+    assert r["status"] == "refused" and "10.0.0.5" in r["reason"]
+
+
+def test_no_hidden_bidirectional_characters_in_source():
+    """Trojan-source: right-to-left / invisible control characters must be written as escapes, never raw."""
+    import pathlib
+    bad = {"‪", "‫", "‬", "‭", "‮", "⁦", "⁧", "⁨", "⁩"}
+    root = pathlib.Path(__file__).resolve().parents[1] / "app"
+    hits = [str(p) for p in root.rglob("*.py") if bad & set(p.read_text(encoding="utf-8"))]
+    assert hits == []
+
+
+def test_windows_event_xml_with_entities_is_refused():
+    from app.automation import windows_logons
+    bomb = ('<!DOCTYPE l [<!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">]>'
+            '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">&b;</Event>')
+    with pytest.raises(ValueError):
+        windows_logons.parse_events(bomb)
+
+
+def test_database_must_be_postgresql():
+    from app.core.config import database_problem
+    assert database_problem("postgresql+psycopg2://u:p@localhost:5432/cyberguard") == ""
+    assert "PostgreSQL" in database_problem("sqlite:///./cyberguard.db")
+    assert "not set" in database_problem("")
+    assert "PostgreSQL" in database_problem("mysql+pymysql://u:p@localhost/db")

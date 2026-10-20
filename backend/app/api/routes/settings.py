@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import HTTPException, APIRouter, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -43,7 +43,11 @@ def update_settings(body: UpdateSettingsRequest, request: Request, user: User = 
         s = UserSettings(user_id=user.id)
         db.add(s)
     if body.sensitivity is not None:
-        s.sensitivity = body.sensitivity
+        level = {"low": "conservative", "high": "aggressive"}.get(body.sensitivity, body.sensitivity)  # old names
+        if level not in ("conservative", "balanced", "aggressive"):
+            raise HTTPException(status_code=422, detail={"error": {"code": "INVALID_SENSITIVITY",
+                                "message": "sensitivity must be conservative, balanced or aggressive"}})
+        s.sensitivity = level
     if body.notificationsEnabled is not None:
         s.notifications_enabled = body.notificationsEnabled
     if body.emailNotifications is not None:

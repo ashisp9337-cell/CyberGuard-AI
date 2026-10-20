@@ -83,15 +83,17 @@ DETECTORS = {
     ("phishing", "email-analysis"): ("email_pipeline.analyze_email", "ok", ""),
     ("phishing", "sms-analysis"): ("phishing.analyze_text (phishing_sms.joblib)", "ok", ""),
     ("phishing", "social-media-analysis"): ("phishing.analyze_text (phishing_social.joblib)", "ok", ""),
-    ("phishing", "qr-phishing"): ("qr_analyzer.analyze_qr", "ok", ""),
-    ("phishing", "fraudulent-website"): ("malicious_url.analyze_url", "ok", ""),
-    ("phishing", "malicious-url"): ("malicious_url.analyze_url", "ok", ""),
-    ("deepfake", "image-analysis"): ("deepfake.analyze_media", "ok", "metadata-only; no trained model"),
+    ("phishing", "qr-phishing"): ("qr_analyzer.analyze_qr", "ok",
+                                  "QR decoder + payload checks (UPI, Wi-Fi, SMS ...) + every trained URL model"),
+    ("phishing", "fraudulent-website"): ("malicious_url.analyze_url", "ok", "URL engine + every trained URL model"),
+    ("phishing", "malicious-url"): ("malicious_url.analyze_url", "ok", "URL engine + every trained URL model"),
+    ("deepfake", "image-analysis"): ("deepfake.analyze_media", "ok",
+                                    "provenance check + AI-image model + face-swap model; the strongest decides"),
     ("deepfake", "video-analysis"): ("deepfake.analyze_media", "ok", "returns 'model unavailable' (no trained video model)"),
     ("deepfake", "video-call"): ("deepfake.analyze_media (video path)", "ok",
                                  "no dedicated video-call detector; the existing video path is used"),
     ("deepfake", "ai-multimedia"): ("deepfake.analyze_media (modality path)", "ok",
-                                    "no dedicated AI-generation detector; the modality detector is used"),
+                                    "images: provenance check + AI-image model + face-swap model; videos: no model yet"),
     ("deepfake", "audio-analysis"): ("-", "unavailable", "no audio/voice detector exists in the repository"),
     **{("impersonation", s): (fn, "ok", "") for s, fn in {
         "government-impersonation": "government_impersonation.analyze_government_impersonation",
@@ -100,7 +102,7 @@ DETECTORS = {
         "financial-impersonation": "financial_impersonation.analyze_financial_impersonation",
         "brand-impersonation": "brand_impersonation.analyze_brand_impersonation",
         "contact-impersonation": "known_contact_impersonation.analyze_known_contact_message",
-        "generic": "impersonation.analyze_identity (existing generic fallback)"}.items()},
+        "generic": "category unclear: every impersonation detector runs, the strongest verdict is shown"}.items()},
     **{("credential", s): ("account_takeover.analyze_event", "ok", f"own trained model for this subtopic: cred_{s}.joblib")
        for s in TITLES["credential"]},
     **{("url-security", s): ("malicious_url.analyze_url", "ok",
@@ -342,7 +344,68 @@ ENTITY_TO_SUBTOPIC = {"government": "government-impersonation", "bank": "financi
 RELATION_RE = re.compile(
     r"\b(this is|it'?s|i am|i'm|your)\s+(own\s+)?(mom|mum|mother|dad|father|papa|mummy|bro|brother|sister|sis|"
     r"son|daughter|beta|uncle|aunt|aunty|auntie|cousin|bhai|didi|friend|buddy|wife|husband)\b", re.I)
-NEW_NUMBER_RE = re.compile(r"\b(my (new|other) number|new number|changed my number|lost my phone|phone is broken)\b", re.I)
+NEW_NUMBER_RE = re.compile(
+    r"\b(my (new|other|temporary|temp) (phone |mobile )?(number|no\.?)|new (phone |mobile )?number|temporary number|"
+    r"changed my number|changed (from )?provider|delete (my|the) old (number|one)|save (this|my new|my) number|"
+    r"(lost|broke|broken|dropped|smashed|damaged|cracked) my phone|phone (is |got )?(broken|dead|damaged|stolen)|"
+    r"(texting|messaging|writing) (you )?(from|off|on) (a |my )?friends?'?s? (old )?phone|using a friends?'?s? (old )?phone)\b", re.I)
+# the "Hi Mum / Hi Dad / it's me" opening of known-contact scams: a relationship greeting without a name
+RELATION_GREETING_RE = re.compile(
+    r"^\W*(hi|hey|hello|hii+|helo|dear)\W+(mum|mom|mam|mummy|mama|ma|dad|daddy|papa|pa|mother|father|son|beta|bro|"
+    r"brother|sis|sister|aunty|auntie|aunt|uncle|grandma|granny|nan|nana|grandpa)\b|^\W*(hey,? )?it'?s me\b", re.I)
+
+ROUTER_MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ml", "models",
+                                 "impersonation_router.joblib")
+ROUTER_WEIGHT = 3.0          # a 100%-sure model adds as much as a sender-name claim (3.0); rules still explain why
+_router_cache: dict = {}
+
+
+def _load_router_model():
+    """Trained router (train_impersonation_router.py) or None. Reloads when the file changes."""
+    if not os.path.exists(ROUTER_MODEL_PATH):
+        return None
+    mtime = os.path.getmtime(ROUTER_MODEL_PATH)
+    if _router_cache.get("mtime") != mtime:
+        try:
+            import joblib
+            b = joblib.load(ROUTER_MODEL_PATH)
+            _router_cache.update(mtime=mtime, model=b["model"] if b.get("kind") == "cyberguard-impersonation-router" else None)
+        except Exception:
+            _router_cache.update(mtime=mtime, model=None)
+    return _router_cache["model"]
+
+
+_router_model = _load_router_model          # replaced in tests / by the training script
+
+
+def _message_text(text: str) -> str:
+    """What a person reads: for a raw e-mail the sender name, subject and body - never the mail-server headers
+    (they are full of 'google' / 'microsoft' and would look like a brand claim)."""
+    if not is_email_text(text):
+        return text
+    try:
+        from app.email_pipeline.parser import parse_email
+        ev = parse_email(text)
+        return "\n".join(filter(None, [ev.from_display_name, ev.subject, ev.body_text]))
+    except Exception:
+        return text
+
+
+def router_probabilities(text: str) -> dict[str, float]:
+    model = _router_model()
+    if model is None or not text.strip():
+        return {}
+    try:
+        probs = model.predict_proba([text[:5000]])[0]
+    except Exception:
+        return {}
+    return {c: float(p) for c, p in zip(model.classes_, probs)}
+# Messages to students rarely name a title ("Dear Student, your hall ticket is blocked ...") -- the academic
+# context itself is the claim of being the institution.
+ACADEMIC_CONTEXT_RE = re.compile(
+    r"\b(dear (student|students|candidate|candidates|parent|parents)|hall ?ticket|admit ?card|semester|exam(ination)? fee|"
+    r"tuition fee|college fee|university fee|scholarship|admission|marksheet|mark sheet|internal marks|attendance shortage|"
+    r"convocation|degree certificate|migration certificate|re-?evaluation|backlog|supplementary exam)\b", re.I)
 SELF_ID_RE = re.compile(r"\b(this is|i am|i'm|we are|on behalf of|from (the )?|team|dear [a-z ]{2,30} (customer|user|student|employee|member))", re.I)
 
 
@@ -389,12 +452,24 @@ def _classify_impersonation(text, extra, db, user_id) -> Classification:
             vote("management-impersonation", weight, f"executive title ({orgs.EXECUTIVE_TITLES.search(zone).group(0)})")
         if orgs.ACADEMIC_TITLES.search(zone):
             vote("teacher-impersonation", weight, f"academic role ({orgs.ACADEMIC_TITLES.search(zone).group(0)})")
+        elif ACADEMIC_CONTEXT_RE.search(zone):
+            vote("teacher-impersonation", weight, f"written as the institution to a student "
+                                                  f"({ACADEMIC_CONTEXT_RE.search(zone).group(0)})")
         if RELATION_RE.search(zone):
             vote("contact-impersonation", weight, f"personal relationship claim ({RELATION_RE.search(zone).group(0)})")
 
     # Sender domain of an official organisation (e.g. @incometax.gov.in) or a saved contact.
     if NEW_NUMBER_RE.search(text):
-        vote("contact-impersonation", 2.0, "says it is writing from a new/changed number")
+        vote("contact-impersonation", 2.0, f"says it is writing from a new/changed number "
+                                           f"({NEW_NUMBER_RE.search(text).group(0)})")
+    if RELATION_GREETING_RE.search(text):
+        vote("contact-impersonation", 1.5, f"opens like a family member or friend "
+                                           f"({RELATION_GREETING_RE.search(text).group(0).strip()})")
+    # Trained router: reads the whole message and adds its probability for every subtopic.
+    probs = router_probabilities(_message_text(text))
+    for sub, p in probs.items():
+        if sub in TITLES["impersonation"] and p >= 0.15:
+            vote(sub, ROUTER_WEIGHT * p, f"router model: {p:.0%} {TITLES['impersonation'][sub].lower()}")
     claimed = str(extra.get("claimedSenderName") or "").strip()
     if claimed and db is not None and user_id:
         try:

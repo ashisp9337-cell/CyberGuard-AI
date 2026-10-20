@@ -9,7 +9,7 @@ os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(max(1, (os.cpu_count() or 2) // 
 import time
 import uuid
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -18,9 +18,9 @@ from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.config import get_settings, security_problems
-from app.db.database import Base, engine
+from app.db.database import engine
 from app.db import models  # noqa: F401 — ensures models are registered before create_all
-from app.api.routes import auth, analysis, scans, dashboard, events, reports, settings as settings_route, threat_intelligence, monitoring, chat, contacts, email as email_route, alerts as alerts_route, incidents as incidents_route, automation as automation_route, iocs as iocs_route, audit as audit_route, mitre as mitre_route
+from app.api.routes import auth, analysis, scans, dashboard, events, reports, settings as settings_route, threat_intelligence, monitoring, chat, contacts, email as email_route, alerts as alerts_route, incidents as incidents_route, automation as automation_route, iocs as iocs_route, audit as audit_route, mitre as mitre_route, quarantine as quarantine_route
 
 settings = get_settings()
 
@@ -35,10 +35,25 @@ if _problems:
     for _p in _problems:
         logger.warning("SECURITY: %s", _p)
 
-# For local/dev SQLite convenience only — production should use Alembic
-# migrations (see alembic/ and README "Database migrations").
-if settings.DATABASE_URL.startswith("sqlite"):
-    Base.metadata.create_all(bind=engine)
+def _schema_status() -> str:
+    """'' if the PostgreSQL schema is at the newest Alembic migration, else a warning (the tables are created and
+    upgraded ONLY by Alembic: `alembic upgrade head`)."""
+    try:
+        from alembic.config import Config
+        from alembic.runtime.migration import MigrationContext
+        from alembic.script import ScriptDirectory
+        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        cfg = Config(os.path.join(here, "alembic.ini"))
+        cfg.set_main_option("script_location", os.path.join(here, "alembic"))
+        heads = set(ScriptDirectory.from_config(cfg).get_heads())
+        with engine.connect() as conn:
+            current = set(MigrationContext.configure(conn).get_current_heads())
+        if current != heads:
+            return (f"database schema is not up to date (database: {', '.join(sorted(current)) or 'empty'}, "
+                    f"code: {', '.join(sorted(heads))}). Stop the backend and run:  alembic upgrade head")
+    except Exception as exc:  # noqa: BLE001 -- report, never crash on the check itself
+        return f"could not check the database schema ({type(exc).__name__}: {str(exc)[:200]})"
+    return ""
 
 from app.core.rate_limit import limiter  # shared with routes (per-route limits)
 
@@ -46,8 +61,21 @@ from app.core.rate_limit import limiter  # shared with routes (per-route limits)
 async def lifespan(_app):
     # Automatic protection: background watchers (Gmail, sign-ins, Windows logons, Downloads). Off in tests.
     from app.automation import manager
+    _schema = _schema_status()
+    if _schema:
+        logger.error("DATABASE: %s", _schema)
     if settings.AUTOMATION_ENABLED:
         manager.start_all()
+    if settings.WARM_UP_MODELS:
+        import threading
+
+        def _warm():
+            from app.services.analysis_service import warm_up
+            t0 = time.time()
+            done = warm_up()
+            slow = {k: v for k, v in done.items() if not isinstance(v, int) or v > 200}
+            logger.info("models loaded in the background in %.1f s%s", time.time() - t0, f" ({slow})" if slow else "")
+        threading.Thread(target=_warm, name="model-warm-up", daemon=True).start()
     yield
     manager.stop_all()
 
@@ -134,6 +162,7 @@ app.include_router(automation_route.router)
 app.include_router(iocs_route.router)
 app.include_router(audit_route.router)
 app.include_router(mitre_route.router)
+app.include_router(quarantine_route.router)
 
 
 

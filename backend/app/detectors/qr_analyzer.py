@@ -2,8 +2,9 @@
 QR code phishing analysis, end to end:
 
     image --decode--> payload text --classify--> kind (url / upi / wifi / sms / ...)
-          --analyse--> URL engine (rules + domain-name model + live checks)
-                       or payload rules
+          --analyse--> URL engine (rules + domain-name model + live checks + EVERY trained URL model:
+                       look-alike, domain spoofing, URL manipulation -- the strongest one decides)
+                       or payload rules (UPI payment fields checked against NPCI's link format, Wi-Fi, SMS ...)
           --merge----> QR-specific indicators --> one uniform result dict
 
 If nothing can be decoded, QRDecodeError is raised. A QR image that cannot be
@@ -14,7 +15,7 @@ from __future__ import annotations
 import uuid
 
 from app.detectors import malicious_url, phishing
-from app.detectors.base import build_result, build_unverified_result, build_unverified_result
+from app.detectors.base import build_result, build_unverified_result
 from app.detectors.qr_decoder import decode_qr_image, MAX_CODES
 from app.detectors.qr_payload import (
     Payload, classify_payload, extra_recommendations, payload_indicators, url_context_indicators,

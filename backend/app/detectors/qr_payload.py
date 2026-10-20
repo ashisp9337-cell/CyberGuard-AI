@@ -133,6 +133,72 @@ def classify_payload(raw: str) -> Payload:
     return Payload("other_scheme", text)
 
 
+# ---- UPI (NPCI "upi://pay?pa=...&pn=...&am=...&tn=..." deep links) ------------------------------------
+# Handles (the part after @) of the UPI apps and banks in use in India (NPCI list of PSP handles).
+UPI_HANDLES = {
+    # PhonePe, Google Pay, Paytm, Amazon Pay, BHIM, WhatsApp, CRED, MobiKwik, Freecharge, Navi, Jupiter, Slice ...
+    "ybl", "ibl", "axl", "okaxis", "okhdfcbank", "okicici", "oksbi", "paytm", "ptyes", "ptaxis", "pthdfc", "ptsbi",
+    "apl", "yapl", "rapl", "upi", "waicici", "waaxis", "wahdfcbank", "wasbi", "axisb", "ikwik", "freecharge",
+    "naviaxis", "jupiteraxis", "fam", "superyes", "slc", "goaxb", "tapicici", "timecosmos", "kmbl", "dlb",
+    # banks
+    "sbi", "hdfcbank", "icici", "axisbank", "kotak", "kkbk", "yesbank", "yesbankltd", "pnb", "barodampay",
+    "cnrb", "boi", "unionbank", "unionbankofindia", "idbi", "idfcbank", "idfcfirst", "indus", "federal", "fbl",
+    "rbl", "aubank", "citi", "hsbc", "sc", "dbs", "uco", "centralbank", "cboi", "iob", "indianbank", "allbank",
+    "mahb", "psb", "jkb", "kbl", "kvb", "tjsb", "equitas", "ujjivan", "esaf", "csbpay", "dcb", "karurvysyabank",
+    "lvb", "postbank", "airtel", "jio", "abfspay", "pockets", "icicipay", "hdfcbankjd", "rmhdfcbank",
+}
+UPI_SCAM_WORDS = re.compile(
+    r"\b(refund|cash ?back|reward|prize|lottery|lucky|winner|won|bonus|gift|kyc|verify|verification|"
+    r"customer ?care|helpline|support|receive|credit(ed)?|claim|electricity|bill update|disconnect|"
+    r"income ?tax|tax refund|police|court|fine|penalty|army|loan|job|registration fee|deposit back)\b", re.I)
+UPI_ORG_WORDS = re.compile(
+    r"\b(bank|sbi|hdfc|icici|axis|kotak|paytm|phonepe|google ?pay|amazon|flipkart|irctc|govt|government|"
+    r"ministry|uidai|aadhaar|income ?tax|electricity|bescom|msedcl|tneb|police|rbi|npci|lic|epfo|customer care)\b", re.I)
+VPA_RE = re.compile(r"^[a-z0-9._\-]{2,256}@[a-z][a-z0-9.\-]{1,64}$", re.I)
+
+
+def upi_indicators(f: dict) -> list[dict]:
+    """Checks on the fields of a UPI payment link (pa = payee UPI ID, pn = payee name, am = amount,
+    tn = note, mc = merchant category code, cu = currency)."""
+    vpa = (f.get("pa") or "").strip().lower()
+    pn, tn = (f.get("pn") or "").strip(), (f.get("tn") or "").strip()
+    handle = vpa.rsplit("@", 1)[-1] if "@" in vpa else ""
+    local = vpa.rsplit("@", 1)[0] if "@" in vpa else vpa
+    try:
+        amount = float(f.get("am") or 0)
+    except ValueError:
+        amount = 0.0
+    words_pn = UPI_SCAM_WORDS.findall(pn)
+    words_tn = UPI_SCAM_WORDS.findall(tn)
+    scam_words = sorted({w[0].lower() if isinstance(w, tuple) else w.lower() for w in words_pn + words_tn})
+    org_name = bool(UPI_ORG_WORDS.search(pn))
+    merchant = bool(f.get("mc")) and f.get("mc") not in ("0000", "0")
+    personal_id = bool(re.fullmatch(r"\+?\d{10,12}", local)) or not merchant
+    return [
+        _ind(not vpa, "No UPI ID in the payment code",
+             "A real UPI payment code always names the receiving UPI ID (pa=...).", "high", 30),
+        _ind(bool(vpa) and not VPA_RE.match(vpa), "Malformed UPI ID",
+             f"'{vpa[:60]}' is not a valid UPI ID (name@bank).", "high", 30),
+        _ind(bool(handle) and VPA_RE.match(vpa) is not None and handle not in UPI_HANDLES,
+             "Unrecognised UPI app / bank handle",
+             f"The UPI ID ends in '@{handle}', which is not one of the UPI apps or banks on the NPCI list.",
+             "medium", 20),
+        _ind(bool(scam_words), "Scam words in the payee name or note",
+             f"The payment text says: {', '.join(scam_words)}. Refunds, prizes, cashback and KYC never require "
+             "you to scan and pay - this is the most common UPI QR scam.", "high", 35),
+        _ind(org_name and not merchant, "Payee name claims to be an organisation, but it is not a registered merchant",
+             f"The name '{pn[:60]}' looks like a bank / company / government office, but the code has no merchant "
+             "category code (mc), which registered businesses' UPI QR codes carry. It is probably a personal account.",
+             "high", 30),
+        _ind(amount >= 10_000, "Large pre-filled amount",
+             f"The code asks for ₹{amount:,.0f}.", "medium", 15 if amount < 50_000 else 25),
+        _ind(bool(f.get("cu")) and f.get("cu", "").upper() != "INR", "Currency is not INR",
+             f"UPI payments are in INR; this code says '{f.get('cu')}'.", "medium", 15),
+        _ind(personal_id and bool(re.fullmatch(r"\+?\d{10,12}", local)), "Payment goes to a mobile-number UPI ID",
+             f"The money goes to a personal UPI ID based on a phone number ({local[:4]}******).", "low", 5),
+    ]
+
+
 def _ind(triggered: bool, label: str, description: str, severity: str, weight: int) -> dict:
     return {"label": label, "description": description, "severity": severity,
             "weight": weight, "triggered": bool(triggered)}
@@ -178,14 +244,14 @@ def payload_indicators(p: Payload) -> list[dict]:
             _ind(True, "QR starts a UPI payment",
                  "Scanning this code leads to a payment screen. Money is only ever received without scanning or entering a PIN; "
                  "a stranger asking you to scan to 'receive' money is a common scam.",
-                 "medium", 30),
+                 "low", 15),
             _ind(action == "collect", "UPI collect request",
                  "The code requests money from the scanner (a collect request) instead of paying a merchant.", "high", 40),
             _ind(bool(f.get("am")), "Payment amount is pre-filled",
                  f"The code fixes the amount ({f.get('am')}). Check it before approving.", "low", 8),
             _ind(not f.get("pn"), "No payee name in the code",
                  "The payment request has no payee name, so you cannot see who receives the money.", "low", 6),
-        ]
+        ] + upi_indicators(f)
     elif k == "wifi":
         encryption = (f.get("T") or "nopass").upper()
         out += [
@@ -241,4 +307,4 @@ def extra_recommendations(p: Payload) -> list[str]:
         "otpauth": ["Do not scan authenticator codes from emails, chats or posters."],
         "dangerous_scheme": ["Do not open this code with any app."],
     }
-    return tips.get(p.kind, [])
+    return tips.get(p.kind, [])

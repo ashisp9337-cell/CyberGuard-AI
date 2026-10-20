@@ -4,19 +4,41 @@ the six CyberGuard modules and their subtopics defined in the frontend's
 src/data/modules.ts. This is the single place that decides "what kind of
 analysis does this input need" — detectors themselves stay generic.
 """
-from app.detectors import phishing, malicious_url, deepfake, impersonation, account_takeover, cyber_threat, email_parser, qr_analyzer, known_contact_impersonation, financial_impersonation, brand_impersonation, teacher_university_impersonation, senior_management_impersonation, government_impersonation, financial_impersonation, known_contact_impersonation, known_contact_impersonation
+from app.detectors import phishing, malicious_url, deepfake, impersonation, account_takeover, cyber_threat, email_parser, qr_analyzer, brand_impersonation, teacher_university_impersonation, senior_management_impersonation, government_impersonation, financial_impersonation, known_contact_impersonation
 
 
-def _try_decode_qr(file_path: str) -> str | None:
-    try:
-        from pyzbar.pyzbar import decode
-        from PIL import Image
-        results = decode(Image.open(file_path))
-        if results:
-            return results[0].data.decode("utf-8", errors="ignore")
-    except Exception:
-        return None
-    return None
+def _impersonation_category_unknown(text: str, extra: dict, subtopic_title: str) -> dict:
+    """The message's claimed identity is unclear: run EVERY impersonation detector (five trained models, the
+    known-contact scam-script check and the general rule set) and report the strongest verdict, so an unclear category never turns a scam
+    into "safe"."""
+    checks = [
+        ("Government official", lambda: government_impersonation.analyze_government_impersonation(text, extra, subtopic_title)),
+        ("Senior management", lambda: senior_management_impersonation.analyze_senior_management_impersonation(text, extra, subtopic_title)),
+        ("Teacher / university", lambda: teacher_university_impersonation.analyze_teacher_university_impersonation(text, extra, subtopic_title)),
+        ("Financial institution", lambda: financial_impersonation.analyze_financial_impersonation(text, extra, subtopic_title)),
+        ("Brand", lambda: brand_impersonation.analyze_brand_impersonation(text, extra, subtopic_title)),
+        ("Friend / relative / known contact",
+         lambda: known_contact_impersonation.analyze_known_contact_message(text, extra, subtopic_title)),
+        ("General impersonation rules", lambda: impersonation.analyze_identity(text, extra, subtopic_title)),
+    ]
+    results = []
+    for name, fn in checks:
+        try:
+            results.append((name, fn()))
+        except Exception:          # one broken detector never breaks the scan
+            continue
+    if not results:
+        return impersonation.analyze_identity(text, extra, subtopic_title)
+    name, best = max(results, key=lambda nr: nr[1].get("riskScore", 0))
+    best = dict(best)
+    others = ", ".join(f"{n} {r.get('riskScore', 0)}" for n, r in results if n != name)
+    best["analysisEngine"] = f"Impersonation (category unclear) - strongest of {len(results)} detectors: {name}; " \
+                             + str(best.get("analysisEngine", ""))
+    best["explanation"] = (f"The sender's claimed identity was unclear, so every impersonation detector checked the "
+                           f"message; the {name.lower()} detector scored it highest. Other scores: {others}. "
+                           + str(best.get("explanation", "")))
+    best["checkedDetectors"] = [{"detector": n, "riskScore": r.get("riskScore", 0)} for n, r in results]
+    return best
 
 
 def run_scan(
@@ -105,7 +127,7 @@ def run_scan(
                 text_input or "", extra_field_values, subtopic_title,
             )
         else:
-            result = impersonation.analyze_identity(text_input or "", extra_field_values, subtopic_title)
+            result = _impersonation_category_unknown(text_input or "", extra_field_values, subtopic_title)
         return result | {"_target": target, "_target_type": "identity"}
 
     if module_id == "credential":
@@ -130,3 +152,51 @@ def run_scan(
         "recommendations": [], "explanation": f"Unknown module '{module_id}'.",
         "_target": "unknown", "_target_type": "text",
     }
+
+
+def warm_up() -> dict:
+    """Load every text / URL / login model into memory once (they otherwise load on their first scan, which made the
+    first scan of each kind slow). Runs in a background thread at startup; uses tiny local inputs, makes NO network
+    calls and saves nothing. Returns {what: milliseconds or error}."""
+    import time
+    from app.detectors import malicious_url
+    from app.services import subtopic_router
+    out = {}
+    sms = "Your parcel is on hold, pay the redelivery fee now"     # no link: warm-up must never go online
+    log = "2026-10-01 09:00:00 sign-in success user=a ip=49.37.12.1 country=IN"
+    jobs = [("phishing", s_, sms) for s_ in ("sms-analysis", "social-media-analysis")] + \
+           [("impersonation", s_, sms) for s_ in ("government-impersonation", "management-impersonation",
+                                                   "teacher-impersonation", "financial-impersonation",
+                                                   "brand-impersonation", "contact-impersonation")] + \
+           [("credential", s_, log) for s_ in ("failed-logins", "password-spraying", "unusual-location", "unknown-device",
+                                                "session-activity", "behavior-changes")]
+    for mod, sub, text in jobs:
+        t = time.perf_counter()
+        try:
+            run_scan(module_id=mod, subtopic_id=sub, subtopic_title=sub, text_input=text, url_input=None,
+                     file_path=None, file_name=None, extra_field_values={})
+            out[sub] = round((time.perf_counter() - t) * 1000)
+        except Exception as exc:  # noqa: BLE001 -- warm-up must never break startup
+            out[sub] = f"error: {type(exc).__name__}"
+    for sub in ("malicious-url", "domain-spoofing", "lookalike-domain", "url-manipulation"):
+        t = time.perf_counter()
+        try:
+            malicious_url.analyze_url("http://example-login-verify.top/a", sub, subtopic_id=sub, network=False)
+            out[sub] = round((time.perf_counter() - t) * 1000)
+        except Exception as exc:  # noqa: BLE001
+            out[sub] = f"error: {type(exc).__name__}"
+    t = time.perf_counter()
+    try:
+        subtopic_router.router_probabilities(sms)
+        out["auto-detect router"] = round((time.perf_counter() - t) * 1000)
+    except Exception as exc:  # noqa: BLE001
+        out["auto-detect router"] = f"error: {type(exc).__name__}"
+    try:
+        from app.email_pipeline import analyze_email
+        t = time.perf_counter()
+        analyze_email(b"From: a@example.com\r\nSubject: test\r\n\r\nhello", network=False)
+        out["email-analysis"] = round((time.perf_counter() - t) * 1000)
+    except Exception as exc:  # noqa: BLE001
+        out["email-analysis"] = f"error: {type(exc).__name__}"
+    return out
+

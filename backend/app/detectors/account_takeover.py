@@ -122,6 +122,8 @@ def parse_log(text: str) -> dict:
     lines = [ln for ln in re.split(r"[\r\n]+", text) if ln.strip()]
 
     fails, users, srcs, invalid = 0, defaultdict(set), set(), 0
+    fails_by_ip = defaultdict(int)          # source IP -> failed attempts from it
+    fail_times = defaultdict(list)          # account -> timestamps of its failed attempts
     invalid_users = defaultdict(set)    # source -> usernames that do not exist on the system
     seq = []      # "F" / "S" in order
     logins = []   # (timestamp, (lat, lon), place)
@@ -144,6 +146,12 @@ def parse_log(text: str) -> dict:
                         invalid_users[src].add(u)
                     break
             srcs.update(ips[:1])
+            if ips:
+                fails_by_ip[ips[0]] += 1
+            fts = _parse_ts(ln)
+            if fts is not None:
+                acct = next((m.group(1).strip("'\"[]()").lower() for rx in USER_RES for m in [rx.search(ln)] if m), "?")
+                fail_times[acct].append(fts)
         elif is_ok:
             seq.append("S")
         ts = _parse_ts(ln)
@@ -179,6 +187,19 @@ def parse_log(text: str) -> dict:
         real = max(len(v - invalid_users[src]) for src, v in users.items() if len(v) == best)
         ev["distinctFailedUsers"] = f"{best} different usernames failed from one source ({real} of them real accounts)"
     out["sources"] = len(srcs)
+    out["failIps"] = sorted(ip for ip, n in fails_by_ip.items() if n >= 3)
+    # fastest burst: most failures on ONE account inside any 10-minute window (automated guessing is fast)
+    burst = 0
+    for times in fail_times.values():
+        times.sort()
+        j = 0
+        for i in range(len(times)):
+            while (times[i] - times[j]).total_seconds() > 600:
+                j += 1
+            burst = max(burst, i - j + 1)
+    out["burstFailures"] = burst
+    if burst >= 8:
+        ev["burstFailures"] = f"{burst} failed attempts on one account within 10 minutes"
     out["invalidUserAttempts"] = invalid
     if invalid:
         ev["invalidUserAttempts"] = f"{invalid} attempt(s) on accounts that do not exist"
@@ -295,6 +316,30 @@ def model_assessment(text: str):
             "flagged": sum(r["flagged"] for r in scored), "elevatedCount": sum(r["elevated"] for r in scored),
             "level": "high" if best["flagged"] else "medium" if best["elevated"] else "low",
             "withHistory": sum(r["historyPercentile"] is not None for r in scored)}
+
+
+def new_place_logins(text: str, min_history: int = 3) -> list[dict]:
+    """Successful logins from a country / network (ASN) the account never used in its earlier successful logins.
+    Only accounts with at least `min_history` earlier successful logins are judged (no history = no baseline)."""
+    seen: dict[str, dict] = {}
+    out = []
+    for e in events_from_log(text):
+        if not e.success:
+            continue
+        h = seen.setdefault(e.user, {"n": 0, "countries": set(), "asns": set()})
+        if h["n"] >= min_history:
+            new_country = bool(e.country and h["countries"] and e.country not in h["countries"])
+            new_asn = bool(e.asn and h["asns"] and e.asn not in h["asns"])
+            if new_country or new_asn:
+                out.append({"user": e.user, "ip": e.ip, "country": e.country, "asn": e.asn, "newCountry": new_country,
+                            "newNetwork": new_asn, "history": h["n"],
+                            "knownCountries": sorted(h["countries"]), "knownAsns": sorted(h["asns"])})
+        h["n"] += 1
+        if e.country:
+            h["countries"].add(e.country)
+        if e.asn:
+            h["asns"].add(e.asn)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -486,7 +531,11 @@ def analyze_event(fields: dict, subtopic_title: str = "Credential Theft & Accoun
             "newCredentialCreated", "massDownload", "successAfterFailures"]
     s = {k: gb(k) or parsed[k] for k in keys}
     spraying = parsed["distinctFailedUsers"] >= 5 or gb("passwordSpraying")
-    brute = failed >= 15 and not spraying
+    burst = parsed.get("burstFailures", 0)
+    brute = (failed >= 15 or burst >= 10) and not spraying
+    new_places = new_place_logins(text) if text else []
+    new_country = [p for p in new_places if p["newCountry"]]
+    new_network = [p for p in new_places if p["newNetwork"] and not p["newCountry"]]
 
     indicators = []
 
@@ -500,6 +549,25 @@ def analyze_event(fields: dict, subtopic_title: str = "Credential Theft & Accoun
         f"{failed} failed authentication attempt(s) recorded.", "high", 20, "T1110", "failedAttempts")
     add(brute, "Brute-force pattern", "Failed-attempt volume fits an automated brute-force attack on one account.",
         "critical", 25, "T1110.001")
+    add(burst >= 8 and not spraying, "Rapid burst of failed logins",
+        f"{burst} failed attempts on one account within 10 minutes -- faster than a person mistyping a password, "
+        "typical of an automated password-guessing tool.", "high", 30, "T1110.001", "burstFailures")
+    if new_country:
+        p = new_country[-1]
+        add(True, "First login from a new country",
+            f"'{p['user']}' signed in from {p['country']}" + (f" ({p['ip']})" if p['ip'] else "") +
+            f" after {p['history']} earlier successful logins only from {', '.join(p['knownCountries'])}. "
+            "Risk-based authentication asks the user to verify such a login (a genuine trip abroad looks the same, "
+            "so this alone means 'verify', not 'alert').", "high", 51, "T1078")
+        if p["newNetwork"]:
+            add(True, "Login from a never-seen network",
+                f"Network AS{p['asn']} was never used by this account before (known: "
+                f"{', '.join('AS' + a for a in p['knownAsns'][:4])}).", "medium", 4, "T1078")
+    elif new_network:
+        p = new_network[-1]
+        add(True, "Login from a never-seen network",
+            f"'{p['user']}' signed in from network AS{p['asn']}" + (f" ({p['ip']})" if p['ip'] else "") +
+            f", never used in {p['history']} earlier logins (same country).", "low", 15, "T1078")
     add(spraying, "Password spraying",
         f"{parsed['distinctFailedUsers']} different usernames failed from one source -- low-and-slow spraying across accounts.",
         "critical", 40, "T1110.003", "distinctFailedUsers")
@@ -534,7 +602,8 @@ def analyze_event(fields: dict, subtopic_title: str = "Credential Theft & Accoun
     score = sum(i["weight"] for i in indicators if i["triggered"])
     triggered = [i for i in indicators if i["triggered"]]
 
-    anomalous = s["impossibleTravel"] or s["newDevice"] or s["unusualLocation"] or s["anonymizingNetwork"] or s["successAfterFailures"]
+    anomalous = (s["impossibleTravel"] or s["newDevice"] or s["unusualLocation"] or s["anonymizingNetwork"]
+                 or s["successAfterFailures"] or bool(new_country))
     cred_change = s["mfaChanged"] or s["passwordResetRecent"] or s["recoveryChanged"]
     persistence = s["forwardingRule"] or s["newCredentialCreated"] or s["privilegeEscalation"]
     state = {"failedAttempts>=5": failed >= 5, "successAfterFailures": s["successAfterFailures"],
@@ -626,7 +695,19 @@ def analyze_event(fields: dict, subtopic_title: str = "Credential Theft & Accoun
                     + (" + RBA Risk Model (RBA-dataset trained)" if ml else ""),
         threat_type=subtopic_title, explanation=explanation,
     )
-    result["parsedSignals"] = {k: v for k, v in parsed.items() if k != "evidence" and v}
+    result["parsedSignals"] = {k: v for k, v in parsed.items() if k not in ("evidence", "failIps") and v}
+    # Attacker sources ONLY (used for the "seen before" IOC memory): IPs with repeated failures, logins from a
+    # new country / network, and the login a trained model flagged. The account's normal IPs are never listed,
+    # so a pasted log can never turn the user's own home IP into a "known bad" indicator.
+    attacker = set(parsed.get("failIps") or [])
+    attacker.update(p["ip"] for p in new_country + new_network if p["ip"])
+    if sub and sub["level"] in ("high", "medium") and sub["event"].ip:
+        attacker.add(sub["event"].ip)
+    if ml and ml["level"] in ("high", "medium") and ml["event"].ip:
+        attacker.add(ml["event"].ip)
+    result["attackerIps"] = sorted(attacker)
+    # every IP seen in the log: only used to LOOK UP "seen before" (an attacker IP from an earlier scan)
+    result["observedIps"] = sorted({e.ip for e in events_from_log(text)} - {None})[:500] if text else []
     if sub:
         result["subtopicModel"] = {"subtopic": subtopic_id, "model": SUBTOPIC_INFO[subtopic_id][0],
                                    "probability": round(sub["probability"], 4), "level": sub["level"],

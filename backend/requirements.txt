@@ -38,3 +38,4 @@ tldextract==5.4.0   # registered-domain parsing with the bundled (offline) Publi
 rapidfuzz>=3.9          # fast edit distance for the look-alike domain model
 # training only (not needed to run the app): pip install dnstwist wordfreq
 #   -> app/ml/training/train_lookalike_domain.py, train_domain_spoofing.py
+onnxruntime>=1.18      # runs the Colab-trained deepfake model on CPU

@@ -132,7 +132,7 @@ def test_medium_level(model_file):
 
 def test_only_on_its_own_page_and_not_on_real_sites(model_file):
     model_file(0.97)
-    assert "subtopicModel" not in scan("https://paypal-login-secure.com/verify", sub="malicious-url")
+    assert "subtopicModel" not in scan("https://paypal-login-secure.com/verify", sub="redirect-analysis")
     assert "subtopicModel" not in scan("https://www.paypal.com/")
     assert "subtopicModel" not in scan("https://rewildingargentina.org")      # no brand name inside
 

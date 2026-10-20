@@ -17,26 +17,25 @@ print("Database:", re.sub(r"://([^:/@]+):[^@]*@", r"://\1:****@", url))
 engine = create_engine(url)
 try:
     with engine.connect() as conn:
-        if url.startswith("postgres"):
-            print("Connected  :", conn.execute(text("select version()")).scalar().split(",")[0])
-            print("DB name    :", conn.execute(text("select current_database()")).scalar())
-            print("Total size :", conn.execute(text("select pg_size_pretty(pg_database_size(current_database()))")).scalar())
-        else:
-            print("Connected  : SQLite")
+        print("Connected  :", conn.execute(text("select version()")).scalar().split(",")[0])
+        print("DB name    :", conn.execute(text("select current_database()")).scalar())
+        print("Total size :", conn.execute(text("select pg_size_pretty(pg_database_size(current_database()))")).scalar())
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+        latest = ", ".join(ScriptDirectory.from_config(Config("alembic.ini")).get_heads())
         try:
-            print("Migration  :", conn.execute(text("select version_num from alembic_version")).scalar(),
-                  "(latest is e5a1c9d7f3b2)")
+            current = conn.execute(text("select version_num from alembic_version")).scalar()
+            print("Migration  :", current, "(up to date)" if current == latest else
+                  f"(NOT up to date - latest is {latest}: run  alembic upgrade head)")
         except Exception:
-            print("Migration  : (no alembic_version table)")
+            print("Migration  : (no alembic_version table - run  alembic upgrade head)")
 
         tables = sorted(inspect(conn).get_table_names())
         print(f"\n{'table':24s} {'rows':>8s} {'size':>10s}  newest entry")
         print("-" * 70)
         for t in tables:
             rows = conn.execute(text(f'select count(*) from "{t}"')).scalar()
-            size = ""
-            if url.startswith("postgres"):
-                size = conn.execute(text("select pg_size_pretty(pg_total_relation_size(:t))"), {"t": t}).scalar()
+            size = conn.execute(text("select pg_size_pretty(pg_total_relation_size(:t))"), {"t": t}).scalar()
             cols = {c["name"] for c in inspect(conn).get_columns(t)}
             newest = ""
             for c in ("created_at", "timestamp", "last_seen", "updated_at", "sent_at"):

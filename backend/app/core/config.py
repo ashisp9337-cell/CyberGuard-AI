@@ -12,10 +12,10 @@ class Settings(BaseSettings):
 
     ENVIRONMENT: str = "development"
 
-    # Database — defaults to a local SQLite file so the project runs with
-    # zero external setup. Point DATABASE_URL at Postgres for production:
-    #   postgresql+psycopg2://user:pass@host:5432/cyberguard
-    DATABASE_URL: str = "sqlite:///./cyberguard.db"
+    # Database: PostgreSQL ONLY (the one and final database of CyberGuard). Set in backend/.env:
+    #   DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/cyberguard
+    # The schema is created and upgraded by Alembic:  alembic upgrade head
+    DATABASE_URL: str = ""
 
     JWT_SECRET: str = "dev-secret-change-me-in-production"
     JWT_ALGORITHM: str = "HS256"
@@ -65,6 +65,16 @@ class Settings(BaseSettings):
     # Auto-quarantine: emails scoring this or more are held in quarantine automatically.
     AUTO_QUARANTINE: bool = True
     QUARANTINE_MIN_SCORE: int = 71
+    # Real, REVERSIBLE quarantine (nothing is ever deleted; every move is logged and can be undone):
+    #  * Gmail: a dangerous inbox email is MOVED to the label below (out of the inbox, not deleted);
+    #    "Release" moves it back to the inbox.
+    MAILBOX_QUARANTINE: bool = True
+    MAILBOX_QUARANTINE_LABEL: str = "CyberGuard-Quarantine"
+    #  * Downloads: a dangerous new download is MOVED to QUARANTINE_DIR (renamed so it cannot be run by a
+    #    double-click); "Restore" puts it back where it was.
+    FILE_QUARANTINE: bool = True
+    FILE_QUARANTINE_MIN_SCORE: int = 71
+    QUARANTINE_DIR: str = "./quarantine"
 
     # ---- One-time codes (OTP) for signup and login ----
     OTP_TTL_MINUTES: int = 10        # a code stops working after this
@@ -75,6 +85,8 @@ class Settings(BaseSettings):
     # URL scans: follow redirects and read the final page (read-only, no JavaScript, never local
     # addresses -- see app/services/safe_fetch.py). Set false to never contact scanned sites.
     LIVE_PAGE_CHECKS: bool = True
+    # Load every model into memory in the background when the backend starts (no slow first scan).
+    WARM_UP_MODELS: bool = True
 
     # ---- Automatic protection (background watchers, see app/automation/) ----
     AUTOMATION_ENABLED: bool = True        # master switch; each watcher also has an on/off in Settings
@@ -126,6 +138,17 @@ class Settings(BaseSettings):
 
 
 WEAK_JWT_SECRETS = {"dev-secret-change-me-in-production", "change-me-to-a-long-random-string", "secret", "changeme", ""}
+
+
+def database_problem(url: str) -> str:
+    """'' if url is a PostgreSQL URL, else the reason CyberGuard refuses to start."""
+    if not url:
+        return ("DATABASE_URL is not set. CyberGuard uses PostgreSQL only: add "
+                "DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/cyberguard to backend/.env")
+    if not url.startswith(("postgresql://", "postgresql+psycopg2://", "postgresql+psycopg://")):
+        return (f"DATABASE_URL must be a PostgreSQL URL (postgresql+psycopg2://...); got a "
+                f"'{url.split(':', 1)[0]}' URL. CyberGuard uses PostgreSQL only.")
+    return ""
 
 
 def security_problems(s: "Settings") -> list[str]:

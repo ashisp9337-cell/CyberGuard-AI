@@ -268,3 +268,43 @@ def test_test_alert_endpoint_reports_all_three_channels(admin_client):
     auth_client = admin_client
     res = auth_client.post("/api/alerts/test").json()
     assert {r["channel"] for r in res["results"]} == {"telegram", "email", "whatsapp"}
+
+
+# ---- Settings -> Alert sensitivity really decides which scans alert -----------------------------
+def _scan_with_score(client, score):
+    import uuid as _uuid
+
+    from app.db.database import SessionLocal
+    from app.db.models import User
+    from app.services import scan_store
+    from app.services.risk_scoring import classify_risk as classify
+    db = SessionLocal()
+    try:
+        uid = db.query(User).filter(User.email == client._test_email).first().id
+        cls = classify(score)
+        scan = scan_store.save_result(db, user_id=uid, module_id="url-security", subtopic_id="general",
+                                      subtopic_title="URL", target=f"http://x-{_uuid.uuid4().hex[:6]}.example/",
+                                      target_type="url", result={"riskScore": score, "classification": cls,
+                                      "severity": "high", "confidenceScore": 90, "analysisEngine": "test",
+                                      "threatType": "test", "indicators": [], "recommendations": [],
+                                      "explanation": "test"})
+        db.commit()
+        return scan.id
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("level,score,expect", [
+    ("conservative", 80, False), ("conservative", 90, True),
+    ("balanced", 65, False), ("balanced", 75, True),
+    ("aggressive", 45, False), ("aggressive", 60, True),
+])
+def test_alert_sensitivity_decides_which_scans_alert(auth_client, telegram, level, score, expect):
+    assert auth_client.put("/api/settings", json={"sensitivity": level}).status_code == 200
+    out = notifier.alert_for_scan(_scan_with_score(auth_client, score))
+    assert bool(out) is expect and (not expect or any(o["status"] == "sent" for o in out))
+
+
+def test_unknown_sensitivity_is_refused_and_old_names_are_mapped(auth_client):
+    assert auth_client.put("/api/settings", json={"sensitivity": "extreme"}).status_code == 422
+    assert auth_client.put("/api/settings", json={"sensitivity": "high"}).json()["sensitivity"] == "aggressive"

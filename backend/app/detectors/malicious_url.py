@@ -13,9 +13,7 @@ The old whole-URL RandomForest models were retired: their training data had form
 (every "bad" URL started with https://, every "good" one did not) and flagged ~98% of real
 popular domains when used without the trusted-site list.
 """
-import os
 import uuid
-import joblib
 
 from app.core.config import get_settings
 from app.detectors.base import build_result
@@ -27,13 +25,25 @@ from app.detectors import trusted_domains
 from app.detectors.url_features import IP_RE
 from app.detectors.url_features_v2 import (split_url, SENSITIVE_WORDS, BRAND_DOMAINS, BRAND_ALIASES, REDIRECT_PARAMS, brand_in_host,
                                            is_shortener, registered_domain)
-from app.detectors import domain_model, page_inspector
+from app.detectors import domain_age, domain_model, page_inspector
 from app.services import safe_fetch
 import re
 
 settings = get_settings()
 
-def _live_indicators(url: str) -> list[dict]:
+def _registry(host: str):
+    """Registry record (RDAP) of the registrable domain + the domain-registration model, or None
+    (IP address, shared hosting platform such as *.web.app - its owner's age says nothing about this page)."""
+    parts = domain_model.site_parts(host)
+    if parts["ip"] or parts["platform"] or not parts["site"] or "." not in parts["site"]:
+        return None
+    try:
+        return domain_age.assess(parts["site"])
+    except Exception:          # registry trouble never breaks a scan
+        return None
+
+
+def _live_indicators(url: str, registry_out: dict | None = None) -> list[dict]:
     host = urlparse(url if "://" in url else f"http://{url}").netloc.split("@")[-1].split(":")[0]
     if not host:
         return []
@@ -47,7 +57,15 @@ def _live_indicators(url: str) -> list[dict]:
         ssl_f = pool.submit(network_intel.get_ssl_info, host)
         vt_f = pool.submit(threat_intelligence.check_virustotal_url_sync, url)
         uh_f = pool.submit(threat_intelligence.check_urlhaus_sync, url)
+        reg_f = pool.submit(_registry, host)
         dns_r, whois_r, ssl_r, vt_r, uh_r = dns_f.result(), whois_f.result(), ssl_f.result(), vt_f.result(), uh_f.result()
+        reg = reg_f.result()
+    if registry_out is not None:
+        registry_out["registry"] = reg
+    if whois_r.get("status") != "ok" and reg and reg.get("ageDays") is not None:
+        whois_r = {"status": "ok", "age_days": int(reg["ageDays"])}       # WHOIS failed: use the registry (RDAP) date
+    if reg and reg.get("sentences"):
+        add(False, "Domain registration (registry record)", ". ".join(reg["sentences"]) + ".", "low", 0)
     if dns_r["status"] == "unresolvable":
         add(True, "Domain does not resolve", f"'{host}' does not resolve to any real server right now.", "critical", 30)
     if whois_r["status"] == "ok":
@@ -238,8 +256,24 @@ def _page_indicators(url: str) -> tuple[list[dict], dict]:
     return out, evidence
 
 
+def _embedded_destination(url: str) -> str | None:
+    """The website an open-redirect link really sends you to (google.com/url?q=..., ?redirect=..., ?next=...), when it
+    is a DIFFERENT site than the link itself; else None."""
+    from urllib.parse import parse_qsl, unquote
+    from app.detectors.url_features_v2 import REDIRECT_PARAMS
+    parts = split_url(url)
+    own = registered_domain(parts["host"])
+    for key, value in parse_qsl(parts["query"], keep_blank_values=True):
+        v = unquote(value).strip()
+        if key.lower() in REDIRECT_PARAMS and v.lower().startswith(("http://", "https://", "//")):
+            dest = "http:" + v if v.startswith("//") else v
+            if registered_domain(split_url(dest)["host"]) not in ("", own):
+                return dest
+    return None
+
+
 def analyze_url(url: str, subtopic_title: str = "Malicious URL Analysis", subtopic_id: str | None = None,
-                network: bool = True) -> dict:
+                network: bool = True, _depth: int = 0) -> dict:
     url = (url or "").strip()
     if not url:
         return build_result(
@@ -254,14 +288,20 @@ def analyze_url(url: str, subtopic_title: str = "Malicious URL Analysis", subtop
     dom_inds, ml = _domain_indicators(url)
     indicators += dom_inds
     evidence = None
+    registry_box: dict = {}
     if network:  # network=False: model + structural rules only (no DNS/WHOIS/SSL/threat-intel/page calls)
-        indicators += _live_indicators(url)
+        indicators += _live_indicators(url, registry_box)
         if settings.LIVE_PAGE_CHECKS:
             page_inds, evidence = _page_indicators(url)
             indicators += page_inds
-    sub = _subtopic_model(url, subtopic_id)
-    if sub:
-        indicators.append(sub["indicator"])
+    subs = _subtopic_models(url, subtopic_id)
+    reg_model = _registry_model(registry_box.get("registry"), subtopic_id)
+    if reg_model:
+        subs.append(reg_model)
+    sub = max(subs, key=_model_points) if subs else None        # the strongest model decides the floor
+    for s_ in subs:
+        if len(subs) == 1 or s_["indicator"]["triggered"]:
+            indicators.append(s_["indicator"])
     rule_score = sum(i["weight"] for i in indicators if i["triggered"])
 
     # The domain-name model adds up to 40 points on top of the rules (it judges only the NAME, so it
@@ -271,16 +311,34 @@ def analyze_url(url: str, subtopic_title: str = "Malicious URL Analysis", subtop
     confidence = min(95, 50 + min(rule_score, 40) + (abs(ml["probability"] - 0.5) * 20 if ml else 0))
 
     # A subtopic's own trained model can only RAISE the score: alert level -> 71-100, verify level -> 51-70.
-    if sub and sub["level"] == "high":
-        span = max(1 - sub["thrAlert"], 1e-6)
-        blended = max(blended, min(100, 71 + round(29 * (sub["probability"] - sub["thrAlert"]) / span)))
-    elif sub and sub["level"] == "medium":
-        span = max(sub["thrAlert"] - sub["thrVerify"], 1e-6)
-        blended = max(blended, min(70, 51 + round(19 * (sub["probability"] - sub["thrVerify"]) / span)))
+    if sub and sub["level"] in ("high", "medium"):
+        blended = max(blended, _model_points(sub))
+
+    # Open redirect (added 19 Oct): score the hidden destination with this same engine (one level deep).
+    dest = _embedded_destination(url) if _depth == 0 else None
+    if dest:
+        d = analyze_url(dest, "Redirect destination", subtopic_id=subtopic_id, network=network, _depth=1)
+        risky = d["riskScore"] >= 51
+        indicators.append({"label": "Hidden redirect to another website",
+                           "description": f"This link forwards to {dest[:120]} (a different website), which CyberGuard "
+                                          f"scores {d['riskScore']}/100. Phishers hide their page behind trusted "
+                                          "sites' redirect links (google.com/url?q=..., ?redirect=...).",
+                           "severity": "critical" if risky else "medium", "weight": 15, "triggered": True})
+        blended = max(blended, min(100, d["riskScore"] + 5)) if risky else min(100, blended + 15)
+    # A shortener whose destination could not be followed: the real website is unknown -> "verify".
+    host_now = split_url(url)["host"]
+    followed = bool(evidence) and len(evidence.get("redirectChain") or evidence.get("chain") or []) > 1
+    if subtopic_id == "redirect-analysis" and is_shortener(host_now) and not followed and _depth == 0:
+        indicators.append({"label": "Destination hidden by a link shortener (not followed)",
+                           "description": "The link goes through a shortener and its real destination could not be "
+                                          "checked here, so nobody can tell yet where it leads. Expand it with the "
+                                          "shortener's preview (e.g. add '+' to a bit.ly link) before opening it.",
+                           "severity": "medium", "weight": 0, "triggered": True})
+        blended = max(blended, 51)
 
     # Verified official site (real host, not user-content hosting, no redirect to an untrusted
     # site): cap the score low (never zero).
-    trusted = trusted_domains.is_trusted(url)
+    trusted = trusted_domains.is_trusted(url) and not (dest and blended >= 51)
     if trusted:
         blended = min(blended, 15)
         confidence = max(confidence, 90)
@@ -306,7 +364,7 @@ def analyze_url(url: str, subtopic_title: str = "Malicious URL Analysis", subtop
         base_score=blended,
         confidence=confidence,
         engine_name="CYBERGUARD URL Engine — rules + live checks"
-                    + (f" + {sub['model']}" if sub else "")
+                    + (" + " + " + ".join(x["model"] for x in subs) if subs else "")
                     + (" + domain-name model (PhiUSIIL + Tranco)" if ml else ""),
         threat_type=subtopic_title,
         explanation=explanation,
@@ -321,6 +379,9 @@ def analyze_url(url: str, subtopic_title: str = "Malicious URL Analysis", subtop
                                                        "brandDomain", "tricks", "trainedAt")}
         result["subtopicModel"]["sameNameOtherEnding"] = bool(sub.get("sameNameOtherEnding"))
         result["subtopicModel"].update(alertThreshold=round(sub["thrAlert"], 4), verifyThreshold=round(sub["thrVerify"], 4))
+    if len(subs) > 1:
+        result["urlModels"] = [{"subtopic": x["subtopic"], "model": x["model"], "level": x["level"],
+                                "probability": x["probability"]} for x in subs]
     return result
 
 
@@ -411,11 +472,62 @@ def _manipulation(url: str):
 SUBTOPIC_MODELS = {"lookalike-domain": _lookalike, "domain-spoofing": _spoofing, "url-manipulation": _manipulation}
 
 
-def _subtopic_model(url: str, subtopic_id: str | None):
-    fn = SUBTOPIC_MODELS.get(subtopic_id or "")
-    if not fn:
+# Pages that receive links from anywhere (a QR code, a "check this link" page) run EVERY trained URL
+# model and let the strongest one decide.
+ALL_URL_MODELS = {"qr-phishing", "malicious-url", "fraudulent-website", "general"}
+
+
+def _subtopic_models(url: str, subtopic_id: str | None) -> list[dict]:
+    fns = list(SUBTOPIC_MODELS.values()) if subtopic_id in ALL_URL_MODELS else \
+        [SUBTOPIC_MODELS[subtopic_id]] if subtopic_id in SUBTOPIC_MODELS else []
+    out = []
+    for fn in fns:
+        try:
+            r = fn(url)
+        except Exception:      # a broken / missing model never breaks the scan
+            r = None
+        if r:
+            out.append(r)
+    # A shortened link (bit.ly/3abc) has no structure to judge: the URL-manipulation model learned that most short
+    # links in its data were malicious and alerted on EVERY one. For shorteners its verdict is capped at "verify";
+    # the real destination is judged by following the link (live check) or by Redirect Analysis.
+    if is_shortener(split_url(url)["host"]):
+        for r in out:
+            if "manipulation" in r.get("model", "").lower() and r["level"] == "high":
+                r["level"] = "medium"
+                r["probability"] = min(r["probability"], (r["thrAlert"] + r["thrVerify"]) / 2)
+                r["indicator"] = {**r["indicator"], "label": "URL manipulation model: short link - verify where it leads",
+                                  "severity": "medium",
+                                  "description": "The link is shortened, so its structure says nothing about the real "
+                                                 "destination; treated as 'verify' rather than an alert. "
+                                                 + r["indicator"].get("description", "")}
+    return out
+
+
+def _registry_model(reg: dict | None, subtopic_id: str | None):
+    """The domain-registration model as a subtopic model (SSL & Domain Analysis page + every general URL page)."""
+    if not reg or reg.get("probability") is None or subtopic_id not in ({"ssl-domain-analysis"} | ALL_URL_MODELS):
         return None
-    try:
-        return fn(url)
-    except Exception:          # a broken / missing model never breaks the scan
-        return None
+    p, level = reg["probability"], reg["level"]
+    facts = reg["facts"]
+    text = ". ".join(reg["sentences"]) + "."
+    return {"subtopic": "ssl-domain-analysis", "model": "Domain registration model", "probability": p, "level": level,
+            "thrAlert": reg["thrAlert"], "thrVerify": reg["thrVerify"], "domain": facts.get("domain"),
+            "brandDomain": None, "tricks": reg["sentences"], "trainedAt": reg.get("trainedAt"),
+            "indicator": {"label": {"high": "Domain registration model: looks like a phishing domain",
+                                    "medium": "Domain registration model: suspicious registration - verify",
+                                    "low": "Domain registration model: registration looks normal"}[level],
+                          "description": f"{text} The model (trained on registry records of real phishing and real "
+                                         f"sites) rates this registration {p * 100:.0f}% phishing-like.",
+                          "weight": 0, "triggered": level != "low",
+                          "severity": {"high": "high", "medium": "medium"}.get(level, "low")}}
+
+
+def _model_points(m: dict) -> int:
+    """A model's verdict on the 0-100 scale: alert level -> 71-100, verify level -> 51-70, below -> 0-50."""
+    p, ta, tv = m["probability"], m["thrAlert"], m["thrVerify"]
+    if m["level"] == "high":
+        return min(100, 71 + round(29 * (p - ta) / max(1 - ta, 1e-6)))
+    if m["level"] == "medium":
+        return min(70, 51 + round(19 * (p - tv) / max(ta - tv, 1e-6)))
+    return round(50 * min(p, tv) / max(tv, 1e-6))

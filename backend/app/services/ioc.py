@@ -115,7 +115,20 @@ def candidates(result: dict, target: str, module_id: str) -> set[tuple[str, str]
                 out.add(("sha256", a["sha256"].lower()))
     if result.get("sha256"):
         out.add(("sha256", str(result["sha256"]).lower()))
+    for ip in result.get("observedIps") or []:        # login logs: every IP in the log is checked ("seen before")
+        if _public_ip(ip):
+            out.add(("ip", ip))
     return out
+
+
+def recordable(cands: set, result: dict, module_id: str) -> set:
+    """Which observables may be REMEMBERED as IOCs. A login log also contains the account's own, normal IPs: for
+    credential scans only the IPs the detector named as attacker sources (result["attackerIps"]) are kept --
+    otherwise one risky log would turn the user's home IP into a "known bad" IP (all later normal logs flagged)."""
+    if module_id != "credential":
+        return cands
+    attackers = {ip for ip in (result.get("attackerIps") or []) if _public_ip(ip)}
+    return {(t, v) for t, v in cands if t != "ip"} | {("ip", ip) for ip in attackers}
 
 
 def lookup(db, user_id: str, cands: set) -> list[IOC]:

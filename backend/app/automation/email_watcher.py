@@ -10,15 +10,27 @@ Every EMAIL_POLL_SECONDS:
    3. each new email goes through the same Email Intelligence Pipeline as a manual upload:
       sender checks (SPF/DKIM/DMARC), phishing text model, impersonation detectors, every link,
       QR codes, attachments -> saved, auto-quarantined in CyberGuard if dangerous, alert if risky
-Nothing in your Gmail is changed, moved or deleted.
+   4. a dangerous INBOX email (risk >= QUARANTINE_MIN_SCORE) is MOVED to the Gmail label "CyberGuard-Quarantine"
+      (see mailbox_quarantine.py): out of the inbox, never deleted, "Release" moves it back. Set
+      MAILBOX_QUARANTINE=false to leave Gmail completely untouched. Reading stays read-only (not marked as read).
 """
 import imaplib
 import re
 
+from app.automation import mailbox_quarantine
 from app.automation.engine import Watcher, get_state, owner_user_id, update_state
 from app.core.config import get_settings
 
 MAX_PER_ROUND = 20
+
+
+def _message_id(raw: bytes) -> str:
+    """The Message-ID header (headers only are parsed)."""
+    from email.parser import BytesHeaderParser
+    try:
+        return str(BytesHeaderParser().parsebytes(raw[:200_000]).get("Message-ID", "") or "").strip()
+    except Exception:
+        return ""
 
 
 class EmailWatcher(Watcher):
@@ -117,16 +129,21 @@ class EmailWatcher(Watcher):
         for uid in uids:
             typ, msg = imap.uid("fetch", str(uid), "(BODY.PEEK[])")      # PEEK = do not mark as read
             raw = next((part[1] for part in msg if isinstance(part, tuple)), None)
+            mid = _message_id(raw) if raw else ""
             if raw and notifier.is_own_mail(raw):
                 pass                        # CyberGuard's own alert / code email: never re-scan it (alert loop)
+            elif raw and mailbox_quarantine.was_released(mid):
+                pass                        # the user released it from quarantine: it is back on purpose
             elif raw and len(raw) <= s.MAX_UPLOAD_MB * 1024 * 1024:
                 db = SessionLocal()
                 try:
                     owner = owner_user_id(db)
                     if owner:
-                        scan, _rec, result = process_email(db, owner, raw,
-                                                           source="gmail" if folder_key is None else f"gmail-{folder_key}")
+                        scan, rec, result = process_email(db, owner, raw,
+                                                          source="gmail" if folder_key is None else f"gmail-{folder_key}")
                         db.commit()
+                        if folder_key is None and s.MAILBOX_QUARANTINE and rec.action_taken == "quarantined":
+                            self._move_to_quarantine(db, rec, uid, mid)
                         checked += 1
                         em = result.get("email", {}) or {}
                         subj = re.sub(r"\s+", " ", em.get("subject", "") or "(no subject)")[:80]
@@ -135,12 +152,30 @@ class EmailWatcher(Watcher):
                         if result["classification"] != "safe":
                             threats += 1
                             finding = f"{result.get('category', 'Threat')}: \"{subj}\"{where} (score {result['riskScore']})"
-                        if result["riskScore"] >= s.ALERT_MIN_SCORE:
+                        if result["riskScore"] >= notifier.ALERT_FLOOR:   # alert sensitivity decides
                             notifier.alert_for_scan(scan.id)
                 finally:
                     db.close()
             save(uidValidity=validity, lastUid=uid)                         # bookmark after each email
         return checked, threats, finding, len(uids)
+
+    @staticmethod
+    def _move_to_quarantine(db, rec, uid, message_id: str) -> None:
+        """Dangerous inbox email -> Gmail quarantine label (reversible). A failure is recorded, never raised."""
+        from app.services import audit
+        try:
+            info = mailbox_quarantine.quarantine_uid(uid, message_id)
+            mailbox_quarantine.record_move(rec, info, action="mailbox-quarantined", by="CYBERGUARD (automatic)")
+            ok = True
+        except Exception as exc:  # noqa: BLE001 -- the scan and alert must still happen
+            mailbox_quarantine.record_move(rec, {"status": "move-failed", "error": f"Could not move it in Gmail: {exc}"[:300]},
+                                           action="mailbox-quarantine-failed", by="CYBERGUARD (automatic)")
+            ok = False
+        from types import SimpleNamespace
+        audit.log(db, action="quarantine.mailbox", user=SimpleNamespace(id=rec.user_id, email=""),
+                  actor="CYBERGUARD (automatic)", target=(rec.subject or "")[:200],
+                  detail={"emailRecordId": rec.id, "from": rec.from_address, "moved": ok}, success=ok)
+        db.commit()
 
     def check(self) -> dict:
         s = get_settings()

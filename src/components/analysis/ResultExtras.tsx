@@ -4,6 +4,7 @@
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { ICONS } from "@/lib/icons";
 import type { AnalysisResult } from "@/types";
+import { ResultInsights } from "@/components/analysis/ResultInsights";
 
 const AUTH_COLOR: Record<string, string> = { pass: "var(--color-safe)", fail: "var(--color-critical)", softfail: "var(--color-warning)" };
 
@@ -32,6 +33,8 @@ export function ResultExtras({ result }: { result: AnalysisResult }) {
 
   return (
     <>
+      <ResultInsights result={result} />
+
       {hits.length > 0 && (
         <Card>
           <CardHeader title="Seen Before" subtitle="Indicators CyberGuard remembered from your earlier risky scans" icon={<ICONS.fingerprint size={16} />} />

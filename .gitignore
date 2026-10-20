@@ -30,3 +30,12 @@ backend/app/ml/training/data/top-1m*
 backend/app/ml/training/data/phishing-links*
 backend/automation_state.json*
 backend/app/ml/training/data/youtube*
+backend/app/ml/models/*.onnx
+
+# URL-security training data collected on this PC (large / regenerated)
+backend/app/ml/training/data/urlscan/
+backend/app/ml/training/data/domain_facts.jsonl
+
+# Quarantined downloads (dangerous files moved here by CyberGuard - never commit them)
+backend/quarantine/
+backend/app/ml/training/data/urlscan_phish_domains.csv

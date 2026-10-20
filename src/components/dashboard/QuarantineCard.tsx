@@ -28,7 +28,13 @@ export function QuarantineCard() {
     setBusy(item.id);
     try {
       await quarantineAction(item.id, action);
-      notify({ variant: "success", title: action === "release" ? "Email released" : "Email deleted" });
+      notify({
+        variant: "success",
+        title: action === "release" ? "Email released" : "Marked as malicious",
+        description: action === "release"
+          ? (item.mailbox?.status === "moved" ? "It is back in your Gmail inbox." : undefined)
+          : "It stays held in quarantine; nothing was deleted.",
+      });
       await load();
     } catch (err) {
       notify({ variant: "critical", title: "Action failed", description: err instanceof Error ? err.message : "Please try again." });
@@ -43,7 +49,7 @@ export function QuarantineCard() {
     <Card>
       <CardHeader
         title="Email Quarantine"
-        subtitle={data ? `${data.counts.quarantined} held · ${data.counts.released} released · ${data.counts.deleted} deleted` : "Dangerous emails held automatically"}
+        subtitle={data ? `${data.counts.quarantined} held · ${data.counts.released} released · ${data.counts.deleted} confirmed malicious` : "Dangerous emails held automatically"}
         icon={<ICONS.lock size={16} />}
       />
       <CardBody>
@@ -65,6 +71,14 @@ export function QuarantineCard() {
                     <span className="shrink-0 text-xs font-mono font-semibold" style={{ color: meta.color }}>{item.riskScore}</span>
                   </div>
                   <p className="text-[10px] text-slate-500 mt-1 truncate" title={item.reason}>{item.category}</p>
+                  {item.mailbox?.status === "moved" && (
+                    <p className="text-[10px] mt-1" style={{ color: "var(--color-info)" }}>
+                      Moved out of your Gmail inbox to the label “{item.mailbox.label}” (not deleted)
+                    </p>
+                  )}
+                  {item.mailbox?.status === "move-failed" && (
+                    <p className="text-[10px] mt-1 text-amber-300">Still in your Gmail inbox: the move failed (see history)</p>
+                  )}
                   <div className="mt-2 flex gap-2">
                     <button
                       disabled={busy === item.id}
@@ -79,7 +93,7 @@ export function QuarantineCard() {
                       className="rounded-md px-2.5 py-1 text-xs font-medium focus-ring disabled:opacity-50"
                       style={{ color: "var(--color-critical)", backgroundColor: "var(--color-critical-bg)" }}
                     >
-                      Delete
+                      Mark malicious
                     </button>
                   </div>
                 </li>

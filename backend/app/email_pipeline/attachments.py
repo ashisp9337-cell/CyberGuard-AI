@@ -52,7 +52,7 @@ EXT_FAMILY = {".pdf": "pdf", ".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg", ".g
               ".dll": "windows-executable", ".scr": "windows-executable", ".rar": "rar", ".7z": "7z"}
 URL_RE = re.compile(rb"""https?://[^\s<>"'\)\]\\]+""", re.I)
 PDF_URI_RE = re.compile(rb"/URI\s*\(([^)]+)\)")
-RTLO = "‮"
+RTLO = "\u202e"   # Right-To-Left Override: makes "invoice\u202efdp.exe" display as "invoiceexe.pdf"
 
 
 def _magic(data: bytes) -> str:

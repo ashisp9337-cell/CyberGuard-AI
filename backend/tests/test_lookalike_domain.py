@@ -145,7 +145,7 @@ def test_same_name_other_ending_is_verify_not_alert(model_file):
 
 def test_model_is_only_used_on_its_own_subtopic(model_file):
     model_file(0.97)
-    assert "subtopicModel" not in scan("http://paypa1.com/signin", sub="malicious-url")
+    assert "subtopicModel" not in scan("http://paypa1.com/signin", sub="redirect-analysis")
     assert "subtopicModel" not in scan("http://paypa1.com/signin", sub=None)
 
 

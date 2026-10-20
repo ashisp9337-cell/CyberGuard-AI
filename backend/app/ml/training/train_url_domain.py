@@ -26,7 +26,6 @@ real popular sites, by rank, and on Indian .in sites).
 import glob
 import json
 import os
-import re
 import sys
 import time
 import warnings

@@ -302,6 +302,21 @@ def _dedup_key(module_id: str, threat_type: str, target: str) -> str:
     return hashlib.sha256(f"{module_id}|{threat_type}|{(target or '').strip().lower()}".encode()).hexdigest()[:16]
 
 
+# Settings -> "Alert sensitivity": which risk level sends an alert to the owner / SOC.
+#   conservative = critical only (86+), balanced = high risk and critical (ALERT_MIN_SCORE, 71+),
+#   aggressive = suspicious and above (51+). Older saved values "low" / "high" mean conservative / aggressive.
+ALERT_FLOOR = 51            # the lowest any sensitivity can alert at: callers only skip scans below this
+
+
+def alert_threshold(sensitivity: str | None) -> int:
+    level = (sensitivity or "balanced").strip().lower()
+    if level in ("conservative", "low"):
+        return 86
+    if level in ("aggressive", "high"):
+        return ALERT_FLOOR
+    return get_settings().ALERT_MIN_SCORE
+
+
 def alert_for_scan(scan_id: str) -> list[dict]:
     """Decide whether to alert for this scan, send it, and record the outcome. Never raises."""
     from app.db.database import SessionLocal
@@ -311,9 +326,11 @@ def alert_for_scan(scan_id: str) -> list[dict]:
     db = SessionLocal()
     try:
         scan = db.get(Scan, scan_id)
-        if scan is None or (scan.risk_score or 0) < s.ALERT_MIN_SCORE:
+        if scan is None:
             return []
         prefs = db.query(UserSettings).filter(UserSettings.user_id == scan.user_id).first()
+        if (scan.risk_score or 0) < alert_threshold(prefs.sensitivity if prefs is not None else None):
+            return []
         if prefs is not None and not prefs.notifications_enabled:
             return []
 
@@ -354,4 +371,4 @@ def alert_for_scan(scan_id: str) -> list[dict]:
         logger.exception("alerting failed for scan %s", scan_id)
         return []
     finally:
-        db.close()
+        db.close()

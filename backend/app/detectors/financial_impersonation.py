@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import uuid
 
 import joblib
@@ -127,6 +126,8 @@ def analyze_financial_impersonation(text: str, extra_field_values: dict, subtopi
     # here because impersonation attempts share the same manipulative language.
     general = phishing._rule_indicators(text, sender=sender_email or None, reply_to=None) if text.strip() else []
     indicators.extend(general)
+    pattern_inds, pattern_floor = phishing.scam_patterns(text, "financial") if text.strip() else ([], 0)
+    indicators.extend(pattern_inds)
 
     rule_score = sum(i["weight"] for i in indicators if i["triggered"])
     model = _get_model()
@@ -145,6 +146,8 @@ def analyze_financial_impersonation(text: str, extra_field_values: dict, subtopi
         blended = min(rule_score, 100)
         confidence = 40 + min(rule_score, 50)
 
+    if pattern_floor:
+        blended = max(blended, pattern_floor)
     for ind in indicators:
         ind.setdefault("id", f"IND_{uuid.uuid4().hex[:12]}")
     triggered = [i for i in indicators if i["triggered"]]

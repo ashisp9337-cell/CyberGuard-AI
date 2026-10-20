@@ -1,0 +1,124 @@
+{
+  "kind": "cyberguard-ai-image",
+  "version": 1,
+  "architecture": "CLIP ViT-L/14 + linear layer (UnivFD)",
+  "backbone": "openai/clip-vit-large-patch14",
+  "output": "logit; sigmoid(logit) = probability the picture is AI-generated",
+  "dataset": "real photos vs AI images from modern-generators, shutterstock-pairs, stylegan-faces",
+  "input_size": 224,
+  "mean": [
+    0.48145466,
+    0.4578275,
+    0.40821073
+  ],
+  "std": [
+    0.26862954,
+    0.26130258,
+    0.27577711
+  ],
+  "views": "up to 3 crops, max decides",
+  "decode": "Pillow draft 448",
+  "thr_alert": 0.9022604048960015,
+  "thr_verify": 0.5940959666292046,
+  "training": {
+    "per_class_max": 10000,
+    "C": 5.0,
+    "images": 43456,
+    "treatment": "all training pictures re-saved as JPEG 65-100, 30% also downscaled"
+  },
+  "results": {
+    "validation": {
+      "n": 7239,
+      "caught_at_alert": 0.8316,
+      "false_alarms_at_alert": 0.0102,
+      "caught_at_verify": 0.933,
+      "false_alarms_at_verify": 0.0503,
+      "auc": 0.9852
+    },
+    "test": {
+      "n": 8000,
+      "caught_at_alert": 0.795,
+      "false_alarms_at_alert": 0.0132,
+      "caught_at_verify": 0.9133,
+      "false_alarms_at_verify": 0.0503,
+      "auc": 0.9795
+    },
+    "test:modern-generators": {
+      "n": 2000,
+      "caught_at_alert": 0.624,
+      "false_alarms_at_alert": 0.036,
+      "caught_at_verify": 0.783,
+      "false_alarms_at_verify": 0.092,
+      "auc": 0.9284
+    },
+    "test:shutterstock-pairs": {
+      "n": 3000,
+      "caught_at_alert": 0.8507,
+      "false_alarms_at_alert": 0.0093,
+      "caught_at_verify": 0.966,
+      "false_alarms_at_verify": 0.0553,
+      "auc": 0.991
+    },
+    "test:stylegan-faces": {
+      "n": 3000,
+      "caught_at_alert": 0.8533,
+      "false_alarms_at_alert": 0.002,
+      "caught_at_verify": 0.9473,
+      "false_alarms_at_verify": 0.0173,
+      "auc": 0.9946
+    },
+    "test_jpeg_quality_50": {
+      "n": 8000,
+      "caught_at_alert": 0.7875,
+      "false_alarms_at_alert": 0.0478,
+      "caught_at_verify": 0.9143,
+      "false_alarms_at_verify": 0.1502,
+      "auc": 0.953
+    },
+    "test_jpeg_quality_50:modern-generators": {
+      "n": 2000,
+      "caught_at_alert": 0.622,
+      "false_alarms_at_alert": 0.05,
+      "caught_at_verify": 0.785,
+      "false_alarms_at_verify": 0.138,
+      "auc": 0.9096
+    },
+    "test_jpeg_quality_50:shutterstock-pairs": {
+      "n": 3000,
+      "caught_at_alert": 0.848,
+      "false_alarms_at_alert": 0.034,
+      "caught_at_verify": 0.9673,
+      "false_alarms_at_verify": 0.1453,
+      "auc": 0.9782
+    },
+    "test_jpeg_quality_50:stylegan-faces": {
+      "n": 3000,
+      "caught_at_alert": 0.8373,
+      "false_alarms_at_alert": 0.06,
+      "caught_at_verify": 0.9473,
+      "false_alarms_at_verify": 0.1633,
+      "auc": 0.9654
+    },
+    "leave_one_source_out": {
+      "modern-generators": {
+        "n": 2000,
+        "auc": 0.7146,
+        "caught_at_alert": 0.221,
+        "false_alarms_at_alert": 0.052
+      },
+      "shutterstock-pairs": {
+        "n": 3000,
+        "auc": 0.735,
+        "caught_at_alert": 0.508,
+        "false_alarms_at_alert": 0.2113
+      },
+      "stylegan-faces": {
+        "n": 3000,
+        "auc": 0.7177,
+        "caught_at_alert": 0.01,
+        "false_alarms_at_alert": 0.004
+      }
+    }
+  },
+  "trained_at": "2026-10-18T16:46:00+00:00"
+}

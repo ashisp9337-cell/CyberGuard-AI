@@ -23,7 +23,7 @@ import unicodedata
 from functools import lru_cache
 
 from rapidfuzz import process
-from rapidfuzz.distance import DamerauLevenshtein, Levenshtein
+from rapidfuzz.distance import DamerauLevenshtein
 
 MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ml", "models", "lookalike_domain.joblib")
 

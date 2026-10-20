@@ -1,7 +1,6 @@
 import json
 import os
 import uuid
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.orm import Session
@@ -10,8 +9,7 @@ from app.core.config import get_settings
 from app.core.dependencies import get_current_user
 from app.core.rate_limit import limiter
 from app.db.database import get_db
-from app.db.models import User, Scan, DetectedIndicatorRow, RecommendationRow, ThreatEvent
-from app.schemas.analysis import RunScanRequest
+from app.db.models import User
 from app.services.analysis_service import run_scan
 from app.services import response_playbook, notifier, subtopic_router, scan_store
 
@@ -113,6 +111,7 @@ async def scan(
             raise HTTPException(status_code=422, detail={"error": {
                 "code": f"SUBTOPIC_{exc.code.upper()}", "message": exc.message, "details": exc.details}})
         subtopicId, subtopicTitle, routing = c.subtopic_id, c.subtopic_title, c.to_dict()
+        result["routing"] = routing          # saved with the scan, so Scan History shows it too
     else:
         result = run_scan(
             module_id=moduleId, subtopic_id=subtopicId, subtopic_title=subtopicTitle,
@@ -134,7 +133,7 @@ async def scan(
     db.refresh(scan_row)
 
     # Alert the admin / SOC (Telegram, email) after the response is sent.
-    if result["riskScore"] >= notifier.get_settings().ALERT_MIN_SCORE:
+    if result["riskScore"] >= notifier.ALERT_FLOOR:              # the user's alert sensitivity decides
         background_tasks.add_task(notifier.alert_for_scan, scan_row.id)
 
     return {

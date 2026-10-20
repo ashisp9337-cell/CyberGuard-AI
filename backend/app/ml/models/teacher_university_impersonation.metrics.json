@@ -1,0 +1,79 @@
+{
+  "topic": "teacher",
+  "model": "TF-IDF (words 1-2 + characters 3-5) + Logistic Regression",
+  "trained_at": "2026-10-17T04:30:56+00:00",
+  "training_rows": {
+    "scam": 1592,
+    "genuine": 6812,
+    "real_scam_sms_added": 203,
+    "real_genuine_on_topic": 1792,
+    "real_genuine_other": 3584,
+    "previous_dataset_rows_used": 3000
+  },
+  "label_cleaning": {
+    "dropped_genuine_looking_like_scam": 88,
+    "dropped_scam_looking_genuine": 13,
+    "on_topic_genuine_set_aside_train": 2,
+    "on_topic_genuine_set_aside_test": 0,
+    "on_topic_threshold": 0.8
+  },
+  "test": "held-out 20% of real SMS (never trained on); detector = model + rules, flagged at score >= 51",
+  "results": {
+    "old_model": {
+      "real genuine teacher-related SMS + email": {
+        "n": 437,
+        "false_alarm_rate": 0.0137
+      },
+      "real teacher-related scam SMS + email": {
+        "n": 49,
+        "caught_rate": 0.1224
+      },
+      "real genuine everyday SMS + email": {
+        "n": 3000,
+        "false_alarm_rate": 0.0563
+      }
+    },
+    "new_model": {
+      "real genuine teacher-related SMS + email": {
+        "n": 437,
+        "false_alarm_rate": 0.0046
+      },
+      "real teacher-related scam SMS + email": {
+        "n": 49,
+        "caught_rate": 0.5102
+      },
+      "real genuine everyday SMS + email": {
+        "n": 3000,
+        "false_alarm_rate": 0.0007
+      }
+    },
+    "old_detector": {
+      "real genuine teacher-related SMS + email": {
+        "n": 437,
+        "false_alarm_rate": 0.0137
+      },
+      "real teacher-related scam SMS + email": {
+        "n": 49,
+        "caught_rate": 0.1224
+      },
+      "real genuine everyday SMS + email": {
+        "n": 600,
+        "false_alarm_rate": 0.0633
+      }
+    },
+    "new_detector": {
+      "real genuine teacher-related SMS + email": {
+        "n": 437,
+        "false_alarm_rate": 0.0046
+      },
+      "real teacher-related scam SMS + email": {
+        "n": 49,
+        "caught_rate": 0.5102
+      },
+      "real genuine everyday SMS + email": {
+        "n": 600,
+        "false_alarm_rate": 0.0
+      }
+    }
+  }
+}

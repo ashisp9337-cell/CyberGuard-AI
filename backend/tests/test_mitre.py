@@ -1,7 +1,7 @@
 """MITRE ATT&CK mapping: techniques are attached to risky scans, explained, and shown in the API."""
 import uuid
 
-from helpers import login_user, register_user
+from helpers import register_user
 
 
 def _scan(client, module, sub, text=None, url=None):

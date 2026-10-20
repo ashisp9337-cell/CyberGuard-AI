@@ -55,7 +55,7 @@ _TLD_WORDS = {"com", "net", "org", "gov", "edu", "www", "http", "https", "co", "
 
 def normalise(url: str) -> str:
     """Drop the scheme and a leading 'www.' -- they are collection artefacts in the public datasets."""
-    u = (url or "").strip().strip("\"'<>")
+    u = (url if isinstance(url, str) else "").strip().strip("\"'<>")
     u = _SCHEME.sub("", u, count=1) if "://" in u[:20] else u
     return re.sub(r"^www\d?\.", "", u, flags=re.I)
 

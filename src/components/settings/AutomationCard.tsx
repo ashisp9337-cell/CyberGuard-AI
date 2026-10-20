@@ -188,7 +188,9 @@ export function AutomationCard() {
           )}
         </div>
         <p className="text-xs text-slate-500 mt-3">
-          Read-only: emails are not marked as read, files are never opened, moved or deleted, Windows logs are only read.
+          Nothing is ever deleted or opened. Emails are read without being marked as read; a dangerous inbox email is moved
+          to the Gmail label “CyberGuard-Quarantine” and a dangerous download to CyberGuard’s quarantine folder — both
+          can be undone (Release / Restore). Windows logs are only read.
         </p>
       </CardBody>
     </Card>

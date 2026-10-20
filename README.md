@@ -17,7 +17,7 @@ React 19 + TypeScript + Vite  (frontend/, this repo root)
   ▼
 FastAPI backend (backend/)
   │
-  ├── SQLAlchemy → PostgreSQL (or SQLite for zero-setup local dev)
+  ├── SQLAlchemy → PostgreSQL (the only database; schema managed by Alembic)
   ├── ML detectors (backend/app/detectors/, backend/app/ml/)
   │     • Phishing text: TF-IDF + Logistic Regression (trained, real)
   │     • Malicious URL: structural features + RandomForest (trained, real)
@@ -65,7 +65,7 @@ python3 -m venv venv
 source venv/bin/activate            # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-cp .env.example .env                # defaults to SQLite, works with zero config
+cp .env.example .env                # set DATABASE_URL to your PostgreSQL database (see below)
 
 # Apply migrations (creates all tables)
 alembic upgrade head
@@ -81,7 +81,7 @@ python -m app.ml.training.train_domain_spoofing    # needs: pip install wordfreq
 # Optional: seed demo data (demo@cyberguard.local / DemoPass123)
 python -m app.db.seed
 
-# Run tests
+# Run tests (on a separate PostgreSQL database: <your db name>_test, created automatically)
 pytest
 
 # Start the API
@@ -105,7 +105,7 @@ every module/subtopic in the UI now calls the real backend.
 
 ## PostgreSQL setup
 
-SQLite is the zero-config default. For Postgres:
+CyberGuard uses PostgreSQL only (the backend refuses to start with any other database). To run one:
 
 ```bash
 # via Docker
@@ -116,7 +116,9 @@ docker run -d --name cyberguard-pg -e POSTGRES_USER=cyberguard \
 DATABASE_URL=postgresql+psycopg2://cyberguard:cyberguard@localhost:5432/cyberguard
 ```
 
-Then `alembic upgrade head` as above — the same migration works on both engines.
+Then `alembic upgrade head` as above. Run it again after every update: the backend logs an error at
+startup if the database schema is older than the code. The tests never touch this database: they use
+`<name>_test` (e.g. `cyberguard_test`), which they create and wipe themselves (the name must end in `_test`).
 
 ## Running everything with Docker
 
@@ -223,9 +225,9 @@ uploaded files, and generated reports.)
 - **Threat intelligence providers** (VirusTotal/AbuseIPDB/URLhaus) require
   your own API keys; without them the corresponding lookups report
   `"status": "unavailable"` rather than fake data.
-- **SQLite is the local default** for zero-setup development; switch
-  `DATABASE_URL` to Postgres before deploying (see above) — the same
-  Alembic migration works on both.
+- **PostgreSQL only.** `DATABASE_URL` must be a `postgresql+psycopg2://` URL; the
+  backend stops with a clear message otherwise. Tables are created and upgraded
+  only by Alembic (`alembic upgrade head`).
 - **Live monitoring** streams via Server-Sent Events (`GET /api/monitoring/stream`,
   wrapped by `src/services/api/monitoringService.ts`), reflecting real
   `threat_events` rows as they're created by scans or `POST /api/events`.

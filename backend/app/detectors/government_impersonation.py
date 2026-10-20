@@ -45,6 +45,110 @@ GOV_CLAIM_WORDS = (
 GOV_TLD_PATTERN = re.compile(r"\.gov(\.[a-z]{2,3})?$|\.gc\.ca$|\.nic\.in$|\.mil$", re.I)
 
 
+# ---------------------------------------------------------------------------------------------------------
+# Indian government-impersonation SCAM SCRIPT (added 19 Oct after the Phase 2 audit: "digital arrest", fake
+# CBI / police / TRAI / customs calls scored only 35-46). These scams follow a fixed script; each stage is a
+# separate signal, and the COMBINATION decides the floor -- one word alone never does.
+#   1. claims an agency      CBI, ED, NCB, police / cyber crime, TRAI, customs, RBI, income tax, UIDAI, court ...
+#   2. threat                arrest / digital arrest / FIR / money laundering / drugs in a parcel / disconnection
+#   3. isolation / secrecy   do not tell anyone, stay on the video call, do not disconnect
+#   4. the ask               pay / transfer / security deposit / "verification account", share PIN / OTP / bank
+#                            details, press 9 / call the officer, or a link to a NON-government website
+# A genuine government notice informs ("processed", "completed", "dispatched", "paid successfully") and, if it has
+# a link, it points to an official domain (.gov.in, .nic.in, .gov ...). Such a notice with NO threat and NO ask is
+# capped low, so real ITR / UIDAI / passport messages are not flagged.
+# ---------------------------------------------------------------------------------------------------------
+AGENCY_RE = re.compile(
+    r"\b(cbi|central bureau of investigation|enforcement directorate|\bed officer|ncb|narcotics control|"
+    r"cyber ?crime|crime branch|police|inspector|commissioner|dcp|trai|telecom regulatory|customs|"
+    r"reserve bank|rbi|income ?tax|electricity|itr|uidai|aadhaar|passport|parivahan|e-?challan|traffic police|court|"
+    r"supreme court|high court|magistrate|ministry|government|govt|election commission|epfo|gst|gst department|municipal|electricity board|electricity (department|office|officer)|discom|power (department|office))\b", re.I)
+THREAT_RE = re.compile(
+    r"(digital(ly)? arrest|under arrest|arrest warrant|warrant (is )?issued|\bfir\b|case (has been )?registered|"
+    r"money laundering|hawala|drugs?|narcotics|illegal (activity|items|parcel)|seized|legal action|court case|"
+    r"non[- ]bailable|jail|prosecut|(electricity|power|light) (connection|supply)?[^.\n]{0,30}(cut|disconnect)|(connection|supply|power) will be (cut|disconnected)|suspend(ed)? (your )?(pan|aadhaar)|(number|sim|mobile|connection)[^.\n]{0,40}"
+    r"(disconnect|block|deactivat|suspend)|will be (disconnected|blocked|deactivated|cancelled))", re.I)
+SECRECY_RE = re.compile(
+    r"(do ?n['o]?t (tell|inform|share this with|disconnect)|don't (tell|inform|disconnect)|tell (no ?one|nobody)|"
+    r"keep (this|it) (secret|confidential)|stay on (the )?(video )?call|remain on (the )?call|confidential (investigation|matter))",
+    re.I)
+PAY_RE = re.compile(
+    r"(transfer|pay|deposit|send)\b[^.\n]{0,60}(rs\.?|₹|inr|rupees|amount|deposit|fee|fine|account|upi)|"
+    r"(security|refundable|verification) (deposit|amount|account)|rbi (verification|safe|secure) account|"
+    r"clear your name|settle (the|this) case|processing fee|penalty", re.I)
+CRED_RE = re.compile(
+    r"(submit|share|enter|send|provide|update|verify)\b[^.\n]{0,40}(atm pin|\bpin\b|otp|cvv|card (number|details)|"
+    r"bank (account )?details|account number|net ?banking|password)", re.I)
+CALLBACK_RE = re.compile(r"(press [0-9]|call (the )?(officer|inspector|executive)|contact (the )?([a-z]+ )?(officer|inspector)|talk to (the )?officer|"
+                         r"(officer|inspector) will call|join (the )?video call)", re.I)
+INFO_RE = re.compile(r"\b(has been|is|was) (processed|completed|dispatched|delivered|approved|confirmed|credited|"
+                     r"paid successfully|received|generated)\b|\bpaid successfully\b|appointment is confirmed", re.I)
+LINK_RE = re.compile(r"\b((?:https?://)?(?:[a-z0-9-]+\.)+[a-z]{2,24})(?:/[^\s]*)?", re.I)
+OFFICIAL_TLD = re.compile(r"(\.gov(\.[a-z]{2,3})?|\.nic\.in|\.gc\.ca|\.mil)$", re.I)
+
+
+def _links(text: str) -> list[str]:
+    out = []
+    for m in LINK_RE.finditer(text):
+        host = m.group(1).lower().split("://")[-1]
+        if "." in host and not re.fullmatch(r"[\d.]+", host) and not host.endswith((".txt", ".pdf")):
+            out.append(host)
+    return out
+
+
+def scam_script(text: str) -> tuple[list[dict], int, int | None]:
+    """-> (indicators, floor, cap). floor raises the score for a scam script; cap limits a genuine notice."""
+    low = text.lower()
+    agency = AGENCY_RE.search(low)
+    threat, secrecy = THREAT_RE.search(low), SECRECY_RE.search(low)
+    pay, cred, callback = PAY_RE.search(low), CRED_RE.search(low), CALLBACK_RE.search(low)
+    links = _links(low)
+    bad_links = [h for h in links if not OFFICIAL_TLD.search(h)]
+    ask = pay or cred or callback or bad_links
+    inds: list[dict] = []
+    if not agency:
+        return inds, 0, None
+
+    def ev(m):
+        return f' ("{m.group(0).strip()[:60]}")' if hasattr(m, "group") else ""
+    inds.append(_ind(True, "Claims to be a government agency", f"The message speaks for an official body{ev(agency)}.",
+                     "low", 5))
+    if threat:
+        inds.append(_ind(True, "Threat of arrest, legal case or disconnection",
+                         f"Government scams frighten the victim first{ev(threat)}. Real agencies send written notices; "
+                         "they never arrest anyone over a phone or video call (there is no 'digital arrest').",
+                         "high", 20))
+    if secrecy:
+        inds.append(_ind(True, "Told to keep it secret / stay on the call",
+                         f"Isolating the victim{ev(secrecy)} is the hallmark of 'digital arrest' scams.", "critical", 25))
+    if pay:
+        inds.append(_ind(True, "Asks for money", f"A payment / deposit is demanded{ev(pay)}. No agency collects fines or "
+                         "'verification deposits' by transfer or UPI to an officer's account.", "critical", 25))
+    if cred:
+        inds.append(_ind(True, "Asks for PIN / OTP / bank details", f"{ev(cred).strip()} -- no government body ever "
+                         "asks for these.", "critical", 30))
+    if callback:
+        inds.append(_ind(True, "Pushes you to call / press a key", f"Moves the victim to a phone or video call{ev(callback)}.",
+                         "high", 15))
+    if bad_links:
+        inds.append(_ind(True, "Link to a non-government website",
+                         f"Claims to be a government agency but links to {bad_links[0]}, which is not an official "
+                         "government domain (.gov.in, .nic.in, .gov ...).", "high", 25))
+    floor = 0
+    if threat and (secrecy or pay or cred or callback):
+        floor = 85 if (secrecy or pay or cred) else 71
+    elif (pay or cred) and (bad_links or callback or threat):
+        floor = 80
+    elif pay or cred or (bad_links and re.search(r"\b(pay|fee|fine|refund|claim|pending|due)\b", low)):
+        floor = 71
+    elif threat:
+        floor = 55
+    cap = None
+    if INFO_RE.search(low) and not (threat or secrecy or ask):
+        cap = 25          # a genuine informational notice: no threat, no ask, official links only
+    return inds, floor, cap
+
+
 def _domain_of(email: str) -> str:
     return email.strip().lower().rsplit("@", 1)[-1] if "@" in email else ""
 
@@ -101,6 +205,10 @@ def analyze_government_impersonation(text: str, extra_field_values: dict, subtop
 
     general = phishing._rule_indicators(text, sender=sender_email or None, reply_to=None) if text.strip() else []
     indicators.extend(general)
+    pattern_inds, pattern_floor = phishing.scam_patterns(text, "government") if text.strip() else ([], 0)
+    indicators.extend(pattern_inds)
+    script_inds, floor, cap = scam_script(text) if text.strip() else ([], 0, None)
+    indicators.extend(script_inds)
 
     rule_score = sum(i["weight"] for i in indicators if i["triggered"])
     model = _get_model()
@@ -119,6 +227,13 @@ def analyze_government_impersonation(text: str, extra_field_values: dict, subtop
         blended = min(rule_score, 100)
         confidence = 40 + min(rule_score, 50)
 
+    if floor:
+        blended = max(blended, floor)
+        confidence = max(confidence, 80)
+    elif cap is not None:
+        blended = min(blended, cap)
+    if pattern_floor:
+        blended = max(blended, pattern_floor)
     for ind in indicators:
         ind.setdefault("id", f"IND_{uuid.uuid4().hex[:12]}")
     triggered = [i for i in indicators if i["triggered"]]
@@ -138,4 +253,4 @@ def analyze_government_impersonation(text: str, extra_field_values: dict, subtop
         indicators=indicators, base_score=blended, confidence=confidence,
         engine_name=f"CYBERGUARD Impersonation Engine — {'TF-IDF+LogReg (192 real + synthetic)' if model_used else 'Rule-Based (model unavailable)'}",
         threat_type=subtopic_title, explanation=explanation,
-    )
+    )

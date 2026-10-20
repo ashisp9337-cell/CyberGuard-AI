@@ -16,6 +16,7 @@ import os
 import platform
 import socket
 import subprocess
+import re
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
@@ -32,6 +33,11 @@ def parse_events(xml_text: str) -> list[dict]:
     """wevtutil /f:xml output (several <Event> elements) -> list of simple dicts, oldest first."""
     if not xml_text.strip():
         return []
+    # Hardened parsing: Windows event XML never contains a DTD or entity declarations, so any "<!DOCTYPE" /
+    # "<!ENTITY" is refused before parsing (blocks entity-expansion "billion laughs" and external-entity tricks;
+    # failed-logon events carry user names typed by attackers).
+    if re.search(r"<!\s*(DOCTYPE|ENTITY)", xml_text, re.I):
+        raise ValueError("refused Windows event XML: it contains a DTD/entity declaration")
     root = ET.fromstring(f"<Events>{xml_text}</Events>")
     out = []
     for ev in root.findall("e:Event", NS):

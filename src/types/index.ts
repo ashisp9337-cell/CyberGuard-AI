@@ -142,6 +142,53 @@ export interface AnalysisResult {
   emailSummary?: EmailSummary;
   category?: string | null;
   parsedSignals?: Record<string, unknown> | null;
+  autoDetect?: AutoDetectInfo | null;
+  modelDetails?: ModelDetail[];
+  provenance?: ProvenanceInfo | null;
+  liveCheck?: LiveCheckInfo | null;
+  checkedDetectors?: { detector: string; riskScore: number }[];
+}
+
+// How Auto-detect chose the subtopic (backend app/services/scan_store.py _routing)
+export interface AutoDetectInfo {
+  subtopicId: string;
+  subtopicTitle: string;
+  method: string;
+  status: string; // "ok" | "fallback"
+  reasons: string[];
+  secondary: string[];
+  note: string;
+}
+
+// One trained model's own verdict (backend scan_store._model_details)
+export interface ModelDetail {
+  name: string;
+  level: "high" | "medium" | "low" | string;
+  kind: "probability" | "percentile" | string;
+  probability: number | null;
+  verifyThreshold: number | null;
+  alertThreshold: number | null;
+  notes: string[];
+}
+
+export interface ProvenanceInfo {
+  proof: boolean;
+  hasContentCredentials: boolean;
+  findings: { label: string; detail: string; proof: boolean }[];
+}
+
+export interface LiveCheckInfo {
+  status: string;
+  reason: string;
+  finalUrl: string;
+  redirectChain: string[];
+  page: {
+    title: string;
+    hasPassword: boolean;
+    brandsImitated: string[];
+    externalFormTargets: string[];
+    sensitiveFields: string[];
+  } | null;
 }
 
 export interface ResponseAction {

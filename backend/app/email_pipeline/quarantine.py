@@ -10,9 +10,10 @@ An analyst can then RELEASE it (it was safe), DELETE it (confirmed malicious),
 or QUARANTINE it by hand. Every change is recorded with who / when / note, and
 nothing is ever really erased, so there is a full audit trail.
 
-Note: emails reach CYBERGUARD by upload or paste, so "quarantine" holds the
-email inside CYBERGUARD. Moving it inside a real mailbox (Gmail / Outlook)
-needs a mailbox connection (IMAP / Graph API), which can plug in here later.
+Uploaded / pasted emails are held inside CYBERGUARD. Emails the Gmail watcher finds in the inbox are
+ALSO moved out of the inbox to the Gmail label "CyberGuard-Quarantine" (app/automation/mailbox_quarantine.py);
+"release" moves them back. Nothing is ever deleted from Gmail: "delete" only marks the record as confirmed
+malicious and the email stays in the quarantine label.
 """
 from datetime import datetime, timezone
 
@@ -72,4 +73,6 @@ def to_dict(rec) -> dict:
             "subject": rec.subject, "category": rec.category, "riskScore": rec.risk_score,
             "classification": rec.classification, "status": rec.action_taken,
             "reason": q.get("reason", ""), "history": q.get("history", []),
+            "mailbox": ({"status": (q.get("mailbox") or {}).get("status", ""),
+                         "label": (q.get("mailbox") or {}).get("label", "")} if q.get("mailbox") else None),
             "createdAt": rec.created_at.isoformat() if rec.created_at else None}

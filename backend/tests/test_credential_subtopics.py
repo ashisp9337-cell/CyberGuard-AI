@@ -126,7 +126,10 @@ def test_medium_and_low_levels(model_dir):
     joblib.dump(_bundle("unusual-location", 0.1), model_dir / "cred_unusual-location.joblib")
     os.utime(model_dir / "cred_unusual-location.joblib", (1, 1))       # force reload
     r = A.analyze_event({}, "x", text=LOG, subtopic_id="unusual-location")
-    assert r["subtopicModel"]["level"] == "low" and r["riskScore"] < 26
+    # a "low" model adds nothing: the score is exactly what the rules give (here the 19 Oct "first login from a
+    # new country" rule fires for the RU login after 5 IN logins)
+    rules_only = min(100, sum(i["weight"] for i in r["indicators"] if i["triggered"]))
+    assert r["subtopicModel"]["level"] == "low" and r["riskScore"] == rules_only
 
 
 def test_model_never_lowers_what_the_rules_found(model_dir):

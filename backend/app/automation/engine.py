@@ -191,6 +191,6 @@ def save_and_alert(*, module_id: str, subtopic_id: str, subtopic_title: str, res
         scan_id = scan.id
     finally:
         db.close()
-    if result["riskScore"] >= notifier.get_settings().ALERT_MIN_SCORE:
+    if result["riskScore"] >= notifier.ALERT_FLOOR:              # the owner's alert sensitivity decides
         notifier.alert_for_scan(scan_id)
     return scan_id

@@ -146,7 +146,7 @@ class UserSettings(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: gen_id("SET"))
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), unique=True, index=True)
-    sensitivity: Mapped[str] = mapped_column(String, default="balanced")  # low | balanced | high
+    sensitivity: Mapped[str] = mapped_column(String, default="balanced")  # conservative | balanced | aggressive (alert level, see notifier.alert_threshold)
     notifications_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     email_notifications: Mapped[bool] = mapped_column(Boolean, default=True)
     integration_settings: Mapped[dict] = mapped_column(JSON, default=dict)

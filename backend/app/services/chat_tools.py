@@ -206,7 +206,8 @@ def build_tools(db: Session, user_id: str) -> list:
         notifications on".
 
         Returns:
-            sensitivity (low/balanced/high), notifications_enabled,
+            sensitivity (conservative = alerts for critical only, balanced = high risk and critical,
+            aggressive = suspicious and above), notifications_enabled,
             email_notifications. Never includes secret keys.
         """
         s = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()

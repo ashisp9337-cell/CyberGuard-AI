@@ -12,5 +12,7 @@ export const API_CONFIG = {
   // of issuing network requests — used for local UI-only development or demos
   // without a backend. Defaults to false now that a real backend exists;
   // set VITE_USE_MOCK_DATA=true to force mock mode.
-  useMockData: import.meta.env.VITE_USE_MOCK_DATA === "true",
+  // A production build (npm run build) NEVER uses mock data, whatever .env says: a real deployment must
+  // only ever show real results.
+  useMockData: !import.meta.env.PROD && import.meta.env.VITE_USE_MOCK_DATA === "true",
 };

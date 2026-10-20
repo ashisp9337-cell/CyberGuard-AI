@@ -101,6 +101,7 @@ SAMPLES = os.path.join(os.path.dirname(__file__), "email_samples")
 class FakeIMAP:
     mails = {}          # the inbox
     spam = {}           # Gmail's Spam folder
+    labels = {}         # other labels (e.g. CyberGuard-Quarantine): name -> {uid: raw}
     log = []
 
     def __init__(self, host, port, timeout=None):
@@ -115,14 +116,36 @@ class FakeIMAP:
 
     def select(self, folder, readonly=False):
         FakeIMAP.log.append(("select", folder, readonly))
-        self.box = FakeIMAP.spam if "Spam" in folder else FakeIMAP.mails
+        name = folder.strip('"')
+        self.box = (FakeIMAP.spam if "Spam" in name else FakeIMAP.mails if name == "INBOX"
+                    else FakeIMAP.labels.setdefault(name, {}))
+        self.readonly = readonly
         return "OK", [b"2"]
+
+    def create(self, name):
+        FakeIMAP.log.append(("create", name))
+        if name.strip('"') in FakeIMAP.labels:
+            return "NO", [b"[ALREADYEXISTS] Duplicate folder name"]
+        FakeIMAP.labels[name.strip('"')] = {}
+        return "OK", [b"Success"]
 
     def response(self, name):
         return name, [b"777"]
 
     def uid(self, cmd, *args):
         FakeIMAP.log.append(("uid", cmd) + args)
+        if cmd == "MOVE":
+            assert not self.readonly, "MOVE on a read-only folder"
+            uid, dest = int(args[0]), args[1].strip('"')
+            raw = self.box.pop(uid)
+            target = FakeIMAP.mails if dest == "INBOX" else FakeIMAP.labels.setdefault(dest, {})
+            new_uid = max(list(target) + [1000]) + 1
+            target[new_uid] = raw
+            return "OK", [f"[COPYUID 1 {uid} {new_uid}] (Success)".encode()]
+        if cmd == "search" and len(args) >= 3 and args[1] == "HEADER":
+            want = args[-1].strip('"')
+            hits = [u for u, raw in self.box.items() if want.encode() in raw]
+            return "OK", [b" ".join(str(u).encode() for u in hits)]
         if cmd == "search":
             crit = args[-1]
             lo = int(crit.split()[1].split(":")[0]) if crit.startswith("UID") else 1
@@ -238,7 +261,8 @@ def test_gmail_watcher_needs_setup_without_password(monkeypatch, fresh_state):
 
 
 # ---- Downloads folder ------------------------------------------------------------------------
-def test_downloads_watcher_checks_only_new_finished_files_and_never_deletes(monkeypatch, fresh_state, auth_client):
+def test_downloads_watcher_checks_only_new_finished_files_and_quarantines_never_deletes(monkeypatch, fresh_state,
+                                                                                          auth_client):
     from app.automation import downloads_watcher
     from app.core.config import get_settings
     folder = fresh_state / "Downloads"
@@ -253,8 +277,15 @@ def test_downloads_watcher_checks_only_new_finished_files_and_never_deletes(monk
     assert w.run_once()["checked"] == 0                                          # waits one round (size stable?)
     st = w.run_once()
     assert st["checked"] == 1 and st["threats"] == 1 and "Invoice_2026.pdf.exe" in st["lastFinding"]
-    assert bad.exists() and (folder / "old_setup.exe").exists()                  # nothing deleted or moved
+    # dangerous: MOVED to quarantine (never deleted); the file that was already there is left alone
+    from app.automation import file_quarantine
+    assert not bad.exists() and (folder / "old_setup.exe").exists()
+    held = file_quarantine.list_files()
+    assert len(held) == 1 and held[0]["name"] == "Invoice_2026.pdf.exe" and held[0]["scanId"]
+    copy = file_quarantine.quarantine_dir() / f"{held[0]['id']}.quarantined"
+    assert copy.read_bytes() == b"MZ" + b"\x90" * 500                           # same bytes, cannot be double-clicked
     assert w.run_once()["checked"] == 1                                          # total unchanged: not scanned twice
+    file_quarantine.restore(held[0]["id"], by="test")                            # cleanup for other tests
 
 
 def test_harmless_download_is_not_reported(monkeypatch, fresh_state, auth_client):

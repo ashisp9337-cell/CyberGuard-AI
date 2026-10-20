@@ -1,5 +1,6 @@
 """
-Retrain the Financial, Brand and Government impersonation models with REAL genuine messages.
+Retrain the Financial, Brand, Government, Senior-management and Teacher/University impersonation models
+with REAL genuine messages (management and teacher also use the real email corpus, phishing_email_real.tsv).
 
 Why: the old training sets had real scam SMS on one side and only SYNTHETIC (hand-written) genuine
 messages on the other, so the models partly learned "real writing = scam". On real genuine bank SMS
@@ -21,7 +22,8 @@ What this script does:
 
 Run from backend/ (a few minutes):
     python -m app.ml.training.retrain_impersonation_real
-Output: app/ml/models/{financial_impersonation,brand_impersonation,government_official_impersonation}.joblib
+Output: app/ml/models/{financial_impersonation,brand_impersonation,government_official_impersonation,
+        senior_management_impersonation,teacher_university_impersonation}.joblib
         + <name>.metrics.json
 """
 import argparse
@@ -65,6 +67,20 @@ TOPICS = {
         "re": r"\b(?:tax|refund|hmrc|irs|government|govt|gov|aadhaar|aadhar|pan card|passport|police|court|customs|visa|"
               r"dvla|fine|penalty|ministry|council|license|licence|uidai|epfo|income tax|social security|benefit)\b",
         "mask": False,
+    },
+    # these two also learn from the real EMAIL corpus: CEO / manager fraud and fake university notices arrive by email
+    "management": {
+        "csv": "senior_management_impersonation.csv", "out": "senior_management_impersonation.joblib",
+        "re": r"\b(?:ceo|cfo|coo|md|managing director|director|chairman|my manager|your manager|boss|hr department|"
+              r"payroll|wire transfer|gift ?cards?|vendor payment|invoice|urgent task|are you at your desk|"
+              r"confidential request)\b",
+        "mask": False, "email": True,
+    },
+    "teacher": {
+        "csv": "teacher_university_impersonation.csv", "out": "teacher_university_impersonation.joblib",
+        "re": r"\b(?:university|college|professor|prof\.|dean|principal|teacher|exam|examination|admission|scholarship|"
+              r"tuition|semester|hall ticket|hostel|registrar|campus|student|marksheet|degree certificate)\b",
+        "mask": False, "email": True,
     },
 }
 
@@ -120,7 +136,25 @@ def clean_labels(df, threshold=0.97):
     return df[~bad].reset_index(drop=True), df[bad]
 
 
+def load_email():
+    """Real phishing / legitimate emails (phishing_email_real.tsv), first 3,000 characters of each."""
+    em = pd.read_csv(os.path.join(DATA, "phishing_email_real.tsv"), sep="\t", header=None, names=["label", "text"],
+                     on_bad_lines="skip", quoting=3, dtype=str).dropna()
+    em = em[em["label"].str.lower().isin(["phishing", "legitimate"])]
+    em = pd.DataFrame({"text": em["text"].str[:3000], "y": (em["label"].str.lower() == "phishing").astype(int)})
+    em["key"] = em["text"].map(norm)
+    conflict = em.groupby("key")["y"].nunique()
+    em = em[~em["key"].isin(conflict[conflict > 1].index)].drop_duplicates("key")
+    return em.assign(p=0.0).reset_index(drop=True)
+
+
 def detector_module(topic):
+    if topic == "management":
+        from app.detectors import senior_management_impersonation as m
+        return m, m.analyze_senior_management_impersonation
+    if topic == "teacher":
+        from app.detectors import teacher_university_impersonation as m
+        return m, m.analyze_teacher_university_impersonation
     if topic == "financial":
         from app.detectors import financial_impersonation as m
         return m, m.analyze_financial_impersonation
@@ -186,6 +220,7 @@ def main():
     sms["b"] = sms["text"].map(bucket)
     train_sms, test_sms = sms[sms.b >= 20], sms[sms.b < 20]
     test_keys = set(test_sms["key"])
+    email = None
     report = {}
 
     for topic, cfg in TOPICS.items():
@@ -197,11 +232,19 @@ def main():
         old["key"] = old["text"].map(norm)
         old = old[~old["key"].isin(test_keys)]          # nothing from the test set may be trained on
 
-        on_topic = train_sms[train_sms["text"].str.contains(rx)]
+        src_train, src_test = train_sms, test_sms
+        if cfg.get("email"):
+            if email is None:
+                email = load_email()
+                email["b"] = email["text"].map(bucket)
+            src_train = pd.concat([train_sms, email[email.b >= 20]], ignore_index=True)
+            src_test = pd.concat([test_sms, email[email.b < 20]], ignore_index=True)
+            old = old[~old["key"].isin(set(email[email.b < 20]["key"]))]
+        on_topic = src_train[src_train["text"].str.contains(rx)]
         real_scam = on_topic[on_topic.y == 1]
         real_hard_genuine = on_topic[(on_topic.y == 0) & (on_topic.p < ON_TOPIC_CLEAN)]
         set_aside_train = int(((on_topic.y == 0) & (on_topic.p >= ON_TOPIC_CLEAN)).sum())
-        other_genuine = train_sms[(train_sms.y == 0) & ~train_sms.index.isin(on_topic.index)]
+        other_genuine = src_train[(src_train.y == 0) & ~src_train.index.isin(on_topic.index)]
         n_other = min(len(other_genuine), max(2000, 2 * len(real_hard_genuine)))
         other_genuine = other_genuine.sample(n=n_other, random_state=SEED)
 
@@ -212,16 +255,18 @@ def main():
         model = make_pipeline().fit(x, train["y"])
 
         # held-out REAL test sets
-        t_topic = test_sms[test_sms["text"].str.contains(rx)]
+        t_topic = src_test[src_test["text"].str.contains(rx)]
         set_aside_test = int(((t_topic.y == 0) & (t_topic.p >= ON_TOPIC_CLEAN)).sum())
         t_topic = t_topic[(t_topic.y == 1) | (t_topic.p < ON_TOPIC_CLEAN)]
-        t_other = test_sms[~test_sms.index.isin(t_topic.index)]
+        t_other = src_test[~src_test.index.isin(t_topic.index)]
         def take(df, n):
             return df.sample(n=min(n, len(df)), random_state=SEED) if len(df) > n else df
+        kind = "SMS + email" if cfg.get("email") else "SMS"
         tests = {
-            f"real genuine {topic}-related SMS": (list(t_topic[t_topic.y == 0].text), [0] * int((t_topic.y == 0).sum())),
-            f"real {topic}-related scam SMS": (list(t_topic[t_topic.y == 1].text), [1] * int((t_topic.y == 1).sum())),
-            "real genuine everyday SMS": (list(take(t_other[t_other.y == 0], 3000).text), [0] * min(3000, int((t_other.y == 0).sum()))),
+            f"real genuine {topic}-related {kind}": (list(t_topic[t_topic.y == 0].text), [0] * int((t_topic.y == 0).sum())),
+            f"real {topic}-related scam {kind}": (list(t_topic[t_topic.y == 1].text), [1] * int((t_topic.y == 1).sum())),
+            f"real genuine everyday {kind}": (list(take(t_other[t_other.y == 0], 3000).text),
+                                              [0] * min(3000, int((t_other.y == 0).sum()))),
         }
         old_path = os.path.join(MODELS, cfg["out"])
         old_model = joblib.load(old_path)

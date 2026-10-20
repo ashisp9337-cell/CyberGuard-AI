@@ -214,9 +214,19 @@ def test_routes_impersonation_to_category_detector(spies):
     assert result["_sentinel"] == "government"
 
 
-def test_unclear_identity_uses_existing_generic_impersonation(spies):
+def test_unclear_identity_runs_every_impersonation_detector(spies):
     result, c = route("impersonation", text="Please send me the files by evening.")
-    assert c.status == "fallback" and called(spies) == ["analyze_identity"]
+    assert c.status == "fallback"
+    assert sorted(called(spies)) == sorted(["government", "management", "teacher", "financial", "brand",
+                                            "contact", "analyze_identity"])
+    assert len(result["checkedDetectors"]) == 7
+
+
+def test_message_to_a_student_goes_to_teacher_university():
+    text = ("Dear Student, your hall ticket for the semester exam is blocked due to pending fees of Rs 3,450. "
+            "Pay within 2 hours at bit.ly/exam-fee-pay or you will not be allowed to appear.")
+    c = sr._classify_impersonation(text, {}, None, None)
+    assert c.subtopic_id == "teacher-impersonation"
 
 
 def test_routes_credential_and_cyber_and_url_module(spies):

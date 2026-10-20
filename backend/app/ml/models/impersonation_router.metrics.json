@@ -1,0 +1,123 @@
+{
+  "model": "TF-IDF (words 1-2 + characters 3-5) + multinomial Logistic Regression",
+  "trained_at": "2026-10-18T18:25:47+00:00",
+  "training_rows": {
+    "financial-impersonation": 4004,
+    "none": 3446,
+    "brand-impersonation": 2623,
+    "management-impersonation": 2299,
+    "teacher-impersonation": 2272,
+    "government-impersonation": 1797,
+    "contact-impersonation": 1374
+  },
+  "test": "20% of messages by text hash, never trained on; router check on real messages (management / teacher sets have no real-only part)",
+  "model_alone_accuracy": {
+    "brand-impersonation": 0.942,
+    "contact-impersonation": 0.966,
+    "financial-impersonation": 0.976,
+    "government-impersonation": 0.988,
+    "management-impersonation": 1.0,
+    "none": 0.94,
+    "teacher-impersonation": 0.998
+  },
+  "router_old_rules_only": {
+    "brand-impersonation": {
+      "n": 376,
+      "right": 0.729,
+      "generic": 0.189,
+      "wrong": 0.082
+    },
+    "contact-impersonation": {
+      "n": 379,
+      "right": 0.074,
+      "generic": 0.916,
+      "wrong": 0.011
+    },
+    "financial-impersonation": {
+      "n": 400,
+      "right": 0.623,
+      "generic": 0.338,
+      "wrong": 0.04
+    },
+    "government-impersonation": {
+      "n": 40,
+      "right": 0.4,
+      "generic": 0.475,
+      "wrong": 0.125
+    },
+    "management-impersonation": {
+      "n": 400,
+      "right": 0.54,
+      "generic": 0.407,
+      "wrong": 0.052
+    },
+    "none": {
+      "n": 400,
+      "right": 0.968,
+      "generic": 0.0,
+      "wrong": 0.033
+    },
+    "teacher-impersonation": {
+      "n": 400,
+      "right": 0.627,
+      "generic": 0.372,
+      "wrong": 0.0
+    },
+    "ALL": {
+      "n": 2395,
+      "right": 0.593,
+      "generic": 0.369,
+      "wrong": 0.038
+    }
+  },
+  "router_new_rules_plus_model": {
+    "brand-impersonation": {
+      "n": 376,
+      "right": 0.918,
+      "generic": 0.061,
+      "wrong": 0.021
+    },
+    "contact-impersonation": {
+      "n": 379,
+      "right": 0.939,
+      "generic": 0.061,
+      "wrong": 0.0
+    },
+    "financial-impersonation": {
+      "n": 400,
+      "right": 0.922,
+      "generic": 0.052,
+      "wrong": 0.025
+    },
+    "government-impersonation": {
+      "n": 40,
+      "right": 0.8,
+      "generic": 0.15,
+      "wrong": 0.05
+    },
+    "management-impersonation": {
+      "n": 400,
+      "right": 0.948,
+      "generic": 0.052,
+      "wrong": 0.0
+    },
+    "none": {
+      "n": 400,
+      "right": 0.953,
+      "generic": 0.0,
+      "wrong": 0.048
+    },
+    "teacher-impersonation": {
+      "n": 400,
+      "right": 0.995,
+      "generic": 0.005,
+      "wrong": 0.0
+    },
+    "ALL": {
+      "n": 2395,
+      "right": 0.944,
+      "generic": 0.04,
+      "wrong": 0.016
+    }
+  }
+}

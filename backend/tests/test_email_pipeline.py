@@ -4,7 +4,6 @@ Tests for the Email Intelligence Pipeline (app/email_pipeline).
 All live lookups (DNS, WHOIS, SSL, VirusTotal, URLhaus) are stubbed, so the
 suite runs offline and gives the same result every time.
 """
-import glob
 import os
 
 import pytest
