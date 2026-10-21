@@ -88,8 +88,11 @@ def explain_url_features(url: str, feature_values: list) -> list[dict]:
     add(f["has_punycode"] == 1, "Punycode / homoglyph domain",
         "Domain uses punycode encoding, often used to visually impersonate a trusted brand.",
         "critical", 24)
-    add(f["num_at"] > 0, "'@' character in URL",
-        "The '@' symbol can be used to hide the real destination host from the visible domain.",
+    # Only an '@' BEFORE the host hides the real destination (paypal.com@evil.tk). An '@' in the path is normal on
+    # many real sites (medium.com/@name, youtube.com/@channel) - fixed 21 Oct after real posts were flagged.
+    authority = (url.split("://", 1)[-1].split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]) if url else ""
+    add("@" in authority, "'@' character in URL",
+        "The '@' symbol before the website name hides the real destination: the browser ignores everything before it.",
         "high", 18)
     add(f["url_length"] > 90, "Unusually long URL",
         f"URL is {int(f['url_length'])} characters long, often used to obscure malicious paths/parameters.",

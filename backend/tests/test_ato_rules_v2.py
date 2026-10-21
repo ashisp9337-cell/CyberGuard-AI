@@ -92,3 +92,14 @@ def test_no_history_means_no_new_country_judgement():
     log = ("2026-10-01 09:00:00 sign-in success user=new ip=49.37.12.1 country=IN\n"
            "2026-10-02 09:00:00 sign-in success user=new ip=196.251.80.9 country=NG")
     assert A.new_place_logins(log) == []
+
+
+def test_impossible_travel_alone_is_verify_level():
+    """Bhubaneswar then Moscow 40 minutes later: at least 'verify' (51), never harmless (21 Oct check)."""
+    from app.detectors.account_takeover import analyze_event
+    log = ("2026-10-20 09:00:00 login success user=ashis ip=49.37.12.10 location=Bhubaneswar\n"
+           "2026-10-20 09:40:00 login success user=ashis ip=95.165.30.2 location=Moscow")
+    assert analyze_event({}, text=log)["riskScore"] >= 51
+    trip = ("2026-10-19 09:00:00 login success user=ashis ip=49.37.12.10 location=Bhubaneswar\n"
+            "2026-10-20 18:00:00 login success user=ashis ip=103.21.58.77 location=Delhi")
+    assert analyze_event({}, text=trip)["riskScore"] < 51

@@ -574,8 +574,11 @@ def analyze_event(fields: dict, subtopic_title: str = "Credential Theft & Accoun
     add(s["successAfterFailures"], "Successful login after repeated failures",
         "A login succeeded right after a run of failures -- the attacker may have found the password.",
         "critical", 40, "T1110", "successAfterFailures")
-    add(s["impossibleTravel"], "Impossible travel", "Logins from places too far apart for the elapsed time.",
-        "critical", 40, "T1078", "impossibleTravel")
+    # weight 51 (was 40, changed 21 Oct): on its own it now means "verify" - a VPN can cause it, so it is not an alert
+    # alone, but a login from Moscow 40 minutes after one in Bhubaneswar must not look harmless (it scored 40)
+    add(s["impossibleTravel"], "Impossible travel", "Logins from places too far apart for the elapsed time (a VPN "
+        "can also cause this - check whether the account owner uses one).",
+        "critical", 51, "T1078", "impossibleTravel")
     add(s["unusualLocation"] and not s["impossibleTravel"], "Login from unusual location",
         "Sign-in from a place this account does not normally use.", "high", 18, "T1078", "unusualLocation")
     add(s["newDevice"], "Unrecognized device", "Device does not match any previously trusted device.",

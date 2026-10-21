@@ -79,7 +79,24 @@ def read_frames(path: str, k: int = FRAMES) -> list[tuple[int, float, np.ndarray
 
 def make_detector(model_path: str):
     import cv2
-    return cv2.FaceDetectorYN.create(model_path, "", (320, 320), 0.7, 0.3, 5000)
+    return create_yunet(cv2, model_path, (320, 320))
+
+
+def create_yunet(cv2, model_path: str, size):
+    """YuNet face detector. OpenCV 5 prints a harmless "Targets are not supported by the new graph engine" warning
+    while creating it (the detector asks for the default CPU target, which the new engine already uses). Only that
+    creation step runs with OpenCV's log level at ERROR; the previous level is restored right after, so no other
+    OpenCV warning is hidden."""
+    log = getattr(getattr(cv2, "utils", None), "logging", None)
+    old = None
+    try:
+        if log is not None:
+            old = log.getLogLevel()
+            log.setLogLevel(log.LOG_LEVEL_ERROR)
+        return cv2.FaceDetectorYN.create(model_path, "", size, 0.7, 0.3, 5000)
+    finally:
+        if log is not None and old is not None:
+            log.setLogLevel(old)
 
 
 def largest_face(bgr: np.ndarray, detector):

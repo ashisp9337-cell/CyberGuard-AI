@@ -62,9 +62,8 @@ def test_scam_patterns_catch_reworded_scams(sub, text):
 @pytest.mark.parametrize("sub,text", [
     ("sms-analysis", "Your Amazon parcel will arrive tomorrow between 10 am and 2 pm. No action needed."),
     ("sms-analysis", "Payment of Rs 499 for your Airtel bill was successful. Thank you."),
-    pytest.param("social-media-analysis", "Join our free webinar on stock market basics this Sunday, link in bio",
-                 marks=pytest.mark.xfail(strict=True, reason="known weakness of the social-media MODEL (61% scam, no rule "
-                                                            "fires); fixed only by retraining - strict, so it alerts once fixed")),
+    # was a known false alarm (xfail) until 21 Oct: promotion that asks for nothing is now held at 50
+    ("social-media-analysis", "Join our free webinar on stock market basics this Sunday, link in bio"),
     ("social-media-analysis", "My phone got stuck on the boot logo after the update, any idea how to fix it?"),
 ])
 def test_scam_patterns_do_not_flag_normal_messages(sub, text):

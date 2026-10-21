@@ -65,7 +65,8 @@ def _face_detector(width, height):
     import cv2
     if not hasattr(cv2, "FaceDetectorYN"):
         return None
-    det = cv2.FaceDetectorYN.create(FACE_DETECTOR_PATH, "", (width, height), 0.7, 0.3, 5000)
+    from app.detectors.video_frames import create_yunet
+    det = create_yunet(cv2, FACE_DETECTOR_PATH, (width, height))
     return det
 
 

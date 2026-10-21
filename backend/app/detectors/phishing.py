@@ -175,8 +175,27 @@ _BEC = (_P(r"\b(ceo|cfo|md|managing director|director|chairman|president|boss|fo
         _P(r"(strictly confidential|keep (this|it) confidential|confidential (deal|matter|transaction|acquisition)|"
            r"tell (no ?one|nobody)|do ?n[o']?t (tell|call|discuss|inform|share)|keep (this|it) (between us|quiet|secret)|"
            r"be discreet|i'?m in a meeting|can'?t (talk|take calls))"))
+# academic authority scams (added 21 Oct after a live check of realistic Indian college messages)
+_ACAD = r"(principal|hod|head of (the )?department|professor|prof\.?|dean|registrar|vice[- ]chancellor|exam(ination)? cell|" \
+        r"controller of exam\w*|placement (cell|officer)|training (&|and) placement|t ?& ?p cell|teacher|faculty|" \
+        r"class coordinator|warden)"
+_ACAD_FAVOUR = (_P(r"\b" + _ACAD + r"\b"),
+                _P(r"(gift ?cards?|new (whats ?app |mobile |phone )?number|personal number|(small|quick|urgent) favou?r|"
+                   r"i'?m in a meeting|can'?t (talk|take calls))"),
+                _P(r"\b(buy|purchase|codes?|urgent(ly)?|asap|immediately|right now|kindly|whats ?app|text me|message me)\b"))
+_ACAD_FEE = (_P(r"\b(internship|offer letter|job offer|placement|scholarship|stipend|fellowship|admit card|hall ticket|"
+                r"degree|certificate|result)s?\b"),
+             _P(r"(security deposit|registration (fee|charge)|processing (fee|charge)|release (fee|charge)|verification fee|"
+                r"refundable deposit|pay (a |the )?(small )?(fee|amount|deposit)|pay (rs\.?|inr|₹) ?\d)"))
+_OTP_REQ = (_P(r"\b(send|share|tell|forward|give|read out)\s+(me\s+)?(the\s+|your\s+|that\s+|this\s+)?(otp|one[- ]time password|"
+               r"verification code|(\d[- ]digit )?code (you|that) (just )?(received|got))"),)
+_OTP_SAFE = _P(r"(do ?n[o']?t|never|no one|nobody|not to)\s+(\w+\s+){0,3}(send|share|tell|forward|give|read out)")
+_SCHOLAR_HOLD = (_P(r"\b(scholarship|stipend|fellowship|nsp|pm[- ]?yasasvi|post[- ]matric)\b"),
+                 _P(r"(on hold|pending|stopped|blocked|rejected|withheld|cancell?ed|will be (lapsed|cancell?ed))"),
+                 _P(r"\b(update|verify|submit|share|send|confirm|re-?enter)\b[^.\n]{0,40}\b(bank|aadhaa?r|account|kyc|"
+                    r"details|ifsc|pan)\b"))
 SCAM_PATTERNS = [
-    # (name, regexes that must ALL match, needs a link?, floor, description)
+    # (name, regexes that must ALL match, needs a link?, floor, description[, unless-regex])
     ("Parcel held - pay a fee", _PARCEL, False, 71,
      "A parcel 'on hold' that you must pay a small fee to release: the most common delivery scam (India Post, FedEx, DHL ...)."),
     ("Investment / crypto profit pitch", _INVEST, False, 71,
@@ -192,6 +211,18 @@ SCAM_PATTERNS = [
      "their usual number)."),
     ("Secret payment request from an executive", _BEC, False, 75,
      "A senior person asks for a payment and to keep it secret: CEO fraud / business e-mail compromise."),
+    ("Gift card / favour request from a teacher or principal", _ACAD_FAVOUR, False, 71,
+     "A principal / HOD / professor 'in a meeting' asks for gift cards or a favour on a new number: a real college would "
+     "never do this. Call the person on the number you already know."),
+    ("Fee for an offer letter, scholarship or admit card", _ACAD_FEE, False, 71,
+     "Asks for a deposit or fee to release an internship / offer letter, scholarship, admit card or certificate: colleges "
+     "and real companies collect fees only through their official portal, never to release a letter."),
+    ("Asks for your OTP", _OTP_REQ, False, 75,
+     "Asks you to send the one-time code you just received: whoever has that code can log in or pay as you. No teacher, "
+     "bank or company ever needs it.", _OTP_SAFE),
+    ("Scholarship on hold - update bank details", _SCHOLAR_HOLD, False, 71,
+     "Says your scholarship is on hold and asks for bank / Aadhaar details: real scholarships (NSP) are updated only on "
+     "scholarships.gov.in, never through a message."),
 ]
 
 
@@ -201,7 +232,9 @@ PATTERNS_FOR = {
     "brand": ("Parcel held - pay a fee", "Fake account-violation appeal", "Billing update request", "Paid task scam"),
     "financial": ("Investment / crypto profit pitch", "Billing update request"),
     "management": ("Secret payment request from an executive",),
-    "teacher": ("Paid task scam",),
+    "teacher": ("Paid task scam", "Gift card / favour request from a teacher or principal",
+                "Fee for an offer letter, scholarship or admit card", "Asks for your OTP",
+                "Scholarship on hold - update bank details"),
     "contact": ("Emergency money request",),
     "government": (),
 }
@@ -219,12 +252,16 @@ def scam_patterns(text: str, topic: str | None = None) -> tuple[list[dict], int]
     windows = [low[i:i + 300] for i in range(0, max(len(low) - 150, 1), 150)] or [low]
     inds, floor = [], 0
     allowed = PATTERNS_FOR.get(topic) if topic else None
-    for name, rxs, needs_link, fl, desc in SCAM_PATTERNS:
+    for name, rxs, needs_link, fl, desc, *unless in SCAM_PATTERNS:
         if allowed is not None and name not in allowed:
             continue
         hits = None
         for w in windows:
             found = [rx.search(w) for rx in rxs]
+            # unless: a match only counts when it is not part of a warning ("do not share the OTP")
+            if all(found) and unless:
+                found[-1] = next((m for m in rxs[-1].finditer(w)
+                                  if not unless[0].search(w[max(0, m.start() - 30):m.end()])), None)
             if all(found):
                 hits = found
                 break
@@ -322,6 +359,27 @@ def _link_destination_indicator(text: str, subtopic_id: str | None) -> dict | No
     }
 
 
+# Signs that a social-media post asks for something a scammer wants (money, details, a click, a contact) - added 21 Oct.
+# The social model learned from YouTube / SMS spam, where plain self-promotion ("new video, link in bio", "subscribe
+# to our channel", "vote for our project") is labelled spam. Promotion is not a scam, so on the social-media page the
+# model ALONE (no rule fired, none of these signs) can no longer push a post past 50.
+# Measured (links scored without network): held-out real SMS scams caught 665 -> 644 of 800 (the ones held at 50 are
+# mostly app / recharge adverts), real SMS wrongly flagged 11 -> 10 of 800; 20 normal social posts wrongly flagged
+# 6 -> 2 (the 2 left contain "win a free" or a Medium link - anyone can publish there). "free" right before
+# webinar / workshop / class / event is not a scam sign (a free event asks for nothing).
+SOCIAL_SCAM_SIGNS = re.compile(
+    r"https?://|www\.|\b[a-z0-9-]+\.(?:com|net|org|in|ly|xyz|top|info|co|me|link|site|online|club|biz)\b|\d{5,}|₹|"
+    r"\brs\.?\s?\d|\$|£|€|\bmoney|\bcash|\bpay|\bpaid|\bsend\b|\bupi\b|\bbank|\baccount|\bverif|\bpassword|\botp\b|"
+    r"\bpin\b|\bkyc|\blogin|\bclaim|\bprize|\bwin\b|\bwon\b|\bwinner|\breward|\bgift|\blottery|\bcash ?back|"
+    r"\bfree\b(?!\s+(?:online\s+)?(?:webinar|workshop|seminar|session|class|classes|course|masterclass|event|entry|"
+    r"demo|trial|talk|meetup|bootcamp)s?\b)|"
+    r"\burgent|\bsuspend|\bblock|\bexpire|\bcall\b|\btxt\b|\btext\b|\bwhatsapp|\btelegram|\bdm me|\bcontact|\binvest|"
+    r"\bcrypto|\bbitcoin|\bearn|\bincome|\bjob\b|\bloan|\bcredit|\bdebit|\bcard\b|\boffer|\bdeal\b|\bdiscount|\bcode\b|"
+    r"\bstop\b|\bunsubscri|\bdetails\b|\bclick|\bconfirm|\bdeliver|\bparcel|\bpackage|\bshipment|\block|\baccess\b|"
+    r"\bidentity|\bdisabl|\blog ?in|\bsign ?in|\bsupport|\bsettle|\bpoints\b|\bredeem|\bpenalt|\bfine\b|\btax|\brefund|"
+    r"\bsecurity|\bupdate your|\bsingles|\bdating|\brebate|\breclaim", re.I)
+
+
 def analyze_text(text: str, sender: str | None = None, subtopic_title: str = "Phishing Detection",
                   subtopic_id: str | None = None, reply_to: str | None = None,
                   scan_links: bool = True) -> dict:
@@ -374,6 +432,13 @@ def analyze_text(text: str, sender: str | None = None, subtopic_title: str = "Ph
         model_note = f" A trained classifier corroborated this with a phishing probability of {proba*100:.0f}%." if model_used else " (Trained model unavailable — indicators are rule-based only.)"
         explanation = f"Detected {len(triggered)} indicator(s), most notably: {names}.{model_note}"
 
+    # links that were checked and found NOT risky do not count as a scam sign; the bare "contains a link" note neither
+    only_safe_links = all(i["label"] == "Suspicious embedded link" for i in triggered)
+    if (subtopic_id == "social-media-analysis" and model_used and only_safe_links and blended > 50
+            and not SOCIAL_SCAM_SIGNS.search(LINK_RE.sub(" ", text))):
+        blended = 50
+        explanation += (" The post reads like promotion, but it asks for nothing a scammer wants (no risky link, money, "
+                        "details or contact request), so the score is held at 50.")
     if pattern_floor and text:
         blended = max(blended, pattern_floor)
         confidence = max(confidence, 80)

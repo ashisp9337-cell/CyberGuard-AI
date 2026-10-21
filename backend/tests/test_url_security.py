@@ -121,3 +121,13 @@ def test_brand_login_on_free_platform_routes_to_fake_login_page():
     c = subtopic_router._classify_url("https://m365-mfa-renew.pages.dev/login?user=ashis", "")
     assert c.subtopic_id == "fake-login-page" and "domain-spoofing" in c.secondary
     assert subtopic_router._classify_url("https://paypal.com.account-verify.co/signin", "").subtopic_id == "domain-spoofing"
+
+
+def test_at_sign_in_path_is_not_the_hidden_host_trick():
+    """medium.com/@name and youtube.com/@channel are normal; only an '@' before the host hides the destination."""
+    from app.detectors.malicious_url import analyze_url
+    def labels(u):
+        return [i["label"] for i in analyze_url(u, subtopic_id="malicious-url", network=False)["indicators"] if i["triggered"]]
+    assert "'@' character in URL" not in labels("https://www.youtube.com/@MrBeast")
+    assert "'@' character in URL" not in labels("https://medium.com/@ashis/learning-python")
+    assert "'@' character in URL" in labels("http://paypal.com@evil.tk/x")
