@@ -124,7 +124,26 @@ BRAND_DOMAINS = {
     "myntra": {"myntra.com"},
     "swiggy": {"swiggy.com"},
     "zomato": {"zomato.com"},
+    # --- crypto wallets / exchanges and other brands seen most in live phishing feeds (OpenPhish, PhishTank,
+    #     urlscan collection 20 Oct 2026) that the list missed ----------------------------------------------------
+    "imtoken": {"token.im"},
+    "trustwallet": {"trustwallet.com"},
+    "trezor": {"trezor.io"},
+    "ledger": {"ledger.com"},                 # everyday word: whole-word match only (WHOLE_WORD_BRANDS)
+    "kucoin": {"kucoin.com"},
+    "opensea": {"opensea.io"},
+    "uniswap": {"uniswap.org"},
+    "wazirx": {"wazirx.com"},
+    "coindcx": {"coindcx.com"},
+    "roblox": {"roblox.com", "rbxcdn.com", "robloxlabs.com"},
+    "allegro": {"allegro.pl", "allegrolokalnie.pl", "allegro.com", "allegro.cz", "allegro.sk", "allegro.hu"},  # whole word only
+    "comcast": {"comcast.com", "comcast.net", "comcastbusiness.net", "xfinity.com", "xfinityhome.com"},
+    "xfinity": {"xfinity.com", "xfinityhome.com", "comcast.com", "comcast.net", "comcastbusiness.net"},
 }
+
+# Brand names that are also ordinary words ("ledger" in accounting sites, "allegro" in music): only a whole token
+# counts (ledger-live-verify.com yes, tallyledger.com no) - no substring or one-typo matching for these.
+WHOLE_WORD_BRANDS = {"ledger", "allegro"}
 
 # Nicknames that clearly mean a brand (matched as whole words only).
 BRAND_ALIASES = {
@@ -133,6 +152,7 @@ BRAND_ALIASES = {
     "icloud": "apple", "appleid": "apple", "gmail": "google", "gdrive": "google", "fb": "facebook",
     "insta": "instagram", "yono": "sbi", "sbionline": "sbi", "netflx": "netflix", "amzn": "amazon",
     "phonepay": "phonepe", "gpay": "google", "paytmbank": "paytm",
+    "ledgerlive": "ledger", "allegrolokalnie": "allegro", "trustwalet": "trustwallet",
 }
 
 # Only government / regulated registrars can hand out names under these suffixes, so a brand word
@@ -214,6 +234,8 @@ def _token_matches_brand(token: str, brand: str, allow_substring: bool) -> bool:
     t = _leet_normalize(token)
     if t == brand or token == brand:
         return True
+    if brand in WHOLE_WORD_BRANDS:
+        return False
     if len(brand) >= 6:
         if _within_one_edit(t, brand):
             return True

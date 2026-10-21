@@ -1,0 +1,178 @@
+{
+  "model": "HistGradientBoosting on page clues (login_page_features.py)",
+  "features": [
+    "has_password",
+    "n_password",
+    "n_inputs",
+    "n_text_inputs",
+    "n_hidden_inputs",
+    "n_sensitive_fields",
+    "n_forms",
+    "has_login_words",
+    "form_external",
+    "form_php",
+    "form_empty_action",
+    "exfil_endpoint",
+    "form_mailto",
+    "brand_named",
+    "brand_mismatch",
+    "title_has_brand_mismatch",
+    "urgent_words",
+    "n_links",
+    "share_dead_links",
+    "share_external_links",
+    "links_to_brand_official",
+    "resources_from_brand_official",
+    "share_external_resources",
+    "favicon_external",
+    "obfuscation",
+    "long_base64",
+    "anti_inspect",
+    "hidden_iframe",
+    "meta_noindex",
+    "meta_refresh",
+    "n_scripts",
+    "share_inline_script",
+    "log_html_chars",
+    "log_text_chars",
+    "title_len",
+    "url_platform",
+    "url_ip",
+    "url_subdomains",
+    "url_hyphens",
+    "url_len",
+    "url_abused_tld",
+    "url_login_path"
+  ],
+  "pages": {
+    "phishing": 2427,
+    "real_login": 1487,
+    "real_website": 642,
+    "phishing_kits": 1201,
+    "real_sites": 531
+  },
+  "skipped": {
+    "no saved page copy": 57,
+    "page shows nothing to judge (phish)": 455,
+    "phishing link ended on the real site (cloaked)": 20,
+    "empty page": 107,
+    "page shows nothing to judge (genuine-login)": 319,
+    "page shows nothing to judge (genuine-web)": 106
+  },
+  "thr_alert": 0.9319949097847928,
+  "thr_verify": 0.7252529739374155,
+  "alert_needs_ask": false,
+  "results": {
+    "all_clues_unseen_kits_and_sites": {
+      "n": 4556,
+      "fake": 2427,
+      "real": 2129,
+      "auc": 0.9808,
+      "caught_at_alert": 0.8537,
+      "caught_at_verify": 0.9176,
+      "false_alarms_at_alert": 0.0103,
+      "false_alarms_at_verify": 0.0493
+    },
+    "page_only_no_address_no_brand_list": {
+      "n": 4556,
+      "fake": 2427,
+      "real": 2129,
+      "auc": 0.9427,
+      "caught_at_alert": 0.4203,
+      "caught_at_verify": 0.7338,
+      "false_alarms_at_alert": 0.0028,
+      "false_alarms_at_verify": 0.0503
+    },
+    "time_test_october_phishing_unseen": {
+      "n": 4294,
+      "fake": 2165,
+      "real": 2129,
+      "auc": 0.9736,
+      "caught_at_alert": 0.6568,
+      "caught_at_verify": 0.7792,
+      "false_alarms_at_alert": 0.0038,
+      "false_alarms_at_verify": 0.0122
+    },
+    "false_alarms_by_kind": {
+      "genuine-login": {
+        "pages": 1487,
+        "at_alert": 0.0034,
+        "at_verify": 0.033
+      },
+      "genuine-web": {
+        "pages": 642,
+        "at_alert": 0.0265,
+        "at_verify": 0.0872
+      }
+    },
+    "live_scan_effect": {
+      "without_rule": {
+        "phishing_caught_at_alert": 0.8537,
+        "phishing_caught_at_verify_or_alert": 0.9176,
+        "genuine-login_not_trusted_pages": 600,
+        "genuine-login_not_trusted_false_alarms_at_alert": 0.0033,
+        "genuine-login_not_trusted_false_alarms_at_verify": 0.03,
+        "genuine-web_not_trusted_pages": 638,
+        "genuine-web_not_trusted_false_alarms_at_alert": 0.0266,
+        "genuine-web_not_trusted_false_alarms_at_verify": 0.0878,
+        "all_real_not_trusted_false_alarms_at_alert": 0.0153
+      },
+      "alert_only_if_page_asks_for_secrets": {
+        "phishing_caught_at_alert": 0.5365,
+        "phishing_caught_at_verify_or_alert": 0.9176,
+        "genuine-login_not_trusted_pages": 600,
+        "genuine-login_not_trusted_false_alarms_at_alert": 0.0033,
+        "genuine-login_not_trusted_false_alarms_at_verify": 0.03,
+        "genuine-web_not_trusted_pages": 638,
+        "genuine-web_not_trusted_false_alarms_at_alert": 0.0141,
+        "genuine-web_not_trusted_false_alarms_at_verify": 0.0878,
+        "all_real_not_trusted_false_alarms_at_alert": 0.0089
+      },
+      "rule_used": false
+    },
+    "real_sites_with_false_alarms_at_verify": {
+      "microsoftonline.com": 12,
+      "zoho.com": 8,
+      "github.com": 7,
+      "x.com": 5,
+      "yahoo.com": 4,
+      "roblox.com": 4,
+      "ups.com": 3,
+      "mail.com": 3,
+      "jyllands-posten.dk": 3,
+      "site.com": 3
+    },
+    "not_trusted_real_sites_with_false_alarms_at_verify": {
+      "zoho.com": 8,
+      "microsoftonline.com": 3,
+      "ups.com": 3,
+      "mail.com": 3,
+      "jyllands-posten.dk": 3,
+      "site.com": 3,
+      "pazarama.com": 2,
+      "grow.google": 2,
+      "shotblogs.com": 2,
+      "bubble.io": 2,
+      "conversionsapigateway.com": 2,
+      "walmart.com": 1,
+      "tidoni-sky.ddnss.de": 1,
+      "doge-tools.freeddns.org": 1,
+      "lamaturtle.freeddns.org": 1
+    },
+    "most_common_missed_phishing_titles": {
+      "(no title)": 9,
+      "ManBetX(\u4e07\u535a\u4f53\u80b2)\u5b98\u7f51|\u82f1\u8d85\u72fc\u961f\u548c\u6c34\u6676\u5bab\u5168\u7403\u8d5e\u52a9\u4f19\u4f34": 8,
+      "Buy Mobile Legends | Up to 2x Bonus Diam": 6,
+      "\u9996\u9801": 6,
+      "WEBULL": 5,
+      "Bank of the Philippine Islands | BPI": 5,
+      "Validate Certificate | Civil Registratio": 4,
+      "\u6d77\u5916\u9891\u9053_\u592e\u89c6\u7f51(cctv.com)": 4,
+      "SEUR: Env\u00edo y transporte de paqueter\u00eda y": 4,
+      "S\u0456t\u0435 \u043eff\u0456\u0441\u0456\u0435l un\u0456qu\u0435 d\u0435 t\u00e9l\u00e9\u0440\u0430\u0456\u0435m\u0435nt | \u0410": 4
+    }
+  },
+  "trained_at": "2026-10-21T08:20:16+00:00",
+  "data": "urlscan.io page copies: phishing reported by OpenPhish / PhishTank vs real login pages",
+  "seconds": 200
+}

@@ -35,26 +35,42 @@ _META_REFRESH = re.compile(r"""<meta[^>]+http-equiv\s*=\s*["']?refresh["']?[^>]*
 _JS_LOCATION = re.compile(r"""(?:window\.|document\.|top\.)?location(?:\.href)?\s*(?:=|\.replace\(|\.assign\()\s*["'](https?://[^"']+)["']""", re.I)
 
 
+# Well-known NAT64 prefix (RFC 6052). On IPv6-only networks (many Indian mobile / hotspot connections) the DNS
+# answers public IPv4 sites with 64:ff9b::<IPv4>: the address is judged by the IPv4 address embedded in it.
+NAT64 = ipaddress.ip_network("64:ff9b::/96")
+
+
 def _bad_ip(ip) -> bool:
+    if ip.version == 6 and ip in NAT64:
+        return _bad_ip(ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF))
     return bool(ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved
                 or ip.is_unspecified or (ip.version == 6 and ip.ipv4_mapped and not ip.ipv4_mapped.is_global))
 
 
 def _resolve_public(host: str) -> tuple[str | None, str]:
     """(ip, '') with the address to connect to, if EVERY address the host resolves to is public; else (None, why)."""
+    ips, why = _resolve_public_all(host)
+    return (ips[0] if ips else None), why
+
+
+def _resolve_public_all(host: str) -> tuple[list[str], str]:
+    """([ips to try, IPv4 first then IPv6], '') if EVERY address the host resolves to is public; else ([], why)."""
     try:
         infos = socket.getaddrinfo(host, None)
     except (socket.gaierror, UnicodeError, OSError):
-        return None, "does not resolve"
+        return [], "does not resolve"
     ips = []
     for info in infos:
         ip = ipaddress.ip_address(info[4][0].split("%")[0])
         if _bad_ip(ip):
-            return None, f"points to a private/local address ({ip})"
-        ips.append(ip)
+            return [], f"points to a private/local address ({ip})"
+        if ip not in ips:
+            ips.append(ip)
     if not ips:
-        return None, "does not resolve"
-    return str(next((i for i in ips if i.version == 4), ips[0])), ""
+        return [], "does not resolve"
+    v4 = [str(i) for i in ips if i.version == 4][:1]
+    v6 = [str(i) for i in ips if i.version == 6][:1]
+    return v4 + v6, ""
 
 
 def _public_ips(host: str) -> tuple[bool, str]:
@@ -70,18 +86,24 @@ def _check(url: str) -> str:
 
 def _vet(url: str) -> tuple[str | None, str]:
     """(ip_to_connect_to, '') if the URL may be fetched, else (None, reason)."""
+    ips, why = _vet_all(url)
+    return (ips[0] if ips else None), why
+
+
+def _vet_all(url: str) -> tuple[list[str], str]:
+    """([checked ips to try], '') if the URL may be fetched, else ([], reason)."""
     p = urlparse(url)
     if p.scheme not in ("http", "https"):
-        return None, f"scheme '{p.scheme}' is not fetched"
+        return [], f"scheme '{p.scheme}' is not fetched"
     try:
         port = p.port
     except ValueError:
-        return None, "invalid port"
+        return [], "invalid port"
     if port not in ALLOWED_PORTS:
-        return None, f"port {port} is not fetched"
+        return [], f"port {port} is not fetched"
     if not p.hostname:
-        return None, "no host"
-    return _resolve_public(p.hostname)
+        return [], "no host"
+    return _resolve_public_all(p.hostname)
 
 
 class FetchError(Exception):
@@ -140,16 +162,24 @@ def fetch(url: str) -> dict:
     url = url if "://" in url else "http://" + url
     chain, current, how = [], url, "start"
     for _ in range(MAX_HOPS + 1):
-        ip, why = _vet(current)
+        ips, why = _vet_all(current)
         if why:
             chain.append({"url": current, "status": None, "how": how})
             return {"status": "refused", "chain": chain, "final_url": current, "html": "", "reason": why}
-        try:
-            status, location, ctype, body = _get_pinned(current, ip)
-            encoding = _encoding(ctype)
-        except FetchError as e:
+        err = None
+        for ip in ips:                       # IPv4 first; IPv6 if this network has no working IPv4 (IPv6-only links)
+            try:
+                status, location, ctype, body = _get_pinned(current, ip)
+                encoding = _encoding(ctype)
+                err = None
+                break
+            except FetchError as e:
+                err = e
+                if e.tls:                    # a certificate problem is the site's answer: never retried
+                    break
+        if err is not None:
             chain.append({"url": current, "status": None, "how": how})
-            return {"status": "error", "chain": chain, "final_url": current, "html": "", "reason": e.reason}
+            return {"status": "error", "chain": chain, "final_url": current, "html": "", "reason": err.reason}
         chain.append({"url": current, "status": status, "how": how})
         if 300 <= status < 400 and location:
             current, how = urljoin(current, location), f"HTTP {status} redirect"

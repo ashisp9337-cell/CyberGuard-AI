@@ -51,19 +51,27 @@ def _live_indicators(url: str, registry_out: dict | None = None) -> list[dict]:
     def add(triggered, label, desc, severity, weight):
         indicators.append({"label": label, "description": desc, "severity": severity, "weight": weight,
                             "triggered": bool(triggered), "id": f"IND_{uuid.uuid4().hex[:12]}"})
-    with ThreadPoolExecutor(max_workers=5) as pool:
+    # All lookups run at the same time. WHOIS is the slowest (often 3-4 s, many servers never answer) and only gives
+    # the registration date, which the registry (RDAP) lookup also gives: when the registry answered with a date we do
+    # NOT wait for WHOIS (it finishes or times out in the background). WHOIS is only waited for as a fallback.
+    pool = ThreadPoolExecutor(max_workers=6)
+    try:
         dns_f = pool.submit(network_intel.resolve_domain, host)
         whois_f = pool.submit(network_intel.get_domain_age, host)
         ssl_f = pool.submit(network_intel.get_ssl_info, host)
         vt_f = pool.submit(threat_intelligence.check_virustotal_url_sync, url)
         uh_f = pool.submit(threat_intelligence.check_urlhaus_sync, url)
         reg_f = pool.submit(_registry, host)
-        dns_r, whois_r, ssl_r, vt_r, uh_r = dns_f.result(), whois_f.result(), ssl_f.result(), vt_f.result(), uh_f.result()
         reg = reg_f.result()
+        dns_r, ssl_r, vt_r, uh_r = dns_f.result(), ssl_f.result(), vt_f.result(), uh_f.result()
+        if reg and reg.get("ageDays") is not None:
+            whois_r = {"status": "ok", "age_days": int(reg["ageDays"])}     # registry date: no need to wait for WHOIS
+        else:
+            whois_r = whois_f.result()                                       # no registry date: WHOIS is the fallback
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
     if registry_out is not None:
         registry_out["registry"] = reg
-    if whois_r.get("status") != "ok" and reg and reg.get("ageDays") is not None:
-        whois_r = {"status": "ok", "age_days": int(reg["ageDays"])}       # WHOIS failed: use the registry (RDAP) date
     if reg and reg.get("sentences"):
         add(False, "Domain registration (registry record)", ". ".join(reg["sentences"]) + ".", "low", 0)
     if dns_r["status"] == "unresolvable":
@@ -202,8 +210,9 @@ def _redirect_target(query: str) -> str | None:
     return None
 
 
-def _page_indicators(url: str) -> tuple[list[dict], dict]:
-    """Live, read-only: follow the redirects and inspect the final page (see safe_fetch.py)."""
+def _page_indicators(url: str, page_box: dict | None = None) -> tuple[list[dict], dict]:
+    """Live, read-only: follow the redirects and inspect the final page (see safe_fetch.py).
+    page_box (optional) receives the page's HTML + final address for the Fake Login model (never saved)."""
     out = []
 
     def add(triggered, label, desc, severity, weight):
@@ -234,6 +243,8 @@ def _page_indicators(url: str) -> tuple[list[dict], dict]:
     add(hops >= 3, "Long redirect chain", f"{hops} hops before the page loads; attackers chain redirects to "
         "hide the destination from filters.", "medium", 10)
     if res["status"] == "ok" and res["html"]:
+        if page_box is not None:
+            page_box.update(html=res["html"], final_url=res["final_url"])
         pg = page_inspector.inspect(res["html"], res["final_url"])
         evidence["page"] = pg
         platform = domain_model.site_parts(final_host)["platform"]
@@ -289,15 +300,19 @@ def analyze_url(url: str, subtopic_title: str = "Malicious URL Analysis", subtop
     indicators += dom_inds
     evidence = None
     registry_box: dict = {}
+    page_box: dict = {}
     if network:  # network=False: model + structural rules only (no DNS/WHOIS/SSL/threat-intel/page calls)
         indicators += _live_indicators(url, registry_box)
         if settings.LIVE_PAGE_CHECKS:
-            page_inds, evidence = _page_indicators(url)
+            page_inds, evidence = _page_indicators(url, page_box)
             indicators += page_inds
     subs = _subtopic_models(url, subtopic_id)
     reg_model = _registry_model(registry_box.get("registry"), subtopic_id)
     if reg_model:
         subs.append(reg_model)
+    login_model = _login_page_model(page_box, subtopic_id)
+    if login_model:
+        subs.append(login_model)
     sub = max(subs, key=_model_points) if subs else None        # the strongest model decides the floor
     for s_ in subs:
         if len(subs) == 1 or s_["indicator"]["triggered"]:
@@ -309,6 +324,12 @@ def analyze_url(url: str, subtopic_title: str = "Malicious URL Analysis", subtop
     model_points = round(40 * ml["probability"]) if ml else 0
     blended = min(100, rule_score + model_points)
     confidence = min(95, 50 + min(rule_score, 40) + (abs(ml["probability"] - 0.5) * 20 if ml else 0))
+
+    # A one-typo look-alike of a known brand's name (imtouken.com, robiox.com, trezr-suite.com) is at least "verify":
+    # real companies do not register misspellings of other brands. (Added 20 Oct; checked against the top-20,000
+    # real sites and 2,478 real pages from the urlscan collection: no new false alarm.)
+    if any(i["triggered"] and i["label"].startswith("Look-alike of ") for i in indicators):
+        blended = max(blended, 51)
 
     # A subtopic's own trained model can only RAISE the score: alert level -> 71-100, verify level -> 51-70.
     if sub and sub["level"] in ("high", "medium"):
@@ -521,6 +542,34 @@ def _registry_model(reg: dict | None, subtopic_id: str | None):
                                          f"sites) rates this registration {p * 100:.0f}% phishing-like.",
                           "weight": 0, "triggered": level != "low",
                           "severity": {"high": "high", "medium": "medium"}.get(level, "low")}}
+
+
+def _login_page_model(page_box: dict, subtopic_id: str | None):
+    """The Fake Login Page model (21 Oct) as a subtopic model: judges the fetched page's HTML. Runs on the Fake Login
+    Page page and every general URL page; it can only RAISE a score (like every subtopic model)."""
+    from app.detectors import fake_login
+    if not page_box.get("html") or subtopic_id not in ({"fake-login-page"} | ALL_URL_MODELS):
+        return None
+    try:
+        a = fake_login.assess(page_box["html"], page_box.get("final_url") or "")
+    except Exception:                                    # a model problem never breaks a scan
+        return None
+    if not a:
+        return None
+    p, level = a["probability"], a["level"]
+    why = fake_login.reasons(a["facts"])
+    host = split_url(page_box.get("final_url") or "")["host"]
+    return {"subtopic": "fake-login-page", "model": "Fake login page model", "probability": p, "level": level,
+            "thrAlert": a["thrAlert"], "thrVerify": a["thrVerify"], "domain": host, "brandDomain": None,
+            "tricks": why[:4], "trainedAt": a.get("trainedAt"),
+            "indicator": {"label": {"high": "Fake login page model: this looks like a copied login page",
+                                    "medium": "Fake login page model: the page may be a fake login - verify",
+                                    "low": "Fake login page model: the page looks normal"}[level],
+                          "description": (f"The page at {host} " + ("; ".join(why) if why else "shows no typical fake-login clues")
+                                          + f". The model (trained on {'real phishing pages and real login pages'}) rates "
+                                            f"it {p * 100:.0f}% fake-login-like."),
+                          "weight": 0, "triggered": level != "low",
+                          "severity": {"high": "critical", "medium": "medium"}.get(level, "low")}}
 
 
 def _model_points(m: dict) -> int:

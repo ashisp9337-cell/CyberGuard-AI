@@ -115,7 +115,14 @@ say("\n5. Other external services")
 if s.GEMINI_API_KEY:
     def gem():
         from google import genai
-        return genai.Client(api_key=s.GEMINI_API_KEY).models.generate_content(model=s.GEMINI_MODEL, contents="Reply with the word OK").text
+        from google.genai import types
+        from app.services.chat_service import REQUEST_TIMEOUT_MS     # same time limit as the real chat assistant
+        client = genai.Client(api_key=s.GEMINI_API_KEY,               # keep a reference: a temporary client is
+                              http_options=types.HttpOptions(timeout=REQUEST_TIMEOUT_MS))   # closed mid-request
+        try:
+            return client.models.generate_content(model=s.GEMINI_MODEL, contents="Reply with the word OK").text
+        finally:
+            client.close()
     r, ms, err = timed(gem)
     row("Gemini (chat assistant)", "works" if r else "FAILS", ms, err or (r or "")[:40])
 else:

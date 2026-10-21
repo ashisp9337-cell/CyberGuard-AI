@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 @limiter.limit("20/minute")
 def chat(request: Request, body: ChatMessageRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
-        reply = send_message(user.id, body.message, db)
+        reply = send_message(user.id, body.message, db, language=body.language)
     except ChatUnavailableError as e:
         raise HTTPException(status_code=503, detail={"error": {"code": "CHAT_UNAVAILABLE", "message": str(e)}})
     return ChatMessageResponse(reply=reply)
@@ -24,4 +24,4 @@ def chat(request: Request, body: ChatMessageRequest, user: User = Depends(get_cu
 @router.post("/reset")
 def chat_reset(user: User = Depends(get_current_user)):
     reset_session(user.id)
-    return {"success": True}
+    return {"success": True}

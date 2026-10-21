@@ -1,0 +1,74 @@
+{
+  "model": "HistGradientBoosting on RDAP registry facts",
+  "features": [
+    "log_age_days",
+    "age_under_30d",
+    "age_under_1y",
+    "term_years",
+    "days_to_expiry",
+    "registrar_rate",
+    "registrar_known",
+    "tld_rate",
+    "ns_cloudflare",
+    "ns_aws",
+    "ns_self",
+    "ns_other",
+    "ns_none",
+    "dnssec",
+    "server_lock",
+    "client_locks"
+  ],
+  "rows": {
+    "train": 2083,
+    "calibration": 353,
+    "test": 343
+  },
+  "used": {
+    "real": 1874,
+    "openphish": 80,
+    "urlscan": 825
+  },
+  "skipped": {
+    "old phishing list (age measured long after the attack) - use --include-old": 2500,
+    "no registry record (deleted / no RDAP)": 773,
+    "already taken down (hold / redemption / pending delete)": 5,
+    "no registration date": 13
+  },
+  "thr_alert": 0.8967936469028647,
+  "thr_verify": 0.7477028565552842,
+  "results": {
+    "calibration": {
+      "n": 353,
+      "phishing": 95,
+      "real": 258,
+      "auc": 0.9307,
+      "caught_at_alert": 0.5789,
+      "false_alarms_at_alert": 0.0116,
+      "caught_at_verify": 0.7158,
+      "false_alarms_at_verify": 0.0504
+    },
+    "test": {
+      "n": 343,
+      "phishing": 108,
+      "real": 235,
+      "auc": 0.9285,
+      "caught_at_alert": 0.6389,
+      "false_alarms_at_alert": 0.034,
+      "caught_at_verify": 0.8241,
+      "false_alarms_at_verify": 0.0809
+    },
+    "age_only_auc_test": 0.9167,
+    "test_domains_under_1_year": {
+      "n": 98,
+      "phishing": 79,
+      "real": 19,
+      "auc": 0.9061,
+      "caught_at_alert": 0.8608,
+      "false_alarms_at_alert": 0.2632,
+      "caught_at_verify": 0.9367,
+      "false_alarms_at_verify": 0.3684
+    }
+  },
+  "trained_at": "2026-10-21T04:34:40+00:00",
+  "data": "registry records (RDAP): FRESH phishing domains (OpenPhish feed, urlscan.io scans; age at scan time) vs Tranco top-1M real sites"
+}

@@ -12,6 +12,7 @@ import { useToast } from "@/context/ToastContext";
 import { escalateScan } from "@/services/api/incidentsService";
 import { MitreAttackCard, MitreIdChip } from "@/components/mitre/MitreAttack";
 import { ResultExtras } from "@/components/analysis/ResultExtras";
+import { askThreatora } from "@/lib/threatora";
 
 const PRIORITY_META: Record<ResponseAction["priority"], { label: string; color: string; bg: string }> = {
   immediate: { label: "Now", color: "var(--color-critical)", bg: "var(--color-critical-bg)" },
@@ -180,6 +181,9 @@ export function ResultView({ result, onNewScan, onSave, newScanLabel = "Run Anot
             <ICONS.download size={15} /> Export Report
           </Button>
         )}
+        <Button variant="ghost" onClick={() => askThreatora(`Explain my scan ${result.scanId} in simple words and tell me what I should do now.`)}>
+          <ICONS.brain size={15} /> Ask Threatora about this scan
+        </Button>
         <Button variant="ghost" onClick={handleEscalate} disabled={escalation !== "idle"}>
           <ICONS.send size={15} />{" "}
           {escalation === "done" ? "Escalated to Team ✓" : escalation === "sending" ? "Escalating…" : "Escalate to Team"}

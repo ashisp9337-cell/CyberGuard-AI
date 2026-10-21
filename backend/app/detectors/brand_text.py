@@ -28,13 +28,14 @@ BRAND_ALIASES = {
     "office 365": "microsoft", "office365": "microsoft", "outlook": "microsoft", "xbox": "microsoft",
     "amazon prime": "amazon", "prime video": "amazon",
     "i.r.s": "irs", "insta": "instagram", "fb": "facebook",
+    "trust wallet": "trustwallet", "ledger live": "ledger",
 }
 
 MASK_TOKEN = "brandx"
 
 # Brand names that are also everyday words. Matching them in free text would
 # produce false "this message claims to be from <brand>" hits ("chase after her").
-AMBIGUOUS = {"chase"}
+AMBIGUOUS = {"chase", "ledger", "allegro"}
 
 
 def _build_pattern() -> re.Pattern:
@@ -59,4 +60,4 @@ def find_brands(text: str) -> list[str]:
         canonical = BRAND_ALIASES.get(name, name)
         if canonical in BRAND_DOMAINS and canonical not in found:
             found.append(canonical)
-    return found
+    return found

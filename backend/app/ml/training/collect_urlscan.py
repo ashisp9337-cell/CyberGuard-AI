@@ -209,7 +209,12 @@ def main():
     ap.add_argument("--web", type=int, default=2000)
     ap.add_argument("--delay", type=float, default=2.5, help="seconds between requests")
     ap.add_argument("--no-dom", action="store_true")
+    ap.add_argument("--dom-only", action="store_true", help="no new searches: only download missing page copies")
+    ap.add_argument("--web-dom", type=int, default=0,
+                    help="also download page copies of this many ordinary real websites (Fake Login model negatives)")
     a = ap.parse_args()
+    if a.dom_only:
+        a.phish = 0                            # no phishing searches either
     if a.test:
         a.login_per_host, a.web = 2, 5
     os.makedirs(os.path.join(OUT, "dom"), exist_ok=True)
@@ -310,7 +315,7 @@ def main():
             print(f"  phishing scans: {counts['phish']}  (fresh OpenPhish domains {min(i + 40, len(doms))}/{len(doms)})",
                   flush=True)
         # 2. real login / account pages
-        for host in GENUINE_LOGIN_HOSTS:
+        for host in ([] if a.dom_only else GENUINE_LOGIN_HOSTS):
             try:
                 r = c.search(f'page.domain:"{host}"', size=a.login_per_host)
             except Refused as e:
@@ -322,7 +327,7 @@ def main():
             if a.test and counts["genuine-login"] >= 4:
                 break
         # 3. ordinary real websites (popular sites, batches of 40 per search)
-        doms = tranco_sample(max(a.web, 40))
+        doms = [] if a.dom_only else tranco_sample(max(a.web, 40))
         for i in range(0, len(doms), 20):
             if counts["genuine-web"] >= a.web:
                 break
@@ -338,9 +343,15 @@ def main():
             print(f"  real websites: {counts['genuine-web']}", flush=True)
         # 4. page HTML (urlscan's stored copy) for phishing + real login pages
         if not a.no_dom:
-            need = [s for s in seen.values() if s["group"] in ("phish", "genuine-login") and not s.get("cloaked")
-                    and not os.path.exists(os.path.join(OUT, "dom", s["uuid"] + ".html.gz"))
-                    and not os.path.exists(os.path.join(OUT, "dom", s["uuid"] + ".none"))]
+            def missing(s):
+                return (not os.path.exists(os.path.join(OUT, "dom", s["uuid"] + ".html.gz"))
+                        and not os.path.exists(os.path.join(OUT, "dom", s["uuid"] + ".none")))
+            need = [s for s in seen.values() if s["group"] in ("phish", "genuine-login") and not s.get("cloaked") and missing(s)]
+            if a.web_dom:                     # ordinary websites: a fixed random pick, so a re-run continues the same pick
+                import random
+                web = sorted((s for s in seen.values() if s["group"] == "genuine-web"), key=lambda s: s["uuid"])
+                pick = random.Random(7).sample(web, min(a.web_dom, len(web)))
+                need += [s for s in pick if missing(s)]
             print(f"downloading stored page HTML for {len(need)} scans ...")
             for i, s in enumerate(need, 1):
                 try:
@@ -349,6 +360,12 @@ def main():
                     print(f"  page HTML: refused ({e}) - stopping HTML downloads")
                     break
                 path = os.path.join(OUT, "dom", s["uuid"])
+                if html and html[:2] == b"\x1f\x8b":            # urlscan sends it compressed: store plain HTML
+                    try:
+                        import zlib
+                        html = zlib.decompressobj(16 + zlib.MAX_WBITS).decompress(html)
+                    except Exception:
+                        pass
                 if html:
                     with gzip.open(path + ".html.gz", "wb") as f:
                         f.write(html)

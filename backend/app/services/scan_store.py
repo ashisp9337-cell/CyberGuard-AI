@@ -184,6 +184,15 @@ def _model_details(result):
                   for i, f in enumerate(faces)])
         out.append(_model("Face-swap model (EfficientNet-B0)", df.get("level"), df.get("probability"),
                           df.get("verifyThreshold"), df.get("alertThreshold"), notes))
+    dv = result.get("deepfakeVideoModel")
+    if isinstance(dv, dict) and dv.get("level"):
+        faces = sorted((f for f in (dv.get("faces") or []) if isinstance(f, dict)),
+                       key=lambda f: -(_num(f.get("probability")) or 0))[:4]
+        notes = [f"Faces checked: {_int(dv.get('framesWithFace'))} of {_int(dv.get('framesChecked'))} frames"]
+        notes += [f"At {int(_num(f.get('second')) or 0) // 60}:{int(_num(f.get('second')) or 0) % 60:02d} - "
+                  f"{round(100 * (_num(f.get('probability')) or 0))}%" for f in faces]
+        out.append(_model("Face-swap video model (EfficientNet-B0, Celeb-DF v2)", dv.get("level"), dv.get("probability"),
+                          dv.get("verifyThreshold"), dv.get("alertThreshold"), notes))
     return out
 
 

@@ -167,6 +167,122 @@ def _image_model_result(file_path: str, subtopic_title: str):
     return result, None
 
 
+def _video_face_check(file_path):
+    from app.detectors import deepfake_video as DV
+    try:
+        return DV.assess_video(file_path), None
+    except DV.ModelUnavailable as e:
+        return None, f"face-swap video model: {e}"
+    except Exception as e:                                   # unreadable video etc.: never crash
+        return None, f"face-swap video model could not read the video ({e.__class__.__name__})"
+
+
+def _clock(sec) -> str:
+    sec = int(sec or 0)
+    return f"{sec // 60}:{sec % 60:02d}"
+
+
+def _video_perf(meta) -> str:
+    r = meta.get("results") or {}
+    t, d = r.get("test_celebdf_half_B_honest") or {}, r.get("test_dfdc_independent") or {}
+    out = ""
+    if t:
+        out += (f" On {t.get('n')} Celeb-DF test videos it never saw it caught {t.get('caught_at_alert', 0) * 100:.0f}% of "
+                f"face-swaps at {t.get('false_alarms_at_alert', 0) * 100:.0f}% false alarms")
+    if d:
+        out += (f"; on a different dataset (DFDC, {d.get('n')} videos) it is much weaker (AUC {d.get('auc', 0):.2f}), "
+                "so a low score is not proof that a video is real")
+    return out + "." if out else ""
+
+
+def _video_result(file_path: str | None, subtopic_title: str) -> dict:
+    """Videos: the strongest check decides.
+    1. provenance (20 Oct)  - the file declares AI generation / names an AI or face-swap tool -> proof
+    2. face-swap model (21 Oct, Celeb-DF v2) - 16 frames, the largest face in each, mean score
+    Without proof and without enough faces the result says 'no verdict', never 'not a deepfake'."""
+    from app.detectors import deepfake_video as DV
+    from app.detectors import video_provenance as VP
+    prov = VP.provenance(file_path) if file_path else {"proof": False, "kind": None, "findings": [],
+                                                       "hasContentCredentials": False}
+    face, why_face = _video_face_check(file_path) if file_path else (None, "no file was uploaded")
+    indicators = [_ind(f["label"], f["detail"], "critical" if f["proof"] else "low", True) for f in prov["findings"]]
+    engines = ["Provenance check (C2PA Content Credentials / generator metadata)"]
+    candidates = []
+    if prov["proof"]:
+        first = next(f for f in prov["findings"] if f["proof"])
+        what = "a face-swap tool was used on it" if prov["kind"] == "faceswap" else "it was made with AI"
+        candidates.append((95, 99, f"The video file itself shows that {what}: {first['detail']} This is proof from "
+                                   "the file, not a guess."))
+
+    if face and face["level"]:
+        p, level, meta = face["probability"], face["level"], face["meta"]
+        top = sorted(face["faces"], key=lambda f: -f["probability"])[:3]
+        moments = ", ".join(f"{_clock(f['second'])} ({f['probability'] * 100:.0f}%)" for f in top)
+        indicators.append(_ind(
+            {"high": "Face-swap video model: the face looks manipulated",
+             "medium": "Face-swap video model: the face may be manipulated - verify",
+             "low": "Face-swap video model: no face manipulation found"}[level],
+            f"The face-swap video model (EfficientNet-B0, trained on Celeb-DF v2) checked the largest face in "
+            f"{face['framesWithFace']} of {face['framesChecked']} frames spread over the video. Average: {_pct(p)} "
+            f"likely manipulated (it warns from {_pct(face['thrVerify'])}, alerts from {_pct(face['thrAlert'])}). "
+            f"Most suspicious moments: {moments}." + _video_perf(meta),
+            "critical" if level == "high" else "medium" if level == "medium" else "low", level != "low"))
+        candidates.append((DV.score_from(face), 60 + abs(p - 0.5) * 60, {
+            "high": f"Face-swap video model: the face looks manipulated ({_pct(p)} on average; most suspicious at {moments}).",
+            "medium": f"Face-swap video model: the face may be manipulated ({_pct(p)} on average) - check the source.",
+            "low": f"Face-swap video model: no face manipulation found ({_pct(p)} on average)."}[level]))
+        engines.append("Face-swap video model (EfficientNet-B0, Celeb-DF v2)")
+    elif face:
+        indicators.append(_ind("Not enough faces for the face-swap model",
+                               f"A clear face (at least 40 pixels) was found in {face['framesWithFace']} of "
+                               f"{face['framesChecked']} checked frames; the model needs at least "
+                               f"{face['meta'].get('min_faces_for_verdict', 3)}. Videos without people, very small "
+                               "faces or screen recordings get no face verdict.", "low", False))
+        engines.append("Face-swap video model (no verdict: too few faces)")
+    else:
+        indicators.append(_ind("Face-swap video model not installed", f"Not used: {why_face}.", "low", False))
+
+    if candidates:
+        score, confidence, decider = max(candidates, key=lambda c: c[0])
+        others = [c[2] for c in candidates if c[2] != decider]
+        if score >= 51:
+            explanation = decider + (" Other checks: " + " ".join(others) if others else "")
+            explanation += (" Treat this as a strong warning: do not trust or share the video as real footage."
+                            if score >= 71 else " Check where the video came from before trusting it.")
+        else:
+            explanation = (" ".join(c[2] for c in candidates) + " This lowers the risk but cannot prove the video "
+                           "is genuine: this model checks face swaps only - not fully AI-generated videos (Sora, Veo, "
+                           "Kling ...), lip-sync changes or cloned voices.")
+        engine = "CYBERGUARD Deepfake Engine — " + " + ".join(engines)
+    else:
+        score, confidence = 0, 0
+        note = (" It carries Content Credentials that do not declare AI." if prov["hasContentCredentials"] else
+                " It carries no Content Credentials or AI-tool names - normal for most videos, because re-uploading, "
+                "screen recording and messaging apps remove them, so this proves nothing.")
+        reason = ("too few clear faces were found for the face-swap model" if face else
+                  "the trained video model is not installed")
+        explanation = ("The video's metadata was checked for AI provenance and found no proof." + note +
+                       f" No verdict is given on the picture itself because {reason}: this is 'no verdict', "
+                       "NOT 'not a deepfake'.")
+        engine = "CYBERGUARD Deepfake Engine — " + " + ".join(engines) + (
+            " — No Verdict" if face else " — Video Model Unavailable")
+    result = build_result(indicators=indicators, base_score=score, confidence=min(confidence, 99),
+                          engine_name=engine, threat_type=subtopic_title, explanation=explanation)
+    if not candidates:                       # no verdict is NOT "safe": shown as "unable to verify"
+        result.update(classification="unverified", severity="info", recommendations=[
+            "Check where the video came from: the original account or channel, the date, other reliable sources.",
+            "For a face check, upload a version where a face is clearly visible for several seconds.",
+            "Do not forward the video as real until its source is confirmed."])
+    result["provenance"] = prov
+    if face:
+        result["deepfakeVideoModel"] = {
+            "probability": round(face["probability"], 4) if face["probability"] is not None else None,
+            "level": face["level"], "faces": face["faces"], "framesWithFace": face["framesWithFace"],
+            "framesChecked": face["framesChecked"], "alertThreshold": face["thrAlert"],
+            "verifyThreshold": face["thrVerify"], "trainedAt": face["meta"].get("trained_at")}
+    return result
+
+
 def _image_metadata_signals(file_path: str) -> list[dict]:
     indicators = []
 
@@ -210,17 +326,7 @@ def analyze_media(file_path: str | None, file_name: str, subtopic_title: str = "
             return model_result
 
     if is_video:
-        explanation = (
-            "No trained video deepfake-detection model is configured on this server, so no "
-            "manipulation verdict is produced. Video deepfake detection requires a dedicated "
-            "trained model (see app/detectors/deepfake.py). This is reported as 'model unavailable', "
-            "not as 'not a deepfake'."
-        )
-        return build_result(
-            indicators=[], base_score=0, confidence=0,
-            engine_name="CYBERGUARD Deepfake Engine — Model Unavailable",
-            threat_type=subtopic_title, explanation=explanation,
-        )
+        return _video_result(file_path, subtopic_title)
 
     indicators = _image_metadata_signals(file_path) if file_path else []
     triggered = [i for i in indicators if i["triggered"]]

@@ -39,3 +39,6 @@ backend/app/ml/training/data/domain_facts.jsonl
 # Quarantined downloads (dangerous files moved here by CyberGuard - never commit them)
 backend/quarantine/
 backend/app/ml/training/data/urlscan_phish_domains.csv
+backend/fl_sample/
+# live-check reports (run outputs on this PC, not code)
+backend/*_check.txt

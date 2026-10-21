@@ -96,7 +96,10 @@ def test_missing_model_falls_back_to_metadata_and_says_why(tmp_path, monkeypatch
 def test_videos_are_not_judged_by_the_image_model(tmp_path, model):
     model(0.99)
     r = deepfake.analyze_media(str(tmp_path / "clip.mp4"), "clip.mp4", "x")
-    assert "Model Unavailable" in r["analysisEngine"] and r["riskScore"] == 0
+    # (21 Oct) a video model now exists: an unreadable/empty video gets "no verdict" from the VIDEO checks
+    assert r["riskScore"] == 0 and r["classification"] == "unverified"
+    assert "Model Unavailable" in r["analysisEngine"] or "No Verdict" in r["analysisEngine"]
+    assert "deepfakeModel" not in r                                   # the image face model never judges a video
 
 
 def test_preprocess_matches_training():

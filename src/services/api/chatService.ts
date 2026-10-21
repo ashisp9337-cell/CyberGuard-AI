@@ -3,8 +3,10 @@
 // browser). Mirrors the same pattern as analysisService.ts.
 import { apiClient } from "./client";
 
-export async function sendChatMessage(message: string): Promise<string> {
-  const res = await apiClient.post<{ reply: string }>("/api/chat", { message });
+export type ChatLanguage = "en" | "hi" | "or";
+
+export async function sendChatMessage(message: string, language: ChatLanguage = "en"): Promise<string> {
+  const res = await apiClient.post<{ reply: string }>("/api/chat", { message, language });
   return res.reply;
 }
 

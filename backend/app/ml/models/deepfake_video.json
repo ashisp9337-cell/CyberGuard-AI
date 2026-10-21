@@ -1,0 +1,98 @@
+{
+  "kind": "cyberguard-deepfake-video",
+  "version": 1,
+  "architecture": "EfficientNet-B0 on face crops; video score = mean face probability",
+  "output": "logit per face; sigmoid(logit) = probability the face is manipulated",
+  "detects": "face swap / face re-enactment (Celeb-DF style). NOT fully AI-generated scenes, NOT lip-sync, NOT voice.",
+  "dataset": "Celeb-DF v2 (train, official test list held out); independent test: DFDC sample videos (Meta)",
+  "input_size": 224,
+  "mean": [
+    0.485,
+    0.456,
+    0.406
+  ],
+  "std": [
+    0.229,
+    0.224,
+    0.225
+  ],
+  "face_margin": 0.25,
+  "frames_per_video": 16,
+  "min_face": 40,
+  "max_side": 1280,
+  "aggregation": "mean",
+  "min_faces_for_verdict": 3,
+  "thr_alert": 0.7019940059720191,
+  "thr_verify": 0.4464077280847511,
+  "training": {
+    "faces": 55605,
+    "real_faces": 19221,
+    "fake_faces": 36384,
+    "epochs": 4,
+    "batch": 64,
+    "lr": 0.0003,
+    "label_smoothing": 0.1,
+    "augmentations": "crop, flip, brightness/contrast, colour, grayscale, low resolution, blur, noise, JPEG 20-90",
+    "split": "by person (Celeb-DF id); levels chosen on half A of the official test list"
+  },
+  "results": {
+    "validation_celebdf_unseen_people": {
+      "n": 861,
+      "real": 110,
+      "fake": 751,
+      "auc": 0.9945,
+      "caught_at_alert": 0.7443,
+      "false_alarms_at_alert": 0.0,
+      "caught_at_verify": 0.964,
+      "false_alarms_at_verify": 0.0455
+    },
+    "test_celebdf_half_A_levels_chosen_here": {
+      "n": 259,
+      "real": 86,
+      "fake": 173,
+      "auc": 0.9961,
+      "caught_at_alert": 0.9133,
+      "false_alarms_at_alert": 0.0116,
+      "caught_at_verify": 0.9827,
+      "false_alarms_at_verify": 0.0581
+    },
+    "test_celebdf_half_B_honest": {
+      "n": 259,
+      "real": 92,
+      "fake": 167,
+      "auc": 0.996,
+      "caught_at_alert": 0.8683,
+      "false_alarms_at_alert": 0.0,
+      "caught_at_verify": 0.9701,
+      "false_alarms_at_verify": 0.0435
+    },
+    "test_celebdf_half_B_jpeg_quality_35": {
+      "n": 259,
+      "real": 92,
+      "fake": 167,
+      "auc": 0.9909,
+      "caught_at_alert": 0.8323,
+      "false_alarms_at_alert": 0.0,
+      "caught_at_verify": 0.9701,
+      "false_alarms_at_verify": 0.087
+    },
+    "test_dfdc_independent": {
+      "n": 400,
+      "real": 77,
+      "fake": 323,
+      "auc": 0.7214,
+      "caught_at_alert": 0.0279,
+      "false_alarms_at_alert": 0.0,
+      "caught_at_verify": 0.0743,
+      "false_alarms_at_verify": 0.026
+    }
+  },
+  "baseline_image_model_auc": null,
+  "videos_without_face": {
+    "train": 0,
+    "val": 0,
+    "test": 0,
+    "dfdc": 0
+  },
+  "trained_at": "2026-10-20T20:04:58+00:00"
+}

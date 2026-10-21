@@ -7,7 +7,13 @@ import ssl
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from datetime import datetime, timezone
 
+import logging
+
 import whois
+
+# The WHOIS library logs "Error trying to connect to socket ..." for every WHOIS server that does not answer (common for
+# dead phishing domains). We already fall back to the registry (RDAP) lookup, so these lines are only noise.
+logging.getLogger("whois").setLevel(logging.CRITICAL)
 
 DNS_TIMEOUT = 2.5
 SSL_TIMEOUT = 3.0
