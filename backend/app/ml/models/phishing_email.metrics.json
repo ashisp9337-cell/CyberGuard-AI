@@ -1,0 +1,37 @@
+{
+ "model": "Email",
+ "model_file": "phishing_email.joblib",
+ "model_sha256": "c95eb0a2af7a7c10f1846683202b6d3725bfa9c630b4d529da8bf8e55a223ef9",
+ "data_file": "phishing_email_real.tsv",
+ "data_sha256": "b84e7595e88473d7c92772c8ab1c49095c3b14f819649d201eb22b2a87168ca7",
+ "data_rows": 18634,
+ "scam_rows": 7312,
+ "split": "train_test_split(test_size=0.2, random_state=42, stratify=label) - the split the training script used",
+ "held_out_confirmed": true,
+ "held_out_check": "a copy trained on the 80% part only gives the saved model's scores on the 20% (largest difference 0.0e+00; limit 0.001)",
+ "template_rows": null,
+ "results": {
+  "heldout": {
+   "messages": 3727,
+   "scam": 1462,
+   "genuine": 2265,
+   "auc": 0.9964,
+   "caught_at_50pct": 0.9877,
+   "false_alarms_at_50pct": 0.0375
+  },
+  "heldout_unseen_texts": {
+   "messages": 3334,
+   "scam": 1224,
+   "genuine": 2110,
+   "auc": 0.9976,
+   "caught_at_50pct": 0.9861,
+   "false_alarms_at_50pct": 0.0213
+  }
+ },
+ "rates_note": "the model alone at 50%; the app also adds its rules and link checks",
+ "measured_at": "2026-10-29T21:18:43Z",
+ "versions": {
+  "scikit-learn": "1.5.2",
+  "python": "3.13.15"
+ }
+}
