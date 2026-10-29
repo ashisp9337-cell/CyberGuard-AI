@@ -89,6 +89,22 @@ def test_model_levels(model_file):
     assert scan("https://site.com/a/b/c?x=1")["subtopicModel"]["level"] == "medium"
 
 
+def test_modern_calibration_applies_only_to_its_own_model(model_file, tmp_path, monkeypatch):
+    import json
+    cal = tmp_path / "url_manipulation.modern.json"
+    monkeypatch.setattr(M, "CALIBRATION_PATH", str(cal))
+    cal.write_text(json.dumps({"thr_alert": 0.99, "thr_verify": 0.97, "model_trained_at": "test"}))
+    model_file(0.95)                       # was "high" with the model's own levels (0.9 / 0.7)
+    assert M.load_model()["thr_alert"] == 0.99
+    assert scan("https://site.com/a/b/c?x=1")["subtopicModel"]["level"] == "low"
+    cal.write_text(json.dumps({"thr_alert": 0.99, "thr_verify": 0.97, "model_trained_at": "an older model"}))
+    M._cache.clear()
+    assert M.load_model()["thr_alert"] == 0.9        # measured on another model version -> ignored
+    cal.write_text("not json")
+    M._cache.clear()
+    assert M.load_model()["thr_alert"] == 0.9        # a broken file never breaks scanning
+
+
 def test_unambiguous_tricks_are_always_high(model_file):
     model_file(0.01)                       # even if the model is unsure
     for url in ("http://paypal.com@185.22.4.9/login", "http://3232235777/admin"):

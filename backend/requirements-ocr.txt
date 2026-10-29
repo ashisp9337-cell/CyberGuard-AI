@@ -1,0 +1,11 @@
+# Local text reading (OCR) for screenshots sent to the chat or to the Telegram bot. Runs on this PC (ONNX, CPU);
+# the image is never uploaded anywhere. Install WITHOUT dependencies, otherwise pip adds a second OpenCV
+# (opencv-python) next to opencv-python-headless and the two clash:
+#
+#     pip install --no-deps -r requirements-ocr.txt
+#
+rapidocr_onnxruntime==1.2.3
+pyclipper
+shapely
+PyYAML
+six

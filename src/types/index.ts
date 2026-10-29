@@ -147,6 +147,70 @@ export interface AnalysisResult {
   provenance?: ProvenanceInfo | null;
   liveCheck?: LiveCheckInfo | null;
   checkedDetectors?: { detector: string; riskScore: number }[];
+  insiderRisk?: InsiderRiskInfo | null;
+  malwareAnalysis?: MalwareAnalysisInfo | null;
+  windowsEvents?: WindowsEventsInfo | null;
+}
+
+// Windows event-log incidents (backend app/services/scan_store.py _windows_events)
+export interface WindowsEventsInfo {
+  format: string;
+  events: number;
+  hosts: number;
+  users: number;
+  timeRange: string[] | null;
+  activityDays: number;
+  incidents: { rule: string; label: string; user: string; host: string; severity: string; mitre: string; lens: string;
+               count: number; first: string; last: string; examples: string[] }[];
+}
+
+// Uploaded-file malware check (backend app/services/scan_store.py _malware_analysis)
+export interface MalwareAnalysisInfo {
+  fileName: string;
+  size: number;
+  sha256: string;
+  detectedType: string;
+  modelAvailable: boolean;
+  virusTotal: string;
+  targets: { name: string; fileType: string; score: number | null; level: string; alertLevel: number | null; checkLevel: number | null }[];
+  archiveFiles: string[];
+  notes: string[];
+}
+
+// Insider Risk triage queue (backend app/services/scan_store.py _insider_risk)
+export interface InsiderQueueEntry {
+  user: string;
+  level: string; // "alert" | "review"
+  risk: number | null; // percentile of ordinary working days
+  score: number;
+  date: string;
+  flaggedDays: number;
+  alertDays: number;
+  historyDays: number;
+  exfiltration: string[];
+  abnormal: string[];
+  pattern: { name: string; strength: string; why: string } | null;
+  mitre: string[];
+  timeline: { date: string; risk: number | null; level: string }[];
+}
+
+export interface InsiderRiskInfo {
+  format: string;
+  events: number;
+  people: number;
+  userDays: number;
+  trained: boolean;
+  timeRange: string[] | null;
+  alerts: number;
+  reviews: number;
+  reviewLevel: number | null;
+  alertLevel: number | null;
+  lenses: { exfiltration: number; abnormal: number; insider: number };
+  falseAlertsPerDay: number | null;
+  testCaught: number;
+  testOf: number;
+  notes: string[];
+  queue: InsiderQueueEntry[];
 }
 
 // How Auto-detect chose the subtopic (backend app/services/scan_store.py _routing)

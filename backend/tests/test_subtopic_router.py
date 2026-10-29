@@ -130,9 +130,12 @@ def called(spies):
     ("cyber-threat", {"text": "Oct 10 12:00:01 fw01 kernel: DROP SRC=45.9.1.2 DST=10.0.0.5 PROTO=TCP DPT=22"}, "network-traffic"),
     ("cyber-threat", {"text": '10.0.0.7 - - [10/Oct/2026:12:00:01 +0530] "GET /api/v1/users?page=2 HTTP/1.1" 200 512'}, "api-abuse"),
     ("cyber-threat", {"text": "EventID=4688 NewProcessName=cmd.exe CommandLine=powershell -enc SQBFAFgA"}, "malware-detection"),
-    ("cyber-threat", {"text": "2026-10-10 02:11:00 user=ravi uploaded 4.2 GB to mega.nz via rclone"}, "data-exfiltration"),
-    ("cyber-threat", {"text": "2026-10-10 user=ravi action=copy file=payroll.xlsx dest=USB removable drive"}, "insider-threat"),
-    ("cyber-threat", {"text": "2026-10-10 03:00:00 user=ravi action=login\n2026-10-10 03:05:00 user=ravi action=file_read"}, "abnormal-activity"),
+    # data exfiltration, abnormal activity and insider threat are one subtopic since 26 Oct: insider-risk
+    ("cyber-threat", {"text": "2026-10-10 02:11:00 user=ravi uploaded 4.2 GB to mega.nz via rclone"}, "insider-risk"),
+    ("cyber-threat", {"text": "2026-10-10 user=ravi action=copy file=payroll.xlsx dest=USB removable drive"}, "insider-risk"),
+    ("cyber-threat", {"text": "2026-10-10 03:00:00 user=ravi action=login\n2026-10-10 03:05:00 user=ravi action=file_read"}, "insider-risk"),
+    ("cyber-threat", {"text": "date,user,pc,activity,details\n2026-10-10 03:00:00,ravi,PC-1,logon,"}, "insider-risk"),
+    ("cyber-threat", {"text": "id,date,user,pc,url,content\n{A},01/02/2010 07:01:00,ACM2278,PC-6377,http://x.com/a,t"}, "insider-risk"),
     ("cyber-threat", {"text": "2026-10-10T12:00:00Z ERROR db-pool: connection refused after 3 retries"}, "log-analysis"),
 ])
 def test_classifies_subtopic(module, kwargs, expected):
@@ -278,18 +281,37 @@ def test_unclear_inputs_call_no_detector(spies, module, kwargs, code):
     assert called(spies) == []
 
 
-def test_missing_detectors_are_reported_not_faked(spies, tmp_path):
+def test_audio_is_routed_to_voice_analysis(tmp_path):
+    """Voice & Audio Analysis exists since 24 Oct (before, audio was reported as unavailable)."""
     wav = tmp_path / "voice.wav"
     wav.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt " + b"\x00" * 24)
-    with pytest.raises(RoutingError) as e:
-        route("deepfake", fp=str(wav), fn="voice.wav")
-    assert e.value.code == "unavailable" and e.value.details["subtopicId"] == "audio-analysis"
+    c = sr.classify(module_id="deepfake", text_input=None, url_input=None, file_path=str(wav), file_name="voice.wav",
+                    extra_field_values={})
+    assert c.subtopic_id == "audio-analysis" and c.to_dict()["subtopicId"] == "audio-analysis"
+    aac = tmp_path / "note.aac"
+    aac.write_bytes(b"\xff\xf1\x50\x80" + b"\x00" * 60)          # AAC (ADTS) stream header
+    assert sr.file_kind(str(aac), "note.aac") == "audio"
+    m4a = tmp_path / "rec.m4a"                                          # phone recorder: generic MP4 brand
+    m4a.write_bytes(b"\x00\x00\x00\x1cftypisom" + b"\x00" * 50)
+    assert sr.file_kind(str(m4a), "rec.m4a") == "audio" and sr.file_kind(str(m4a), "clip.mp4") == "video"
+    mp3 = tmp_path / "a.mp3"
+    mp3.write_bytes(b"\xff\xfb\x90\x00" + b"\x00" * 60)
+    assert sr.file_kind(str(mp3), "a.mp3") == "audio"
 
+
+def test_missing_detectors_are_reported_not_faked(spies, tmp_path):
+    # (26 Oct) uploaded programs now have a detector: Malware Detection (static checks + EMBER2024, never run) ...
     exe = tmp_path / "setup.exe"
     exe.write_bytes(b"MZ\x90\x00" + b"\x00" * 60)
+    c = sr.classify(module_id="cyber-threat", text_input=None, url_input=None, file_path=str(exe), file_name="setup.exe",
+                    extra_field_values=None)
+    assert c.subtopic_id == "malware-detection"
+    # ... but a photo sent to the Cyber Threat module is still refused, never faked
+    png = tmp_path / "photo.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 40)
     with pytest.raises(RoutingError) as e:
-        route("cyber-threat", fp=str(exe), fn="setup.exe")
-    assert e.value.code == "unavailable"
+        route("cyber-threat", fp=str(png), fn="photo.png")
+    assert e.value.code == "unavailable" and "Deepfake" in e.value.message
 
     pdf = tmp_path / "doc.pdf"
     pdf.write_bytes(b"%PDF-1.7\n" + b"\x00" * 40)

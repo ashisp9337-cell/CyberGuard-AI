@@ -128,10 +128,12 @@ def otp_notice(text: str) -> bool:
 
 
 def bare_domains(text: str) -> list[str]:
-    """Untrusted bare domains in the text, as http:// links (trusted sites such as swiggy.com are left out)."""
+    """Untrusted bare domains in the text, as http:// links (trusted sites such as swiggy.com are left out).
+    Domains inside a full link (https://...) are NOT bare domains: that link is checked as written - counting it
+    again as "http://" made every https link look unencrypted (found 21 Oct: a Medium blog link scored 41)."""
     from app.detectors import trusted_domains
     out = []
-    for m in BARE_DOMAIN_RE.finditer(text or ""):
+    for m in BARE_DOMAIN_RE.finditer(LINK_RE.sub(" ", text or "")):
         d = m.group(1).rstrip(".,;:)")
         host = d.split("/")[0].lower()
         if not re.search(r"[a-z]", host.split(".")[0]) or host.count(".") > 5:

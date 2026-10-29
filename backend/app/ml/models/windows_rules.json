@@ -1,0 +1,121 @@
+{
+ "data": "OTRF Security-Datasets, datasets/atomic/windows/*/host (MIT licence)",
+ "per_tactic": {
+  "collection": {
+   "recordings": 1,
+   "any_incident": 0,
+   "technique_seen": 0
+  },
+  "credential_access": {
+   "recordings": 24,
+   "any_incident": 20,
+   "technique_seen": 20
+  },
+  "defense_evasion": {
+   "recordings": 42,
+   "any_incident": 35,
+   "technique_seen": 33
+  },
+  "discovery": {
+   "recordings": 9,
+   "any_incident": 4,
+   "technique_seen": 4
+  },
+  "execution": {
+   "recordings": 4,
+   "any_incident": 2,
+   "technique_seen": 1
+  },
+  "lateral_movement": {
+   "recordings": 29,
+   "any_incident": 21,
+   "technique_seen": 19
+  },
+  "persistence": {
+   "recordings": 9,
+   "any_incident": 7,
+   "technique_seen": 7
+  },
+  "privilege_escalation": {
+   "recordings": 3,
+   "any_incident": 3,
+   "technique_seen": 3
+  }
+ },
+ "total": {
+  "recordings": 121,
+  "any_incident": 92,
+  "technique_seen": 87
+ },
+ "incidents_by_rule": {
+  "cred_dump": 24,
+  "lsass_read": 8,
+  "remote_exec": 9,
+  "service_install": 4,
+  "encoded_ps": 36,
+  "security_off": 10,
+  "audit_policy": 1,
+  "lolbin": 12,
+  "log_off_reg": 8,
+  "firewall_open": 2,
+  "remote_thread": 7,
+  "ntlm_weak": 2,
+  "add_user": 2,
+  "remote_child": 17,
+  "user_created": 2,
+  "group_add": 2,
+  "cmdline_log_off": 2,
+  "remote_admin_pipe": 7,
+  "remote_discovery_pipe": 8,
+  "wmi_subscription": 6,
+  "service_reg": 3,
+  "run_key": 3,
+  "sched_task": 2
+ },
+ "independent_test": {
+  "data": "EVTX-ATTACK-SAMPLES, github.com/sbousseaden/EVTX-ATTACK-SAMPLES (GPL-3.0); not used to write the rules",
+  "per_tactic": {
+   "Command and Control": {
+    "files": 6,
+    "any_incident": 0
+   },
+   "Credential Access": {
+    "files": 39,
+    "any_incident": 18
+   },
+   "Defense Evasion": {
+    "files": 36,
+    "any_incident": 6
+   },
+   "Discovery": {
+    "files": 11,
+    "any_incident": 4
+   },
+   "Execution": {
+    "files": 34,
+    "any_incident": 8
+   },
+   "Lateral Movement": {
+    "files": 47,
+    "any_incident": 11
+   },
+   "Other": {
+    "files": 2,
+    "any_incident": 0
+   },
+   "Persistence": {
+    "files": 22,
+    "any_incident": 4
+   },
+   "Privilege Escalation": {
+    "files": 66,
+    "any_incident": 10
+   }
+  },
+  "total": {
+   "files": 263,
+   "any_incident": 61
+  },
+  "before_26_oct_rules": "41 of 263 files (same test, rules before the 26 Oct additions)"
+ }
+}

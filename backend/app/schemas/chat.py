@@ -10,5 +10,13 @@ class ChatMessageRequest(BaseModel):
     language: Literal["en", "hi", "or"] | None = None      # reply language: English, Hindi, Odia
 
 
+class ChatAction(BaseModel):
+    id: str
+    kind: str
+    summary: str
+    status: str
+
+
 class ChatMessageResponse(BaseModel):
-    reply: str
+    reply: str
+    actions: list[ChatAction] = []        # actions the AI prepared; they run only when the user presses Confirm

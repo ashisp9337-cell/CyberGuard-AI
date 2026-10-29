@@ -3,7 +3,17 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
-import { sendChatMessage, resetChat, type ChatLanguage } from "@/services/api/chatService";
+import {
+  cancelChatAction,
+  confirmChatAction,
+  loadChatHistory,
+  resetChat,
+  sendChatMessage,
+  sendChatScreenshot,
+  streamChatMessage,
+  type ChatAction,
+  type ChatLanguage,
+} from "@/services/api/chatService";
 import { ApiError } from "@/services/api/client";
 import { ICONS } from "@/lib/icons";
 import { THREATORA_EVENT, type ThreatoraAsk } from "@/lib/threatora";
@@ -13,6 +23,8 @@ interface ChatMsg {
   role: "user" | "assistant";
   text: string;
   time: number;
+  /** Actions Threatora prepared; they run only when the user presses Confirm. */
+  actions?: ChatAction[];
 }
 
 const WELCOME: ChatMsg = {
@@ -29,6 +41,8 @@ const LANGUAGES: { id: ChatLanguage; label: string; title: string }[] = [
   { id: "or", label: "ଓଡ଼ି", title: "ଓଡ଼ିଆରେ ଉତ୍ତର (Reply in Odia)" },
 ];
 const MAX_CHARS = 4000; // same limit as the backend (MAX_CHAT_CHARS)
+const MAX_IMAGE_MB = 10; // same limit as the backend (/api/chat/image)
+const IMAGE_TYPES = "image/png,image/jpeg,image/webp,image/bmp";
 
 /** Quick questions under the welcome message. "fill" only puts the text in the box (the user pastes the rest). */
 const SUGGESTIONS: { label: string; text: string; fill?: boolean }[] = [
@@ -150,6 +164,10 @@ export function ThreatoraWidget() {
   const [pos, setPos] = useState<Pos>(() => clampPosition(loadPosition()));
   const [language, setLanguage] = useState<ChatLanguage>(loadLanguage);
   const [pendingAsk, setPendingAsk] = useState<ThreatoraAsk | null>(null);
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragInfo = useRef<{ startX: number; startY: number; startPos: Pos; moved: boolean } | null>(null);
@@ -158,6 +176,40 @@ export function ThreatoraWidget() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, open]);
+
+  // Saved conversation (kept in the database): shown again when the chat is opened after a reload / restart.
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setHistoryLoaded(false);
+      setMessages([WELCOME]);
+      return;
+    }
+    if (!open || historyLoaded) return;
+    let cancelled = false;
+    loadChatHistory(50)
+      .then((items) => {
+        if (cancelled || items.length === 0) return;
+        setMessages((prev) => (prev.length > 1 ? prev : [
+          WELCOME,
+          ...items.map((h) => ({
+            id: h.id,
+            role: h.role,
+            text: h.text,
+            time: h.createdAt ? new Date(h.createdAt).getTime() : Date.now(),
+            actions: h.actions,
+          })),
+        ]));
+      })
+      .catch(() => {
+        // history is a convenience: the chat works without it
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, isAuthenticated, historyLoaded]);
 
   useEffect(() => {
     const onResize = () => setPos((p) => clampPosition(p));
@@ -228,23 +280,109 @@ export function ThreatoraWidget() {
   }
 
   async function handleSend() {
+    if (attachment) {
+      await sendScreenshot(attachment, input);
+      return;
+    }
     await sendText(input);
+  }
+
+  function updateMessage(id: string, patch: (m: ChatMsg) => ChatMsg) {
+    setMessages((prev) => prev.map((m) => (m.id === id ? patch(m) : m)));
   }
 
   async function sendText(raw: string) {
     const text = raw.trim().slice(0, MAX_CHARS);
     if (!text || sending) return;
+    const replyId = `a_${Date.now()}`;
     setMessages((prev) => [...prev, { id: `u_${Date.now()}`, role: "user", text, time: Date.now() }]);
     setInput("");
     setSending(true);
     setError(null);
+    let received = false;
     try {
-      const reply = await sendChatMessage(text, language);
-      setMessages((prev) => [...prev, { id: `a_${Date.now()}`, role: "assistant", text: reply, time: Date.now() }]);
+      // The reply appears while Threatora writes it.
+      const out = await streamChatMessage(text, language, (piece) => {
+        if (!received) {
+          received = true;
+          setMessages((prev) => [...prev, { id: replyId, role: "assistant", text: piece, time: Date.now() }]);
+        } else {
+          updateMessage(replyId, (m) => ({ ...m, text: m.text + piece }));
+        }
+      });
+      if (received) {
+        updateMessage(replyId, (m) => ({ ...m, text: out.reply, actions: out.actions }));
+      } else {
+        setMessages((prev) => [...prev, { id: replyId, role: "assistant", text: out.reply, time: Date.now(), actions: out.actions }]);
+      }
     } catch (err) {
+      if (!received) {
+        // Streaming not available (older backend, proxy): ask the normal way once.
+        try {
+          const out = await sendChatMessage(text, language);
+          setMessages((prev) => [...prev, { id: replyId, role: "assistant", text: out.reply, time: Date.now(), actions: out.actions }]);
+          return;
+        } catch (err2) {
+          err = err2;
+        }
+      }
       setError(err instanceof ApiError ? err.message : "Couldn't reach Threatora. Please try again.");
     } finally {
       setSending(false);
+    }
+  }
+
+  function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    if (f.size > MAX_IMAGE_MB * 1024 * 1024) {
+      setError(`The screenshot is larger than ${MAX_IMAGE_MB} MB.`);
+      return;
+    }
+    setError(null);
+    setAttachment(f);
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }
+
+  async function sendScreenshot(file: File, raw: string) {
+    if (sending) return;
+    const question = raw.trim().slice(0, MAX_CHARS);
+    setMessages((prev) => [...prev, {
+      id: `u_${Date.now()}`, role: "user", time: Date.now(),
+      text: `📷 ${file.name}${question ? `\n${question}` : ""}`,
+    }]);
+    setInput("");
+    setAttachment(null);
+    setSending(true);
+    setError(null);
+    try {
+      const out = await sendChatScreenshot(file, question, language);
+      setMessages((prev) => [...prev, { id: `a_${Date.now()}`, role: "assistant", text: out.reply, time: Date.now(), actions: out.actions }]);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Couldn't send the screenshot. Please try again.");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function runAction(msgId: string, action: ChatAction, confirm: boolean) {
+    if (actionBusy) return;
+    setActionBusy(action.id);
+    setError(null);
+    const setStatus = (status: string) =>
+      updateMessage(msgId, (m) => ({ ...m, actions: m.actions?.map((a) => (a.id === action.id ? { ...a, status } : a)) }));
+    try {
+      const out = confirm ? await confirmChatAction(action.id) : await cancelChatAction(action.id);
+      setStatus(confirm ? "done" : "cancelled");
+      setMessages((prev) => [...prev, {
+        id: `x_${Date.now()}`, role: "assistant", time: Date.now(), text: confirm ? `✅ ${out.message}` : out.message,
+      }]);
+    } catch (err) {
+      setStatus("failed");
+      setError(err instanceof ApiError ? err.message : "The action could not be carried out.");
+    } finally {
+      setActionBusy(null);
     }
   }
 
@@ -264,6 +402,7 @@ export function ThreatoraWidget() {
   async function handleClear() {
     setMessages([WELCOME]);
     setError(null);
+    setAttachment(null);
     try {
       await resetChat();
     } catch {
@@ -372,11 +511,40 @@ export function ThreatoraWidget() {
                         >
                           {m.role === "assistant" ? <MessageBody text={m.text} /> : m.text}
                         </div>
+                        {m.actions?.map((a) => (
+                          <div key={a.id} className="mt-1 w-full rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-2 text-[12px] text-amber-100">
+                            <p className="font-semibold text-amber-200 mb-0.5">Needs your confirmation</p>
+                            <p>{a.summary}</p>
+                            {a.status === "pending" ? (
+                              <div className="mt-1.5 flex gap-1.5">
+                                <button
+                                  onClick={() => runAction(m.id, a, true)}
+                                  disabled={actionBusy !== null}
+                                  className="rounded-md bg-amber-400 text-slate-950 font-semibold px-2.5 py-1 hover:bg-amber-300 focus-ring disabled:opacity-50"
+                                >
+                                  {actionBusy === a.id ? "Working…" : "Confirm"}
+                                </button>
+                                <button
+                                  onClick={() => runAction(m.id, a, false)}
+                                  disabled={actionBusy !== null}
+                                  className="rounded-md border border-amber-500/40 px-2.5 py-1 text-amber-100 hover:bg-amber-500/10 focus-ring disabled:opacity-50"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <p className="mt-1 text-[11px] text-amber-300/80">
+                                {({ done: "✔ Done", cancelled: "Cancelled", failed: "Could not be carried out", running: "Working…",
+                                  expired: "Expired - ask Threatora again" } as Record<string, string>)[a.status] ?? a.status}
+                              </p>
+                            )}
+                          </div>
+                        ))}
                         <span className="text-[10px] text-slate-600 px-1">{formatTime(m.time)}</span>
                       </div>
                     </div>
                   ))}
-                  {sending && (
+                  {sending && messages[messages.length - 1]?.role === "user" && (
                     <div className="flex justify-start">
                       <div className="bg-canvas border border-default rounded-xl"><TypingDots /></div>
                     </div>
@@ -401,13 +569,35 @@ export function ThreatoraWidget() {
                   )}
                 </div>
 
+                {attachment && (
+                  <div className="px-2.5 pt-2 shrink-0 flex items-center gap-2 text-[11px] text-slate-300">
+                    <span className="flex items-center gap-1 rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 max-w-[80%]">
+                      <ICONS.image size={12} className="text-cyan-300 shrink-0" />
+                      <span className="truncate">{attachment.name}</span>
+                    </span>
+                    <button onClick={() => setAttachment(null)} aria-label="Remove screenshot" className="text-slate-500 hover:text-white focus-ring rounded">
+                      <ICONS.close size={13} />
+                    </button>
+                    <span className="text-slate-500">read on this computer, not uploaded to the AI</span>
+                  </div>
+                )}
                 <div className="p-2.5 border-t border-default shrink-0 flex items-end gap-2">
+                  <input ref={fileRef} type="file" accept={IMAGE_TYPES} className="hidden" onChange={pickFile} />
+                  <button
+                    onClick={() => fileRef.current?.click()}
+                    disabled={sending}
+                    aria-label="Attach a screenshot"
+                    title="Check a screenshot (SMS, WhatsApp, e-mail or QR code)"
+                    className="h-9 w-9 shrink-0 rounded-lg border border-strong text-slate-400 flex items-center justify-center hover:text-white hover:bg-canvas focus-ring disabled:opacity-40"
+                  >
+                    <ICONS.image size={15} />
+                  </button>
                   <textarea
                     ref={inputRef}
                     value={input}
                     onChange={(e) => setInput(e.target.value.slice(0, MAX_CHARS))}
                     onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), handleSend())}
-                    placeholder="Ask a question or paste a link / message…"
+                    placeholder={attachment ? "Add a question (optional)…" : "Ask a question or paste a link / message…"}
                     disabled={sending}
                     rows={input.includes("\n") || input.length > 60 ? 4 : 1}
                     maxLength={MAX_CHARS}
@@ -415,7 +605,7 @@ export function ThreatoraWidget() {
                   />
                   <button
                     onClick={handleSend}
-                    disabled={sending || !input.trim()}
+                    disabled={sending || (!input.trim() && !attachment)}
                     aria-label="Send message"
                     className="h-9 w-9 shrink-0 rounded-lg bg-gradient-to-br from-cyan-400 to-blue-600 text-white flex items-center justify-center hover:opacity-90 focus-ring disabled:opacity-40"
                   >
@@ -430,4 +620,4 @@ export function ThreatoraWidget() {
     </>,
     document.body
   );
-}
+}

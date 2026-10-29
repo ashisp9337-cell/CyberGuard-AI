@@ -16,12 +16,17 @@ from app.services import response_playbook, notifier, subtopic_router, scan_stor
 router = APIRouter(prefix="/api/analysis", tags=["analysis"])
 settings = get_settings()
 
-ALLOWED_EXTENSIONS = {".eml", ".msg", ".txt", ".png", ".jpg", ".jpeg", ".mp4", ".mov", ".avi", ".mkv", ".webm", ".mp3", ".wav", ".pdf"}
+# Programs, archives and Office files are accepted ONLY by the Cyber Threat module (Malware Detection). Like every
+# upload they are stored under a random name, never run, and deleted as soon as they have been read.
+CYBER_EXTRA_EXTENSIONS = {"", ".exe", ".dll", ".scr", ".sys", ".cpl", ".msi", ".apk", ".elf", ".so", ".bin", ".zip",
+                          ".jar", ".doc", ".docx", ".docm", ".xls", ".xlsx", ".xlsm", ".ppt", ".pptx", ".pptm", ".rtf",
+                          ".js", ".vbs", ".ps1", ".bat", ".cmd", ".hta", ".lnk", ".evtx", ".xml"}
+ALLOWED_EXTENSIONS = {".eml", ".msg", ".txt", ".log", ".csv", ".json", ".pcap", ".pcapng", ".cap", ".png", ".jpg", ".jpeg", ".mp4", ".mov", ".avi", ".mkv", ".webm", ".mp3", ".wav", ".ogg", ".opus", ".m4a", ".aac", ".flac", ".pdf"}
 
 
-def _save_upload(file: UploadFile) -> tuple[str, str]:
+def _save_upload(file: UploadFile, extra: set | frozenset = frozenset()) -> tuple[str, str]:
     ext = os.path.splitext(file.filename or "")[1].lower()
-    if ext not in ALLOWED_EXTENSIONS:
+    if ext not in ALLOWED_EXTENSIONS and ext not in extra:
         raise HTTPException(status_code=400, detail={"error": {"code": "UNSUPPORTED_FILE_TYPE", "message": f"File type {ext} is not supported."}})
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     safe_name = f"{uuid.uuid4().hex}{ext}"       # never the user's file name: no path tricks possible
@@ -77,6 +82,7 @@ async def scan(
     urlInput: str | None = Form(None),
     extraFieldValues: str | None = Form(None),
     file: UploadFile | None = File(None),
+    referenceFile: UploadFile | None = File(None),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -93,9 +99,21 @@ async def scan(
         extra_fields = {str(k)[:100]: (v if isinstance(v, (str, int, float, bool)) or v is None else str(v))
                         for k, v in list(extra_fields.items())[:50]}
 
+    has_reference = referenceFile is not None and bool(referenceFile.filename)
+    if has_reference and moduleId != "deepfake":                  # checked before anything is saved
+        raise HTTPException(status_code=400, detail={"error": {"code": "UNEXPECTED_REFERENCE",
+                            "message": "A reference recording is only used by Voice & Audio Analysis."}})
     file_path, file_name = (None, None)
     if file is not None and file.filename:
-        file_path, file_name = _save_upload(file)
+        file_path, file_name = _save_upload(file, CYBER_EXTRA_EXTENSIONS if moduleId == "cyber-threat" else frozenset())
+    reference_path = None
+    if has_reference:                                             # a genuine recording of the person (voice match)
+        try:
+            reference_path, _ = _save_upload(referenceFile)
+        except HTTPException:
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
+            raise
 
     routing = None
     if subtopicId == "auto":
@@ -106,19 +124,28 @@ async def scan(
                 file_name=file_name, extra_field_values=extra_fields, db=db, user_id=user.id,
             )
         except subtopic_router.RoutingError as exc:
-            if file_path and os.path.exists(file_path):
-                os.remove(file_path)
+            for p in (file_path, reference_path):
+                if p and os.path.exists(p):
+                    os.remove(p)
             raise HTTPException(status_code=422, detail={"error": {
                 "code": f"SUBTOPIC_{exc.code.upper()}", "message": exc.message, "details": exc.details}})
         subtopicId, subtopicTitle, routing = c.subtopic_id, c.subtopic_title, c.to_dict()
         result["routing"] = routing          # saved with the scan, so Scan History shows it too
     else:
-        result = run_scan(
-            module_id=moduleId, subtopic_id=subtopicId, subtopic_title=subtopicTitle,
-            text_input=textInput, url_input=urlInput, file_path=file_path, file_name=file_name,
-            extra_field_values=extra_fields, db=db, user_id=user.id,
-        )
+        try:
+            result = run_scan(
+                module_id=moduleId, subtopic_id=subtopicId, subtopic_title=subtopicTitle,
+                text_input=textInput, url_input=urlInput, file_path=file_path, file_name=file_name,
+                extra_field_values=extra_fields, db=db, user_id=user.id, reference_path=reference_path,
+            )
+        finally:
+            if reference_path and os.path.exists(reference_path):
+                os.remove(reference_path)     # a person's genuine voice is private: never kept on the server
 
+    if reference_path and os.path.exists(reference_path):
+        os.remove(reference_path)
+    if file_path and os.path.exists(file_path) and (moduleId == "cyber-threat" or "voiceAnalysis" in result):
+        os.remove(file_path)          # logs and voice recordings can hold private data: the server copy is deleted once read
     target = result.pop("_target", file_name or urlInput or textInput or "submission")
     target_type = result.pop("_target_type", "text")
     # Threat-specific response actions (quarantine, block IP, revoke session, report ...).

@@ -128,6 +128,34 @@ def probability(bundle: dict, name: str, suffix: str) -> float:
     return float(probabilities(bundle, [name], [suffix])[0])
 
 
+# "Verify" level re-measured on 2026 sites (added 21 Oct). The level is where 1% of real 2026 websites the model never
+# saw (315,735 Chrome UX Report top-1M sites that are not in Tranco or PhiUSIIL) score higher; at it the model caught
+# 36% of the phishing domains first listed by Phishing.Database between April and October 2026 (739 domains). Written by
+# app/ml/training/calibrate_url_domain.py; it only applies to the model version it was measured on.
+MODERN_PATH = os.path.join(os.path.dirname(MODEL_PATH), "url_domain_model.modern.json")
+_modern_cache: dict = {}
+
+
+def modern_verify_level() -> float | None:
+    b = load()
+    if b is None or not os.path.exists(MODERN_PATH):
+        return None
+    key = (os.path.getmtime(MODERN_PATH), _cache.get("mtime"))
+    if _modern_cache.get("key") != key:
+        level = None
+        try:
+            import json
+            with open(MODERN_PATH, encoding="utf-8") as f:
+                c = json.load(f)
+            if c.get("model_trained_at") and c["model_trained_at"] == (b.get("card") or {}).get("trained_at"):
+                lv = float(c["verify_level"])
+                level = lv if 0 < lv < 1 else None
+        except (OSError, ValueError, KeyError, TypeError):
+            level = None
+        _modern_cache.update(key=key, level=level)
+    return _modern_cache.get("level")
+
+
 def assess(host: str):
     """Model view of a host, or None when the model does not apply (no model, IP, hosting platform)."""
     b = load()
@@ -137,5 +165,7 @@ def assess(host: str):
     if parts["ip"] or parts["platform"] or not parts["name"]:
         return None
     p = probability(b, parts["name"], parts["suffix"])
+    level = modern_verify_level()
     return {"probability": p, "site": parts["site"], "threshold": b["threshold"],
-            "flagged": p >= b["threshold"], "card": b.get("card", {})}
+            "flagged": p >= b["threshold"], "card": b.get("card", {}),
+            "verifyLevel": level, "verify": level is not None and p >= level}

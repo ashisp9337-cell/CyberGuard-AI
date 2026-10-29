@@ -102,6 +102,7 @@ def test_password_reset_ends_sessions_and_old_reset_links(client):
     t1 = client.post("/api/auth/forgot-password", json={"email": e}).json()["devResetToken"]
     t2 = client.post("/api/auth/forgot-password", json={"email": e}).json()["devResetToken"]
     assert client.post("/api/auth/reset-password", json={"token": t2, "newPassword": "NewPass456"}).status_code == 200
+    client.cookies.clear()                    # only the old cookie is sent (httpx2's jar keeps both otherwise)
     client.cookies.set("cyberguard_session", session)
     assert client.get("/api/auth/me").status_code == 401                       # old session is dead
     assert client.post("/api/auth/reset-password", json={"token": t1, "newPassword": "Other789X"}).status_code == 400
@@ -113,9 +114,11 @@ def test_tampered_or_unsigned_tokens_rejected(client):
     register_user(client, {"name": "T", "email": _email(), "password": "TestPass123"})
     me = client.get("/api/auth/me").json()
     forged = pyjwt.encode({"sub": me["id"], "sv": 0, "exp": 9999999999}, "wrong-secret-" + "y" * 40, algorithm="HS256")
+    client.cookies.clear()                    # only the forged cookie is sent (httpx2's jar keeps both otherwise)
     client.cookies.set("cyberguard_session", forged)
     assert client.get("/api/auth/me").status_code == 401
     none_alg = pyjwt.encode({"sub": me["id"], "sv": 0, "exp": 9999999999}, None, algorithm="none")
+    client.cookies.clear()
     client.cookies.set("cyberguard_session", none_alg)
     assert client.get("/api/auth/me").status_code == 401
 

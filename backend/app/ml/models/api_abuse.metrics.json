@@ -1,0 +1,82 @@
+{
+  "model": "TF-IDF character 1-4-grams of the request SHAPE + logistic regression",
+  "trained_at": "2026-10-21T19:02:13+00:00",
+  "quick_run": false,
+  "data": {
+    "csic2010": "https://www.tic.itefi.csic.es/dataset/ (copy: github baksakal/HTTP-DATASET-CSIC-2010...)",
+    "httpparams": "github.com/Morzeux/HttpParamsDataset (MIT)",
+    "dephides_legitimate": "github.com/ebubekirbbr/dephides (MIT, CommonCrawl links)",
+    "fwaf_test_only": "github.com/faizann24/Fwaf-Machine-Learning-driven-Web-Application-Firewall",
+    "training_requests": 261783,
+    "training_attacks": 18711
+  },
+  "levels": {
+    "thr_alert": 0.9899201117135882,
+    "thr_verify": 0.8726340858670595,
+    "chosen_on": "10% of DEPHIDES websites used for nothing else: alert = 0.1%, verify = 0.5% of their real requests"
+  },
+  "results": {
+    "auc": {
+      "csic_official_test": 0.869,
+      "httpparams_heldout_values": 0.9996,
+      "fwaf_independent_attack_payloads": 0.9465,
+      "fwaf_independent_all_attacks_incl_probes": 0.9223,
+      "unseen_websites_vs_csic_attacks": 0.9887
+    },
+    "attacks_caught": {
+      "csic_attacks": {
+        "n": 12198,
+        "at_alert": 0.2707,
+        "at_verify": 0.6153
+      },
+      "httpparams_attack_values": {
+        "n": 5919,
+        "at_alert": 0.939,
+        "at_verify": 0.9878
+      },
+      "fwaf_attack_payloads": {
+        "n": 45824,
+        "at_alert": 0.289,
+        "at_verify": 0.4143
+      },
+      "fwaf_probes_for_old_scripts": {
+        "n": 2241,
+        "at_alert": 0.0,
+        "at_verify": 0.0004
+      }
+    },
+    "real_requests_flagged": {
+      "unseen_websites_commoncrawl": {
+        "n": 56664,
+        "at_alert": 0.0008,
+        "at_verify": 0.0052
+      },
+      "unseen_websites_with_query": {
+        "n": 10151,
+        "at_alert": 0.001,
+        "at_verify": 0.0112
+      },
+      "csic_normal_test": {
+        "n": 36000,
+        "at_alert": 0.0009,
+        "at_verify": 0.0947
+      },
+      "fwaf_real_queries_independent": {
+        "n": 30000,
+        "at_alert": 0.0023,
+        "at_verify": 0.0114
+      },
+      "urlscan_2026_real_pages": {
+        "n": 1970,
+        "at_alert": 0.0015,
+        "at_verify": 0.0066
+      }
+    },
+    "normal_20_request_logs_flagged": {
+      "n": 2000,
+      "at_alert": 0.02,
+      "at_verify": 0.1045
+    },
+    "note": "CSIC 'anomalous' also contains requests that are only badly formed (wrong field formats), not attacks; a syntax model cannot and should not flag those, so its CSIC catch rate is lower than on real attack payloads. Fwaf 'probes for old scripts' (?x=XXpathXX) are requests for known vulnerable file names - judged here by syntax only, so mostly not caught. Fwaf's 'good' queries are not clean: 4% of those with a '?' are real scanner attacks (Nessus probes, union select, |ping|), so its false-alarm numbers are an upper bound; the clean normal sets are the unseen CommonCrawl websites and the urlscan.io 2026 pages."
+  }
+}

@@ -71,7 +71,10 @@ def activity(days: int = 14, user: User = Depends(get_current_user), db: Session
     key_map = {"phishing": "phishing", "impersonation": "impersonation", "deepfake": "deepfake",
                "credential": "accountTakeover", "url-security": "suspiciousUrls", "cyber-threat": "networkThreats"}
     for s in scans:
-        label = s.created_at.strftime("%b %d")
+        # the days are UTC days: PostgreSQL returns times in its own time zone (Asia/Kolkata on the PC), so convert
+        # first - otherwise scans made between 00:00 and 05:30 IST fell outside the chart (fixed 22 Oct)
+        ca = s.created_at if s.created_at.tzinfo else s.created_at.replace(tzinfo=timezone.utc)
+        label = ca.astimezone(timezone.utc).strftime("%b %d")
         if label not in buckets:
             continue
         key = key_map.get(s.module_id)

@@ -1,0 +1,17 @@
+{
+  "verify_level": 0.3506151857019756,
+  "model_trained_at": "2026-10-11T23:01:47+00:00",
+  "model_alert_level": 0.3207154858291203,
+  "target": "1% of real 2026 sites the model never saw",
+  "data": "Chrome UX Report top-1M (https://raw.githubusercontent.com/zakird/crux-top-lists/main/data/global/current.csv.gz): 315,735 real sites not in Tranco / PhiUSIIL",
+  "results": {
+    "real_2026_sites_other_half_flagged": 0.0105,
+    "real_2026_sites_other_half_flagged_at_model_alert_level": 0.0139,
+    "urlscan_2026_phishing_sites": {
+      "n": 910,
+      "caught_at_verify_level": 0.1791,
+      "caught_at_model_alert_level": 0.2077
+    }
+  },
+  "calibrated_at": "2026-10-21T18:34:05+00:00"
+}

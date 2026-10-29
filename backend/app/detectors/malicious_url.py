@@ -31,6 +31,82 @@ import re
 
 settings = get_settings()
 
+# ---- Added 21 Oct after the QR / 2026-link benchmark (offline; no link was opened) -------------------------------
+# Free website hosts where anyone can publish a page in minutes. On these the site NAME is chosen by whoever uploaded
+# the page, so brand / login words in it are a strong hint. Measured on real 2026 data: brand or login words in the
+# name fire on 0.8% of the 4,404 popular real sites on these hosts (Chrome UX Report top-1M, mostly gambling and
+# clickbait blogs) and on 23% of the 1,103 phishing sites on them that urlscan.io saw in 2026.
+FREE_WEB_HOSTS = frozenset("""vercel.app netlify.app github.io gitlab.io pages.dev workers.dev r2.dev web.app
+firebaseapp.com appspot.com glitch.me repl.co replit.app replit.dev webflow.io framer.app framer.website square.site
+wixsite.com weebly.com weeblysite.com blogspot.com wordpress.com yolasite.com typedream.app herokuapp.com onrender.com
+azurewebsites.net amplifyapp.com pantheonsite.io plesk.page cprapid.com duckdns.org ddns.net trycloudflare.com
+dweb.link cf-ipfs.com w3s.link nftstorage.link lovable.app myshopify.com surge.sh fly.dev deno.dev godaddysites.com
+mystrikingly.com carrd.co notion.site jimdosite.com webnode.page edgeone.app""".split())
+# Words kept only if they are clearly more common in phishing names than in real ones on 2026 data ("update", "auth",
+# "sso", "reward", "unlock", "invoice", "bank", "recover" were dropped: real company apps and blogs use them as often).
+_HOSTED_LURE_LONG = ("login", "signin", "logon", "verify", "secure", "account", "wallet", "support", "billing", "claim",
+                     "refund", "payment", "confirm", "security", "suspend", "webmail", "airdrop", "authenticat")
+_HOSTED_LURE_SHORT = frozenset({"kyc", "otp", "usdt", "mfa", "2fa", "pay", "help", "fees"})
+HOSTED_NAME_LABEL = "Brand or login words in the name of a free-hosted site"
+WP_PLANTED_LABEL = "Web page planted in a WordPress system folder"
+DOMAIN_2026_LABEL = "Domain-name model: name looks like 2026 phishing domains - verify"
+VERIFY_FLOOR_LABELS = frozenset({HOSTED_NAME_LABEL, WP_PLANTED_LABEL, DOMAIN_2026_LABEL})
+# A web page (.html / .php) inside WordPress's own system folders is where phishing kits are dropped on hacked sites.
+# Fires on 19 of 288,195 real links (DEPHIDES / CommonCrawl), 0 of 7,698 real urlscan.io links and 0 of 5,005 real QR
+# links; on 2-4% of the phishing links in the DEPHIDES, Phishing.Database and quishing (QR) sets.
+_WP_PLANTED_RE = re.compile(r"/wp-(?:includes|content|admin)/(?:[^?#]*/)?[^/?#]+\.s?html?(?:[?#]|$)|"
+                            r"/wp-(?:includes|content/uploads)/(?:[^?#]*/)?[^/?#]+\.php(?:[?#]|$)", re.I)
+
+
+# the hosts' own service names (login.wordpress.com is WordPress's real sign-in), never judged as user sites
+_HOST_OWN_NAMES = frozenset({"www", "login", "accounts", "account", "auth", "signin", "my", "app", "api", "help",
+                             "support", "status", "docs", "blog", "mail", "pay", "secure", "dashboard", "admin"})
+
+
+def free_host(host: str) -> tuple[str | None, str]:
+    """('vercel.app', 'wetransfer-smoky') for a site on a free website host, else (None, '')."""
+    host = (host or "").lower().rstrip(".")
+    sp = domain_model.site_parts(host)
+    pl = sp["platform"]
+    if pl:                                    # on the public-suffix list (vercel.app, github.io, ey.r.appspot.com ...)
+        base = pl if pl in FREE_WEB_HOSTS else next((f for f in FREE_WEB_HOSTS if pl.endswith("." + f)), None)
+    elif sp["site"] in FREE_WEB_HOSTS:        # not on it (weeblysite.com, wordpress.com ...): the sub-domain is the name
+        pl = base = sp["site"]
+    else:
+        return None, ""
+    if not base:
+        return None, ""
+    name = host[: -len(pl) - 1] if host.endswith("." + pl) else ""
+    return base, ("" if name in _HOST_OWN_NAMES else name)
+
+
+def _popular_sites():
+    """The 100,000 most popular sites (Tranco), kept inside the look-alike model. Long-lived popular sites are never
+    raised to "verify" by the domain-name model alone (steamcommunity.com, gq.com, my.naver.com scored above its 2026
+    level). None when that model is missing -> the domain-name model then never raises a score on its own."""
+    try:
+        from app.detectors import lookalike_domain
+        b = lookalike_domain.load_model()
+        return b["index_obj"].allow if b and b.get("index_obj") is not None else None
+    except Exception:
+        return None
+
+
+def hosted_name_words(host: str) -> tuple[str | None, str | None, str | None]:
+    """(platform, brand, login word) found in the uploader-chosen name of a free-hosted site."""
+    platform, name = free_host(host)
+    if not platform or not name:
+        return platform, None, None
+    name = name.lower()
+    tokens = [t for t in re.split(r"[^a-z0-9]+", name) if t]
+    brands = set(BRAND_DOMAINS) | set(BRAND_ALIASES)
+    brand = next((t for t in tokens if t in brands), None) or \
+        next((b for b in sorted(brands) if len(b) >= 6 and any(b in t and t != b for t in tokens)), None)
+    if platform in ("github.io", "gitlab.io"):
+        brand = None             # GitHub / GitLab user names: the real organisations own their brand names there
+    word = next((w for w in _HOSTED_LURE_LONG if w in name), None) or next((t for t in tokens if t in _HOSTED_LURE_SHORT), None)
+    return platform, brand, word
+
 def _registry(host: str):
     """Registry record (RDAP) of the registrable domain + the domain-registration model, or None
     (IP address, shared hosting platform such as *.web.app - its owner's age says nothing about this page)."""
@@ -104,10 +180,39 @@ def _extra_rules(url: str) -> list[dict]:
     sensitive = tuple(SENSITIVE_WORDS) + ("kyc", "otp", "bank", "wallet", "refund")
     path_query = (parts["path"] + "?" + parts["query"]).lower()
     ip_login = bool(IP_RE.match(parts["host"])) and any(w in path_query for w in sensitive)
-    return [{"label": "Login-style page on a raw IP address",
-             "description": "A page asking for login/KYC/account details is hosted on a bare IP address instead of a "
-                            "named website. Real banks and services never do this.",
-             "severity": "critical", "weight": 25, "triggered": ip_login}]
+    out = [{"label": "Login-style page on a raw IP address",
+            "description": "A page asking for login/KYC/account details is hosted on a bare IP address instead of a "
+                           "named website. Real banks and services never do this.",
+            "severity": "critical", "weight": 25, "triggered": ip_login}]
+    # Added 21 Oct after the QR benchmark (public quishing dataset): two classic tricks the domain checks miss.
+    site = registered_domain(parts["host"])
+    brand_site = next((d for b, doms in BRAND_DOMAINS.items() for d in doms
+                       if d not in (site, parts["host"]) and re.search(r"(?<![a-z0-9-])" + re.escape(d)
+                                                                      + r"(?![a-z0-9-])", path_query)), None)
+    hidden = bool(brand_site) and bool(_PATH_LOGIN_RE.search(path_query)) and not _redirect_target(parts["query"])
+    out.append({"label": "Another brand's address hidden in the path",
+                "description": f"The page path mentions {brand_site} next to login words, but the page is on "
+                               f"{site or parts['host']}. Phishing kits copy the real site's address into the path "
+                               "so the link looks right at a glance.", "severity": "high", "weight": 25,
+                "triggered": hidden})
+    kit = _KIT_RE.search(path_query)
+    out.append({"label": "Phishing-kit file name in the path",
+                "description": f"The path contains '{kit.group(0)[:40] if kit else ''}', a file / command name used by "
+                               "well-known phishing kits that copy PayPal / bank sign-in pages.", "severity": "high",
+                "weight": 25, "triggered": bool(kit) and site not in BRAND_DOMAINS.get("paypal", ())})
+    planted = _WP_PLANTED_RE.search(parts["path"] + ("?" + parts["query"] if parts["query"] else ""))
+    out.append({"label": WP_PLANTED_LABEL,
+                "description": f"The page '{planted.group(0)[-60:] if planted else ''}' sits inside WordPress's own "
+                               "system folders (wp-includes / wp-content), where real sites keep code and images, not "
+                               "pages. Phishing kits are dropped there on hacked WordPress sites.", "severity": "high",
+                "weight": 25, "triggered": bool(planted)})
+    return out
+
+
+_PATH_LOGIN_RE = re.compile(r"log-?in|sign-?in|logon|verif|secure|account|update|confirm|webscr|auth|password|banking")
+_KIT_RE = re.compile(r"webscr(?:\.php|\.cmd|_)|cmd=_(?:login|account|s-xclick|update)|websc[r]?_?login|"
+                     r"(?:paypal|apple|chase|wellsfargo|bankofamerica|amazon|netflix)[^/?]*/(?:[^/?]*/)*"
+                     r"(?:login|signin|verify|update)[^/?]*\.(?:php|html?)", re.I)
 
 
 def _domain_indicators(url: str) -> tuple[list[dict], dict | None]:
@@ -157,6 +262,13 @@ def _domain_indicators(url: str) -> tuple[list[dict], dict | None]:
     add(publish and login_path, "Login / verification page on a free platform",
         f"A '{login_path.group(1) if login_path else ''}' page on {publish}: real banks and companies host their "
         "sign-in pages on their own domain, not on free hosting.", "high", 20)
+    fh, fh_brand, fh_word = hosted_name_words(host)
+    fh_what = " and ".join(x for x in (f"the brand '{fh_brand}'" if fh_brand else "",
+                                       f"the word '{fh_word}'" if fh_word else "") if x)
+    add(bool(fh and (fh_brand or fh_word)) and not trusted_domains.is_trusted(url), HOSTED_NAME_LABEL,
+        f"This site lives on {fh}, a free website host, and the name its uploader chose contains {fh_what}. "
+        "Anyone can publish there in minutes; phishers pick names like these so the link looks official. "
+        "(On 2026 data this fired on 23% of phishing sites on free hosts and 0.8% of popular real ones.)", "high", 20)
     target = _redirect_target(parts["query"])
     if (target and domain_model.site_parts(target)["site"] != site["site"]
             and not trusted_domains.is_trusted("https://" + target + "/")):
@@ -180,6 +292,12 @@ def _domain_indicators(url: str) -> tuple[list[dict], dict | None]:
             f"The domain-name model (trained on 41k real phishing and 382k legitimate domains) gives "
             f"'{ml['site']}' a {ml['probability'] * 100:.0f}% phishing likelihood; its alert level is "
             f"{ml['threshold'] * 100:.0f}% (flags about 1% of real legitimate domains).", "high", 0)
+        popular = _popular_sites()
+        add(ml.get("verify") and popular is not None and ml["site"] not in popular
+            and not trusted_domains.is_trusted(url), DOMAIN_2026_LABEL,
+            f"'{ml['site']}' scores {ml['probability'] * 100:.0f}%, above the level re-measured on 2026 websites "
+            f"({(ml.get('verifyLevel') or 0) * 100:.0f}%, which only 1% of real 2026 sites reach). Check the site "
+            "carefully before trusting it.", "medium", 0)
     return out, ml
 
 
@@ -330,6 +448,10 @@ def analyze_url(url: str, subtopic_title: str = "Malicious URL Analysis", subtop
     # real sites and 2,478 real pages from the urlscan collection: no new false alarm.)
     if any(i["triggered"] and i["label"].startswith("Look-alike of ") for i in indicators):
         blended = max(blended, 51)
+    # Added 21 Oct (2026-link benchmark): brand / login words in a free-hosted site's name, a page planted in
+    # WordPress system folders, and the domain-name model above its 2026 level are each at least "verify".
+    if any(i["triggered"] and i["label"] in VERIFY_FLOOR_LABELS for i in indicators):
+        blended = max(blended, 51)
 
     # A subtopic's own trained model can only RAISE the score: alert level -> 71-100, verify level -> 51-70.
     if sub and sub["level"] in ("high", "medium"):
@@ -413,6 +535,8 @@ def _lookalike(url: str):
     a = lookalike_domain.assess(host) if host else None
     if a is None or "thrAlert" not in a or a.get("noNearBrand") and a["probability"] < a["thrVerify"]:
         return None                                 # a known / protected / government site, or nothing close
+    if any(registered_domain(host) in doms or host in doms for doms in BRAND_DOMAINS.values()):
+        return None                                 # one of a brand's own listed domains (razorpay.me, paypal.me, wa.me)
     p, level, brand = a["probability"], a["level"], a.get("brandDomain")
     tricks = ", ".join(a.get("tricks") or []) or "small changes to the name"
     name = "Look-alike domain model"
@@ -490,7 +614,34 @@ def _manipulation(url: str):
             "domain": split_url(url)["host"], "brandDomain": None, "tricks": a["findings"]}
 
 
-SUBTOPIC_MODELS = {"lookalike-domain": _lookalike, "domain-spoofing": _spoofing, "url-manipulation": _manipulation}
+def _link2026(url: str):
+    """The 2026 link model (26 Oct): the whole link compared with real 2026 phishing links. General URL pages only.
+    Only its ALERT level (0.5% of real links) raises a score; its "verify" level (5% of real links) is a note only."""
+    from app.detectors import link_2026
+    a = link_2026.assess(url)
+    if a is None:
+        return None
+    p, level = a["probability"], a["level"]
+    note = level == "medium"
+    if note:
+        a = {**a, "level": "low", "probability": min(p, a["thrVerify"])}
+        level = "low"
+    name = "2026 link model"
+    label = (f"{name}: looks like this year's phishing links" if level == "high" else
+             f"{name}: a little like recent phishing links (note only)" if note else f"{name}: looks normal")
+    desc = (f"The 2026 link model (trained on real phishing links seen by urlscan.io in September-October 2026 and on "
+            f"real 2026 sites, including sites on free website hosts; tested on later days and other sites) rates this "
+            f"link {p * 100:.0f}% phishing-like (alert level {a['thrAlert'] * 100:.0f}%, reached by about 0.5% of real "
+            f"links). It reads only the link text.")
+    ind = {"label": label, "description": desc, "weight": 0, "triggered": level != "low" or note,
+           "severity": {"high": "high", "medium": "medium"}.get(level, "low"), "mitre": "T1566.002",
+           "id": f"IND_{uuid.uuid4().hex[:12]}"}
+    return {**a, "subtopic": "link-2026", "model": "2026 link model (urlscan.io 2026 trained)", "indicator": ind,
+            "domain": split_url(url)["host"], "brandDomain": None, "tricks": []}
+
+
+SUBTOPIC_MODELS = {"lookalike-domain": _lookalike, "domain-spoofing": _spoofing, "url-manipulation": _manipulation,
+                   "link-2026": _link2026}
 
 
 # Pages that receive links from anywhere (a QR code, a "check this link" page) run EVERY trained URL

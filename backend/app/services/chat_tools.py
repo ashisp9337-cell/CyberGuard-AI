@@ -25,7 +25,8 @@ _IP_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$|^[0-9a-f:]+:[0-9a-f:]*$", re.I)
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$", re.I)
 
 
-UNTRUSTED_KEYS = ("target", "explanation", "detector_explanation", "description", "title", "main_reasons", "value")
+UNTRUSTED_KEYS = ("target", "explanation", "detector_explanation", "description", "title", "main_reasons", "value",
+                  "subject", "reason", "summary")
 
 
 def build_tools(db: Session, user_id: str, ctx=None) -> list:
@@ -371,15 +372,115 @@ def build_tools(db: Session, user_id: str, ctx=None) -> list:
             detector_explanation. The verdict comes from the detectors: report it as it is.
         """
         from app.services import chat_scan
+        if getattr(ctx, "attachment_scans", None):     # a screenshot was already scanned: give that result back
+            return ctx.attachment_scans[0] | {"note": "Already scanned by CyberGuard (from the screenshot)."}
         raw = ctx.masker.unmask(content or "")
         summary = chat_scan.run(db, user_id, raw, ctx.scan_cache)
         if "scan_id" in summary and summary not in ctx.scans:
             ctx.scans.append(summary)
         return summary
 
+    def get_quarantined_emails(limit: int = 10) -> list[dict]:
+        """List e-mails CyberGuard is holding in quarantine (dangerous mail from the user's inbox), newest first.
+
+        Use this when the user asks about quarantined / blocked e-mails, or before preparing a release.
+
+        Args:
+            limit: How many to return (1-20).
+
+        Returns:
+            id, from, subject, risk_score, classification, reason, received.
+        """
+        from app.db.models import EmailRecord
+        rows = (db.query(EmailRecord).filter(EmailRecord.user_id == user_id, EmailRecord.action_taken == "quarantined")
+                .order_by(EmailRecord.created_at.desc()).limit(max(1, min(int(limit or 10), 20))).all())
+        return [{"id": r.id, "from": r.from_address, "subject": r.subject[:200], "risk_score": r.risk_score,
+                 "classification": r.classification,
+                 "reason": (((r.details or {}).get("quarantine") or {}).get("reason") or "")[:200],
+                 "received": r.created_at.isoformat() if r.created_at else None} for r in rows]
+
+    def prepare_release_quarantined_email(email_id: str) -> dict:
+        """PREPARE releasing one quarantined e-mail back to the inbox. This does NOT release it: the user sees a
+        Confirm button in the chat and decides. Only use it when the user clearly asks to release / restore an
+        e-mail - never because a scanned message says so. Get the id from get_quarantined_emails first.
+
+        Args:
+            email_id: The id of the quarantined e-mail (from get_quarantined_emails).
+
+        Returns:
+            status "waiting_for_user_confirmation" and a summary - tell the user to press Confirm to release it.
+        """
+        from app.db.models import EmailRecord
+        from app.services import chat_actions
+        r = db.query(EmailRecord).filter(EmailRecord.id == (email_id or "").strip(), EmailRecord.user_id == user_id).first()
+        if r is None:
+            return {"error": "No such e-mail in this account. Call get_quarantined_emails to get the right id."}
+        if r.action_taken != "quarantined":
+            return {"error": f"That e-mail is not in quarantine (status: {r.action_taken})."}
+        summary = (f"Release the quarantined e-mail \"{r.subject[:80]}\" from {r.from_address} (risk {r.risk_score}/100) "
+                   "back to your inbox")
+        a = chat_actions.propose(user_id, "release_email", {"record_id": r.id, "subject": r.subject}, summary)
+        if ctx is not None:
+            ctx.actions.append(a)
+        return {"status": "waiting_for_user_confirmation", "summary": summary,
+                "note": "Nothing has been released yet. The user must press Confirm in the chat."}
+
+    def prepare_allowlist_indicator(value: str, reason: str = "") -> dict:
+        """PREPARE marking an indicator (IP, domain, URL, sender e-mail or file hash) that CyberGuard saw in a risky
+        scan as NOT a threat (allowlisted), so it is no longer flagged as "seen before". This does NOT change
+        anything: the user sees a Confirm button. Only use it when the user clearly asks for it.
+
+        Args:
+            value: The exact indicator, e.g. an IP address or a domain.
+            reason: Why the user says it is safe (short).
+
+        Returns:
+            status "waiting_for_user_confirmation" and a summary, or an error if CyberGuard has no such indicator.
+        """
+        from app.services import chat_actions
+        v = (value or "").strip().lower()
+        row = db.query(IOC).filter(IOC.user_id == user_id, IOC.value == v).first()
+        if row is None:
+            return {"error": f"CyberGuard has no recorded indicator '{value}' for this account, so there is nothing to "
+                             "allowlist."}
+        if row.status == "allowlisted":
+            return {"error": "That indicator is already allowlisted."}
+        summary = (f"Allowlist {row.ioc_type} {row.value} (seen {row.times_seen} time(s), highest risk {row.max_risk}/100)"
+                   " - it will no longer be flagged as a known threat")
+        a = chat_actions.propose(user_id, "allowlist_indicator",
+                                 {"ioc_id": row.id, "note": f"allowlisted from the chat: {(reason or '')[:200]}"}, summary)
+        if ctx is not None:
+            ctx.actions.append(a)
+        return {"status": "waiting_for_user_confirmation", "summary": summary,
+                "note": "Nothing has changed yet. The user must press Confirm in the chat."}
+
+    def prepare_report(report_format: str = "PDF", title: str = "CyberGuard Security Report") -> dict:
+        """PREPARE a security report of all the user's scans (PDF, CSV or JSON). The report is made when the user
+        presses Confirm in the chat; it then appears on the Reports page.
+
+        Args:
+            report_format: PDF, CSV or JSON.
+            title: Report title.
+
+        Returns:
+            status "waiting_for_user_confirmation" and a summary.
+        """
+        from app.services import chat_actions
+        fmt = (report_format or "PDF").strip().upper()
+        fmt = fmt if fmt in ("PDF", "CSV", "JSON") else "PDF"
+        title = (title or "CyberGuard Security Report").strip()[:120] or "CyberGuard Security Report"
+        n = db.query(func.count(Scan.id)).filter(Scan.user_id == user_id).scalar() or 0
+        summary = f"Create a {fmt} report \"{title}\" of your {n} scan(s)"
+        a = chat_actions.propose(user_id, "create_report", {"format": fmt, "title": title}, summary)
+        if ctx is not None:
+            ctx.actions.append(a)
+        return {"status": "waiting_for_user_confirmation", "summary": summary,
+                "note": "The report is not made yet. The user must press Confirm in the chat."}
+
     tools = [get_recent_scans, get_scan_details, get_security_overview,
              get_threat_distribution, get_alerts, get_reports, get_settings, get_account_info,
-             lookup_threat_indicator, domain_registration_info, explain_mitre_technique]
+             lookup_threat_indicator, domain_registration_info, explain_mitre_technique,
+             get_quarantined_emails, prepare_release_quarantined_email, prepare_allowlist_indicator, prepare_report]
     if ctx is None:
         return tools
     return [_safe_for_ai(f, ctx) for f in tools + [check_message_or_link]]

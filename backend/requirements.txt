@@ -36,6 +36,14 @@ pyparsing>=3.1,<3.3  # oletools uses old pyparsing names; 3.3+ floods warnings
 anyio>=4.7,<5
 tldextract==5.4.0   # registered-domain parsing with the bundled (offline) Public Suffix List
 rapidfuzz>=3.9          # fast edit distance for the look-alike domain model
+dpkt==1.9.8             # reads uploaded packet captures (.pcap / .pcapng); pure Python, nothing is replayed
+av==19.0.2              # decodes voice notes / recordings (WhatsApp .opus/.ogg, .m4a, .mp3, .wav ...): bundled FFmpeg
+faster-whisper==1.2.1   # offline speech-to-text for the voice scam check (model: python -m app.ml.training.fetch_whisper)
+pefile==2024.8.26       # Malware Detection: reads uploaded programs for the EMBER2024 model (pure Python, nothing is run)
+signify==0.7.1          # signature features of the EMBER2024 model (signify 0.9 removed the class its feature code uses)
+lightgbm>=4.5,<5        # runs the EMBER2024 malware model (app/ml/models/EMBER2024_all.model)
+python-evtx==0.8.1      # reads Windows Event Viewer .evtx files (pure Python, in a separate process with a time limit)
+oscrypto @ git+https://github.com/wbond/oscrypto.git@1547f535001ba568b239b8797465536759c742a3 ; sys_platform == "linux"  # signify needs oscrypto; this commit fixes OpenSSL 3 detection on Linux (Windows uses the normal release)
 # training only (not needed to run the app): pip install dnstwist wordfreq
 #   -> app/ml/training/train_lookalike_domain.py, train_domain_spoofing.py
 onnxruntime>=1.18      # runs the Colab-trained deepfake model on CPU

@@ -45,3 +45,11 @@ def test_academic_authority_scams():
         assert A(t, {}, "Teacher")["riskScore"] >= 51, t
     for t in real:
         assert A(t, {}, "Teacher")["riskScore"] < 51, t
+
+
+def test_a_full_https_link_is_not_counted_again_as_a_bare_http_domain():
+    """21 Oct live check: 'https://medium.com/@name/post' was ALSO picked up as 'http://medium.com/...' and that
+    unencrypted copy scored 41, which pushed a normal blog post to 73."""
+    from app.detectors.phishing import bare_domains
+    assert bare_domains("my post: https://medium.com/@ashis/learning-python-3a2b") == []
+    assert bare_domains("pay at sbi-kyc-update.top/login now") == ["http://sbi-kyc-update.top/login"]

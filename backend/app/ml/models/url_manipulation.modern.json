@@ -1,0 +1,22 @@
+{
+  "thr_alert": 0.9963874766158594,
+  "thr_verify": 0.9888085699677567,
+  "model_trained_at": "2026-10-16T19:29:00+00:00",
+  "data": "urlscan.io page addresses with a path: 2101 real (441 sites), 1624 phishing",
+  "old_levels": {
+    "thr_alert": 0.9132729123632847,
+    "thr_verify": 0.7627681735424545,
+    "real_links_other_half_flagged_at_alert": 0.1857,
+    "real_links_other_half_flagged_at_verify": 0.331,
+    "phishing_2026_caught_at_alert": 0.0961,
+    "phishing_2026_caught_at_verify": 0.4089
+  },
+  "new_levels": {
+    "real_links_other_half_flagged_at_alert": 0.0071,
+    "real_links_other_half_flagged_at_verify": 0.0131,
+    "phishing_2026_caught_at_alert": 0.0012,
+    "phishing_2026_caught_at_verify": 0.0055
+  },
+  "note": "The statistical part of the model hardly separates 2026 phishing from real links; at levels that keep real links quiet it rarely fires. Explicit tricks still force alert / verify.",
+  "calibrated_at": "2026-10-21T13:41:47+00:00"
+}

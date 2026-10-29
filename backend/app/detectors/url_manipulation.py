@@ -196,6 +196,25 @@ AT_LEAST_VERIFY = ("'../' path tricks",)
 _cache: dict = {}
 
 
+# Thresholds re-measured on MODERN links (added 21 Oct). The model was trained on 2010s-2020s link datasets; on 2,101
+# real 2026 links with a path (urlscan.io page copies, 441 sites) its old alert level flagged 18.6% of real links and
+# only 9.6% of 2026 phishing links. The file below holds levels where at most 1% (alert) / 5% (verify) of real modern
+# links are flagged, chosen on half of the sites and checked on the other half. The explicit tricks ('@' in the
+# host, disguised IP, double encoding ...) still force alert / verify as before. Delete the file to use the old levels;
+# a retrained model ignores it (the file names the model version it was measured on).
+CALIBRATION_PATH = os.path.join(os.path.dirname(MODEL_PATH), "url_manipulation.modern.json")
+
+
+def _calibration() -> dict | None:
+    try:
+        import json
+        with open(CALIBRATION_PATH, encoding="utf-8") as f:
+            c = json.load(f)
+        return c if 0 < c["thr_verify"] <= c["thr_alert"] <= 1 else None
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def load_model():
     if not os.path.exists(MODEL_PATH):
         _cache.clear()
@@ -207,6 +226,9 @@ def load_model():
             b = joblib.load(MODEL_PATH)
             ok = isinstance(b, dict) and b.get("kind") == "cyberguard-url-manipulation" and list(b["features"]) == FEATURES
             b = b if ok else None
+            cal = _calibration() if b else None
+            if cal and cal.get("model_trained_at") == b.get("trained_at"):   # only for the model it was measured on
+                b = {**b, "thr_alert": cal["thr_alert"], "thr_verify": cal["thr_verify"], "calibration": cal}
         except Exception:
             b = None
         _cache.update(mtime=mtime, bundle=b)

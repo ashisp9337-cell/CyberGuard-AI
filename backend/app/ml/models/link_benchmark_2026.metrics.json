@@ -1,0 +1,31 @@
+{
+  "what": "QR / link checks measured on real 2026 data, offline (no link was opened, live page / registry checks not included)",
+  "measured_at": "2026-10-21",
+  "where": "Claude workspace copy of this backend (same code and models as this PC after the 21 Oct update)",
+  "qr_dataset": {
+    "source": "Quishing dataset, github.com/fouadtrad (CC BY 4.0): 9,987 real QR codes, phishing and benign",
+    "decoded": "9,987 of 9,987 (zxing-cpp); 13 of 13 distorted photos (blur, tilt, low light, JPEG)",
+    "sample": "1,500 phishing + 1,500 benign decoded links, scored by the whole URL engine (qr-phishing subtopic)",
+    "auc_before_21_oct_checks": 0.8161,
+    "auc": 0.8249,
+    "phishing_caught_at_51": {"before": 0.1913, "after": 0.2527},
+    "real_flagged_at_51": {"before": 0.0087, "after": 0.0107}
+  },
+  "url_engine_2026": {
+    "source": "urlscan.io collection on this PC (data/urlscan/scans.jsonl): 4,078 phishing and 4,866 real links (first + final URL)",
+    "auc_before_21_oct_checks": 0.6419,
+    "auc": 0.6562,
+    "phishing_caught_at_51": {"before": 0.1324, "after": 0.2487},
+    "real_flagged_at_51": {"before": 0.0510, "after": 0.0561}
+  },
+  "url_manipulation_model_2026": {
+    "source": "same urlscan.io collection: 2,101 real and 1,624 phishing page addresses that have a path",
+    "auc": 0.5844,
+    "note": "trained on older link datasets; its alert levels were re-measured on these links (url_manipulation.modern.json)"
+  },
+  "domain_name_model_2026": {
+    "source": "Phishing.Database domains first listed April-October 2026 (739) and urlscan.io 2026 phishing sites (910) vs 8,000 real 2026 sites the model never saw (Chrome UX Report top-1M, not in Tranco / PhiUSIIL)",
+    "auc_new_2026_phishing_domains": 0.807,
+    "auc_urlscan_2026_phishing_sites": 0.774
+  }
+}

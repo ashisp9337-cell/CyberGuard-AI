@@ -131,3 +131,17 @@ def test_at_sign_in_path_is_not_the_hidden_host_trick():
     assert "'@' character in URL" not in labels("https://www.youtube.com/@MrBeast")
     assert "'@' character in URL" not in labels("https://medium.com/@ashis/learning-python")
     assert "'@' character in URL" in labels("http://paypal.com@evil.tk/x")
+
+
+def test_brand_address_in_the_path_and_phishing_kit_files():
+    """21 Oct QR benchmark: a brand's address hidden in the path of another site, and PayPal-kit file names."""
+    from app.detectors.malicious_url import _extra_rules
+    def fired(u):
+        return {i["label"] for i in _extra_rules(u) if i["triggered"]}
+    assert "Another brand's address hidden in the path" in fired("https://soydanielc.github.io/accounts.google.com/signin")
+    assert "Phishing-kit file name in the path" in fired("http://chriscel.org/PLO5XIde/webscr_prim.php?cmd=_login")
+    assert "Phishing-kit file name in the path" in fired("https://mail.intomahost2.com/port/paypal/auth/login.php")
+    # real pages: a brand mentioned in an article path, PayPal's own site, a normal redirect parameter
+    assert not fired("https://www.theverge.com/2026/10/1/google.com-redesign")
+    assert not fired("https://www.paypal.com/cgi-bin/webscr?cmd=_login-run")
+    assert not fired("https://accounts.google.com/signin?continue=https://mail.google.com/mail/")

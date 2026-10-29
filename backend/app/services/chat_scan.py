@@ -23,8 +23,9 @@ def _scan_once(db, user_id: str, module_id: str, raw: str, url: str | None):
     return result, c
 
 
-def run(db, user_id: str, raw: str, cache: dict | None = None) -> dict:
-    """Scan one pasted item. Returns the saved result summary (real values; the caller masks it for the AI)."""
+def run(db, user_id: str, raw: str, cache: dict | None = None, source: str = "chat", alert: bool = True) -> dict:
+    """Scan one pasted item. Returns the saved result summary (real values; the caller masks it for the AI).
+    source: shown in Scan History ("chat", "telegram")."""
     from app.services import notifier, response_playbook, scan_store, subtopic_router
 
     raw = (raw or "").strip()
@@ -58,10 +59,10 @@ def run(db, user_id: str, raw: str, cache: dict | None = None) -> dict:
     response_playbook.apply(result, module_id, c.subtopic_id, raw)
     row = scan_store.save_result(db, user_id=user_id, module_id=module_id, subtopic_id=c.subtopic_id,
                                  subtopic_title=c.subtopic_title, result=result, target=str(target),
-                                 target_type=target_type, metadata={"via": "chat"}, source="chat")
+                                 target_type=target_type, metadata={"via": source}, source=source)
     db.commit()
     db.refresh(row)
-    if result["riskScore"] >= notifier.ALERT_FLOOR:                # same alert rules as a normal scan
+    if alert and result["riskScore"] >= notifier.ALERT_FLOOR:      # same alert rules as a normal scan
         threading.Thread(target=notifier.alert_for_scan, args=(row.id,), daemon=True).start()
 
     reasons = sorted((i for i in result["indicators"] if i.get("triggered") and i.get("weight", 0) > 0),
@@ -77,6 +78,36 @@ def run(db, user_id: str, raw: str, cache: dict | None = None) -> dict:
     if cache is not None:
         cache[key] = out
     return out
+
+
+def run_qr_image(db, user_id: str, path: str, name: str, source: str = "chat", alert: bool = True) -> dict:
+    """Scan the QR code(s) in an image with the QR-phishing detector (UPI / Wi-Fi / link payloads) and save it."""
+    from app.services import notifier, response_playbook, scan_store, subtopic_router
+    try:
+        result, c = subtopic_router.route(module_id="phishing", text_input=None, url_input=None, file_path=path,
+                                          file_name=name, extra_field_values={}, db=db, user_id=user_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.info("chat QR scan failed: %s", exc)
+        return {"error": "The QR code could not be checked."}
+    result["routing"] = c.to_dict()
+    target = result.pop("_target", None) or name
+    target_type = result.pop("_target_type", "file")
+    response_playbook.apply(result, "phishing", c.subtopic_id, "")
+    row = scan_store.save_result(db, user_id=user_id, module_id="phishing", subtopic_id=c.subtopic_id,
+                                 subtopic_title=c.subtopic_title, result=result, target=str(target),
+                                 target_type=target_type, metadata={"via": source}, source=source)
+    db.commit()
+    db.refresh(row)
+    if alert and result["riskScore"] >= notifier.ALERT_FLOOR:
+        threading.Thread(target=notifier.alert_for_scan, args=(row.id,), daemon=True).start()
+    reasons = sorted((i for i in result["indicators"] if i.get("triggered") and i.get("weight", 0) > 0),
+                     key=lambda i: -i.get("weight", 0))[:5]
+    return {"scan_id": row.id, "risk_score": result["riskScore"], "verdict": result["classification"],
+            "severity": result["severity"], "threat_type": result["threatType"],
+            "checked_as": f"phishing / {c.subtopic_title}",
+            "main_reasons": [f"{i['label']}: {i['description'][:220]}" for i in reasons],
+            "recommended_actions": [r[:220] for r in result.get("recommendations", [])[:4]],
+            "detector_explanation": result["explanation"][:700]}
 
 
 def verdict_line(summary: dict) -> str:

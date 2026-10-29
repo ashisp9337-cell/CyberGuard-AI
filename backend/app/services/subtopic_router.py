@@ -73,6 +73,7 @@ TITLES = {
         "malware-detection": "Malware Detection", "network-traffic": "Suspicious Network Traffic Detection",
         "api-abuse": "API Abuse Detection", "data-exfiltration": "Data Exfiltration Detection",
         "abnormal-activity": "Abnormal User Activity Detection", "insider-threat": "Insider Threat Detection",
+        "insider-risk": "Insider Risk: Data Exfiltration, Abnormal Activity & Insider Threat",
         "log-analysis": "System & Application Log Analysis",
     },
 }
@@ -89,12 +90,14 @@ DETECTORS = {
     ("phishing", "malicious-url"): ("malicious_url.analyze_url", "ok", "URL engine + every trained URL model"),
     ("deepfake", "image-analysis"): ("deepfake.analyze_media", "ok",
                                     "provenance check + AI-image model + face-swap model; the strongest decides"),
-    ("deepfake", "video-analysis"): ("deepfake.analyze_media", "ok", "returns 'model unavailable' (no trained video model)"),
+    ("deepfake", "video-analysis"): ("deepfake.analyze_media", "ok",
+                                    "provenance check (C2PA / AI-tool / face-swap tool tags) + face-swap video model"),
     ("deepfake", "video-call"): ("deepfake.analyze_media (video path)", "ok",
                                  "no dedicated video-call detector; the existing video path is used"),
     ("deepfake", "ai-multimedia"): ("deepfake.analyze_media (modality path)", "ok",
-                                    "images: provenance check + AI-image model + face-swap model; videos: no model yet"),
-    ("deepfake", "audio-analysis"): ("-", "unavailable", "no audio/voice detector exists in the repository"),
+                                    "images: provenance check + AI-image model + face-swap model; videos: provenance "
+                                    "check + face-swap video model (no model yet for fully AI-generated video)"),
+    ("deepfake", "audio-analysis"): ("voice.analyze_voice", "ok", "AI-voice model + speech scam check + voice match"),
     **{("impersonation", s): (fn, "ok", "") for s, fn in {
         "government-impersonation": "government_impersonation.analyze_government_impersonation",
         "management-impersonation": "senior_management_impersonation.analyze_senior_management_impersonation",
@@ -113,6 +116,11 @@ DETECTORS = {
        for s in TITLES["url-security"]},
     **{("cyber-threat", s): ("cyber_threat.analyze_event_text", "ok", "one shared rule engine for all subtopics")
        for s in TITLES["cyber-threat"]},
+    ("cyber-threat", "malware-detection"): ("malware.analyze_file (uploads) / cyber_threat.analyze_event_text (text)",
+                                            "ok", "uploaded files: static checks + EMBER2024 model, never run; pasted "
+                                                  "process / event text: the rule engine"),
+    ("cyber-threat", "insider-risk"): ("cyber_threat.analyze_event_text -> insider_risk.analyze_text", "ok",
+                                       "one engine, three lenses: own + peer baselines and a model trained on CERT r4.2"),
 }
 
 
@@ -155,7 +163,8 @@ TEXT_EXT = {".txt", ".log", ".csv", ".json"}
 
 
 def file_kind(file_path: str | None, file_name: str | None) -> str | None:
-    """'image' | 'video' | 'audio' | 'email' | 'text' | 'pdf' | 'executable' | 'archive' | 'unknown' | None."""
+    """'image' | 'video' | 'audio' | 'email' | 'text' | 'pdf' | 'executable' | 'archive' | 'capture' | 'evtx' |
+    'unknown' | None."""
     if not file_path and not file_name:
         return None
     head = b""
@@ -163,6 +172,11 @@ def file_kind(file_path: str | None, file_name: str | None) -> str | None:
         with open(file_path, "rb") as f:
             head = f.read(64)
     ext = os.path.splitext(file_name or file_path or "")[1].lower()
+    if head[:4] in (b"\xd4\xc3\xb2\xa1", b"\xa1\xb2\xc3\xd4", b"\x4d\x3c\xb2\xa1", b"\xa1\xb2\x3c\x4d",
+                    b"\x0a\x0d\x0d\x0a"):                    # pcap (both byte orders, us / ns) and pcapng
+        return "capture"
+    if head.startswith(b"ElfFile\x00"):                        # Windows event log saved from Event Viewer (.evtx)
+        return "evtx"
     if head.startswith(b"\x89PNG") or head.startswith(b"\xff\xd8\xff") or head[:6] in (b"GIF87a", b"GIF89a") \
             or (head[:4] == b"RIFF" and head[8:12] == b"WEBP") or head.startswith(b"BM"):
         return "image"
@@ -170,10 +184,12 @@ def file_kind(file_path: str | None, file_name: str | None) -> str | None:
         return "audio"
     if head[:4] == b"RIFF" and head[8:12] == b"AVI ":
         return "video"
-    if head[4:8] == b"ftyp":
-        return "audio" if head[8:11] in (b"M4A", b"M4B") else "video"
+    if head[4:8] == b"ftyp":            # MP4 family: many phones label voice recordings with a generic brand ("isom")
+        return "audio" if head[8:11] in (b"M4A", b"M4B") or ext in (".m4a", ".m4b", ".aac") else "video"
     if head.startswith(b"\x1aE\xdf\xa3"):                       # Matroska / WebM
         return "video"
+    if len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xF6) == 0xF0:   # AAC (ADTS) stream
+        return "audio"
     if head.startswith(b"ID3") or head[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2") \
             or head.startswith(b"OggS") or head.startswith(b"fLaC"):
         return "audio"
@@ -317,8 +333,7 @@ def _classify_deepfake(kind, file_name, extra) -> Classification:
     declared_ai = _truthy(extra.get("aiGenerated")) or _truthy(extra.get("suspectedAiGenerated"))
     source = str(extra.get("source") or extra.get("captureType") or "").lower()
     if kind == "audio":
-        raise RoutingError("unavailable", "Voice/audio deepfake detection is not implemented in this system, "
-                           "so the clip was not analysed.", {"moduleId": m, "subtopicId": "audio-analysis"})
+        return Classification(m, "audio-analysis", "file-type", ["Audio file (voice note / recording)"])
     if kind == "image":
         if declared_ai:
             return Classification(m, "ai-multimedia", "metadata", ["Image declared as possibly AI-generated"],
@@ -627,7 +642,9 @@ def _classify_url(text, url_input) -> Classification:
 # ---------------------------------------------------------------------------
 CYBER_PATTERNS = [
     # (subtopic, regex, description) -- each regex recognises a LOG/EVENT FORMAT, not a threat.
-    ("data-exfiltration", re.compile(
+    # (26 Oct) data exfiltration, abnormal activity and insider threat are ONE subtopic: insider-risk. Their old ids
+    # stay in TITLES so older scans and links keep working, but new inputs are routed to insider-risk.
+    ("insider-risk", re.compile(
         r"(\b(bytes_out|bytes_sent|sent_bytes|out_bytes|upload(ed)?_bytes)\s*[=:]\s*\d+|"
         r"\b(uploaded|copied|transferred|exported|synced)\b[^\n]{0,40}\b\d+(\.\d+)?\s?(kb|mb|gb|tb)\b|"
         r"\b(scp|rsync|rclone|curl\s+(-T|--upload-file)|aws s3 cp|gsutil cp|azcopy)\b)", re.I),
@@ -640,20 +657,23 @@ CYBER_PATTERNS = [
     ("api-abuse", re.compile(
         r"\"(GET|POST|PUT|PATCH|DELETE) (/api/|/v\d+/|/graphql|/rest/)[^\"]*\" \d{3}|"
         r"\b(api[_-]?key|x-api-key|client_id|access_token|bearer)\b[^\n]{0,40}(/api/|/v\d+/|endpoint)|"
-        r"\b(endpoint|route)\s*[=:]\s*/(api|v\d+)/", re.I),
+        r"\b(endpoint|route)\s*[=:]\s*/(api|v\d+)/|"
+        r"^\s*(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(https?://\S+|/\S*)\s+HTTP/\d", re.I),   # raw HTTP requests
         "API access-log records"),
     ("network-traffic", re.compile(
         r"(\bSRC=\S+\s+DST=\S+|\b(src_?ip|dst_?ip|source_ip|dest_ip)\s*[=:]\s*\d|"
         r"\b(DPT|SPT|dst_?port|src_?port)\s*[=:]\s*\d+|\bPROTO=(TCP|UDP|ICMP)\b|"
         r"\b\d{1,3}(\.\d{1,3}){3}[.:]\d+\s*(->|>|→)\s*\d{1,3}(\.\d{1,3}){3}[.:]\d+|"
-        r"\b(ACCEPT|DROP|DENY|REJECT|ALLOW|BLOCK)\b[^\n]*\b(TCP|UDP|ICMP)\b)", re.I),
+        r"\b(ACCEPT|DROP|DENY|REJECT|ALLOW|BLOCK)\b[^\n]*\b(TCP|UDP|ICMP)\b|"
+        r"^#fields\s+ts\s|\bid\.orig_h\b|"                                        # Zeek conn.log
+        r"^[^\n]*\b(Src|Source) ?IP\b[^\n]*,[^\n]*\b(Dst|Destination) ?Port\b)", re.I),   # flow-record CSV header
         "network flow / firewall records"),
-    ("insider-threat", re.compile(
+    ("insider-risk", re.compile(
         r"\b(usb|removable (media|storage|drive)|mass storage|print(ed)? job|printer|"
         r"forward(ed)? to (personal|external)|personal (e-?mail|gmail|drive)|"
         r"(hr|payroll|salary|confidential|restricted|source code) (share|folder|files?|database|repo))\b", re.I),
         "internal data-handling audit records"),
-    ("abnormal-activity", re.compile(
+    ("insider-risk", re.compile(
         r"\b(user(name)?|account|uid)\s*[=:]\s*\S+[^\n]{0,80}\b(action|activity|event|operation|op)\s*[=:]\s*\S+", re.I),
         "per-user activity audit records"),
     ("log-analysis", re.compile(
@@ -667,18 +687,36 @@ CYBER_PATTERNS = [
 
 def _classify_cyber(text, kind, file_text) -> Classification:
     m = "cyber-threat"
-    if kind in ("executable", "archive", "pdf", "image", "video", "audio", "email", "unknown"):
-        raise RoutingError("unavailable", "File-based malware analysis is not implemented: the existing cyber-threat "
-                           "detector analyses event/log text only. Paste the related log or event lines instead.",
-                           {"moduleId": m, "subtopicId": "malware-detection"})
+    if kind == "capture":
+        return Classification(m, "network-traffic", "file-type", ["packet capture file (pcap / pcapng)"])
+    if kind == "evtx":                                       # (26 Oct) Windows Event Viewer file
+        return Classification(m, "insider-risk", "file-type", ["Windows event log file (.evtx) - account, process and "
+                                                               "security-control checks"])
+    if kind in ("executable", "archive", "pdf", "unknown"):   # (26 Oct) uploaded files: static checks + EMBER2024
+        return Classification(m, "malware-detection", "file-type",
+                              [{"executable": "program file (Windows / Linux)", "archive": "archive or Office document",
+                                "pdf": "PDF document", "unknown": "binary file"}[kind] + " - checked without running it"])
+    if kind in ("image", "video", "audio", "email"):
+        raise RoutingError("unavailable", f"This is {'an' if kind in ('image', 'audio', 'email') else 'a'} {kind} "
+                           "file: open the Deepfake or Phishing module for it. The Cyber Threat module checks programs, "
+                           "archives, PDFs, Office files and logs.", {"moduleId": m, "subtopicId": "malware-detection"})
     body = text or file_text or ""
     if not body.strip():
         raise RoutingError("undetermined", "Paste the log lines or event records to analyse.")
+    from app.detectors import windows_events
+    win = windows_events.looks_like(body)
+    if win:                        # Windows Security / Sysmon / PowerShell events exported as JSON or XML
+        return Classification(m, "insider-risk", "log-format", [f"Windows event log ({win.upper()}) - account, process "
+                                                                "and security-control checks"])
+    from app.detectors.insider_risk import FORMATS, activity_log_kind
+    layout = activity_log_kind(body)
+    if layout:                     # a user-activity table (logons, USB, file copies, e-mail, web) with a header row
+        return Classification(m, "insider-risk", "log-format", [f"{FORMATS[layout]} (header row recognised)"])
     lines = [ln for ln in body.splitlines() if ln.strip()]
     hits = []
     for sub, rx, desc in CYBER_PATTERNS:
         n = sum(1 for ln in lines if rx.search(ln))
-        if n:
+        if n and sub not in [h[0] for h in hits]:
             hits.append((sub, n, desc))
     if not hits:
         raise RoutingError("undetermined", "This does not look like a log or event record, so the type of activity "

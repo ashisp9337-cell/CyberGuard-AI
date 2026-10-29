@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     # Telegram: create a bot with @BotFather, then put its token and your chat id here.
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_CHAT_ID: str = ""
+    # Forward a suspicious message / screenshot to the bot and get CyberGuard's verdict (owner chat only).
+    TELEGRAM_INBOX: bool = True
     # Email via SMTP (Gmail: smtp.gmail.com, port 587, and an App Password -- not your normal password).
     # Port 587 = STARTTLS, port 465 = SSL; both work.
     SMTP_HOST: str = ""

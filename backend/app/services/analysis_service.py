@@ -4,6 +4,8 @@ the six CyberGuard modules and their subtopics defined in the frontend's
 src/data/modules.ts. This is the single place that decides "what kind of
 analysis does this input need" — detectors themselves stay generic.
 """
+import os
+
 from app.detectors import phishing, malicious_url, deepfake, impersonation, account_takeover, cyber_threat, email_parser, qr_analyzer, brand_impersonation, teacher_university_impersonation, senior_management_impersonation, government_impersonation, financial_impersonation, known_contact_impersonation
 
 
@@ -46,7 +48,7 @@ def run_scan(
     text_input: str | None, url_input: str | None,
     file_path: str | None, file_name: str | None,
     extra_field_values: dict | None,
-    db=None, user_id: str | None = None,
+    db=None, user_id: str | None = None, reference_path: str | None = None,
 ) -> dict:
     extra_field_values = extra_field_values or {}
 
@@ -95,7 +97,8 @@ def run_scan(
         return result | {"_target": target_text[:80] or (file_name or "submission"), "_target_type": "email" if subtopic_id == "email-analysis" else "text"}
 
     if module_id == "deepfake":
-        result = deepfake.analyze_media(file_path, file_name or "media file", subtopic_title)
+        result = deepfake.analyze_media(file_path, file_name or "media file", subtopic_title,
+                                        reference_path=reference_path)
         return result | {"_target": file_name or "uploaded media", "_target_type": "file"}
 
     if module_id == "impersonation":
@@ -142,7 +145,38 @@ def run_scan(
         return result | {"_target": target, "_target_type": "url"}
 
     if module_id == "cyber-threat":
-        result = cyber_threat.analyze_event_text(text_input or "", extra_field_values, subtopic_title)
+        text = text_input or ""
+        if file_path and os.path.exists(file_path):
+            # an uploaded log / text file is read WHOLE (the upload is already limited to MAX_UPLOAD_MB); it is only
+            # read as text, never run (added 23 Oct - before, uploaded files were ignored by this module)
+            from app.services.subtopic_router import file_kind
+            kind = file_kind(file_path, file_name)
+            if kind == "capture":         # Wireshark / tcpdump capture: parsed, never replayed (added 24 Oct)
+                result = cyber_threat.analyze_network_capture(file_path, file_name or "capture", subtopic_title)
+                return result | {"_target": file_name or "packet capture", "_target_type": "file"}
+            if kind == "evtx":            # Windows Event Viewer file: read by a separate process, never run
+                from app.detectors import windows_events
+                xml, note = windows_events.evtx_to_xml(file_path)
+                if not xml:               # unreadable: say so - never a clean verdict for a file that was not read
+                    from app.detectors.base import build_unverified_result
+                    result = build_unverified_result(engine_name="CYBERGUARD Windows Event Engine",
+                                                     threat_type=subtopic_title,
+                                                     explanation=note or "The .evtx file could not be read.")
+                    result["recommendations"] = ["Save the log again from Event Viewer (Save All Events As... .evtx) "
+                                                 "or export it as XML, then upload it again."]
+                    return result | {"_target": file_name or "event log", "_target_type": "file"}
+                result = cyber_threat.analyze_event_text(xml, extra_field_values, subtopic_title)
+                if note:
+                    result["explanation"] = note + " " + result["explanation"]
+                return result | {"_target": file_name or "event log", "_target_type": "file"}
+            if kind in ("executable", "archive", "pdf", "unknown"):   # (26 Oct) Malware Detection: never run
+                from app.detectors import malware
+                result = malware.analyze_file(file_path, file_name or "file", subtopic_title)
+                return result | {"_target": file_name or "uploaded file", "_target_type": "file"}
+            if kind == "text":
+                with open(file_path, "rb") as f:
+                    text = (text + "\n" if text else "") + f.read().decode("utf-8", errors="replace")
+        result = cyber_threat.analyze_event_text(text, extra_field_values, subtopic_title)
         target = (text_input or "")[:80] or (file_name or "event submission")
         return result | {"_target": target, "_target_type": "file" if file_name else "text"}
 

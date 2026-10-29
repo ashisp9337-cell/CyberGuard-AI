@@ -291,3 +291,17 @@ class AuditLog(Base):
     user_agent: Mapped[str] = mapped_column(Text, default="")
     success: Mapped[bool] = mapped_column(Boolean, default=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+
+
+class ChatMessage(Base):
+    """One message in a user's conversation with Threatora (the AI chat), kept so the chat survives a backend
+    restart and can be shown again. Text is stored as the user saw it; "Clear conversation" deletes the rows."""
+    __tablename__ = "chat_messages"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: gen_id("CHT"))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
+    role: Mapped[str] = mapped_column(String)                        # user | assistant
+    text: Mapped[str] = mapped_column(Text, default="")
+    language: Mapped[str | None] = mapped_column(String, nullable=True)
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)          # e.g. {"actions": [...], "attachment": "..."}
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)

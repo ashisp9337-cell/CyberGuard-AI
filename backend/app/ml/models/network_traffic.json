@@ -1,0 +1,201 @@
+{
+  "data": "CIC-IDS2017, corrected by Engelen et al. (KU Leuven, WTMC 2021): 2,100,814 connections, Monday-Friday",
+  "levels_rule": "busiest normal source + 1, at least 5",
+  "window_seconds": 600,
+  "held_out_days": {
+    "Tuesday": {
+      "levels": {
+        "port_scan": 97,
+        "host_sweep": 5,
+        "failed_flood": 208,
+        "brute_force": 9,
+        "dos_flood": 2553
+      },
+      "false_incidents": [
+        "failed_flood: 192.168.10.9 had 497 unanswered or reset connections within 10 minutes between 2017-07-04 14:11:46 and 2017-07-04 14:12:57 UTC.",
+        "failed_flood: 192.168.10.14 had 486 unanswered or reset connections within 10 minutes between 2017-07-04 16:41:55 and 2017-07-04 16:42:55 UTC."
+      ],
+      "attacks": {
+        "FTP-Patator": {
+          "connections": 3984,
+          "caught_by": [
+            "brute_force"
+          ]
+        },
+        "SSH-Patator": {
+          "connections": 2988,
+          "caught_by": [
+            "brute_force"
+          ]
+        }
+      }
+    },
+    "Wednesday": {
+      "levels": {
+        "port_scan": 97,
+        "host_sweep": 5,
+        "failed_flood": 498,
+        "brute_force": 9,
+        "dos_flood": 1196
+      },
+      "false_incidents": [
+        "dos_flood: 192.168.10.5 opened 2,552 connections to the HTTPS service on 162.208.20.178:443 within 10 minutes between 2017-07-05 20:07:44 and 2017-07-05 20:16:04 UTC (3,401 in total).",
+        "dos_flood: 192.168.10.5 opened 2,504 connections to the HTTPS service on 162.208.22.34:443 within 10 minutes between 2017-07-05 20:13:21 and 2017-07-05 20:21:39 UTC (2,769 in total)."
+      ],
+      "attacks": {
+        "DoS GoldenEye": {
+          "connections": 7647,
+          "caught_by": [
+            "dos_flood"
+          ]
+        },
+        "DoS Hulk": {
+          "connections": 159062,
+          "caught_by": [
+            "dos_flood"
+          ]
+        },
+        "DoS Slowhttptest": {
+          "connections": 5111,
+          "caught_by": [
+            "dos_flood",
+            "failed_flood"
+          ]
+        },
+        "DoS slowloris": {
+          "connections": 5732,
+          "caught_by": [
+            "dos_flood",
+            "failed_flood"
+          ]
+        },
+        "Heartbleed": {
+          "connections": 11,
+          "caught_by": []
+        }
+      }
+    },
+    "Thursday": {
+      "levels": {
+        "port_scan": 97,
+        "host_sweep": 5,
+        "failed_flood": 498,
+        "brute_force": 9,
+        "dos_flood": 2553
+      },
+      "false_incidents": [],
+      "attacks": {
+        "Infiltration": {
+          "connections": 48,
+          "caught_by": []
+        },
+        "Infiltration - Portscan (unlabelled in the dataset)": {
+          "connections": 79321,
+          "caught_by": [
+            "failed_flood",
+            "host_sweep",
+            "port_scan"
+          ]
+        },
+        "Web Attack - Brute Force": {
+          "connections": 1365,
+          "caught_by": []
+        },
+        "Web Attack - Sql Injection": {
+          "connections": 12,
+          "caught_by": []
+        },
+        "Web Attack - XSS": {
+          "connections": 679,
+          "caught_by": []
+        }
+      }
+    },
+    "Friday": {
+      "levels": {
+        "port_scan": 97,
+        "host_sweep": 5,
+        "failed_flood": 498,
+        "brute_force": 9,
+        "dos_flood": 2553
+      },
+      "false_incidents": [],
+      "attacks": {
+        "Bot": {
+          "connections": 2208,
+          "caught_by": []
+        },
+        "DDoS": {
+          "connections": 95123,
+          "caught_by": [
+            "dos_flood"
+          ]
+        },
+        "PortScan": {
+          "connections": 159151,
+          "caught_by": [
+            "failed_flood",
+            "port_scan"
+          ]
+        }
+      }
+    }
+  },
+  "busiest_normal": {
+    "port_scan": 96,
+    "host_sweep": 1,
+    "failed_flood": 497,
+    "brute_force": 8,
+    "dos_flood": 2552
+  },
+  "thresholds": {
+    "port_scan": 97,
+    "host_sweep": 5,
+    "failed_flood": 498,
+    "brute_force": 9,
+    "dos_flood": 2553
+  },
+  "model_held_out_days": {
+    "Tuesday": {
+      "auc": 0.996,
+      "normal_flagged": 0.0014,
+      "caught_share": {
+        "FTP-Patator": 0.459,
+        "SSH-Patator": 0.007
+      }
+    },
+    "Wednesday": {
+      "auc": 0.6412,
+      "normal_flagged": 0.0013,
+      "caught_share": {
+        "DoS GoldenEye": 0.001,
+        "DoS Hulk": 0.0,
+        "DoS Slowhttptest": 0.0,
+        "DoS slowloris": 0.0,
+        "Heartbleed": 0.0
+      }
+    },
+    "Thursday": {
+      "auc": 0.9387,
+      "normal_flagged": 0.0067,
+      "caught_share": {
+        "Infiltration": 0.344,
+        "Infiltration - Portscan (unlabelled in the dataset)": 0.799,
+        "Web Attack - Brute Force": 0.007,
+        "Web Attack - Sql Injection": 0.0,
+        "Web Attack - XSS": 0.037
+      }
+    },
+    "Friday": {
+      "auc": 0.9982,
+      "normal_flagged": 0.0091,
+      "caught_share": {
+        "Bot": 0.0,
+        "DDoS": 1.0,
+        "PortScan": 0.998
+      }
+    }
+  },
+  "model_threshold": 0.3703160810368458,
+  "trained_at": "2026-10-23T21:17:46+00:00"
+}

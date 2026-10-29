@@ -23,6 +23,8 @@ export interface RunAnalysisInput {
   file?: UploadedFileMeta;
   /** The actual browser File object, required to upload to the real backend. */
   fileBlob?: File;
+  /** Voice & Audio Analysis only: a genuine recording of the person, for the voice match (deleted after the scan). */
+  referenceBlob?: File;
   extraFieldValues?: Record<string, string>;
 }
 
@@ -53,6 +55,7 @@ export async function runAnalysis(
   if (input.urlInput) form.append("urlInput", input.urlInput);
   if (input.extraFieldValues) form.append("extraFieldValues", JSON.stringify(input.extraFieldValues));
   if (input.fileBlob) form.append("file", input.fileBlob, input.file?.name ?? input.fileBlob.name);
+  if (input.referenceBlob) form.append("referenceFile", input.referenceBlob, input.referenceBlob.name);
 
   let stageIndex = 0;
   const stageTimer = setInterval(() => {
@@ -64,7 +67,9 @@ export async function runAnalysis(
   onStage?.(STANDARD_SCAN_STAGES[0], 0, STANDARD_SCAN_STAGES.length);
 
   try {
-    const result = await apiClient.post<AnalysisResult>("/api/analysis/scan", form, { timeoutMs: 60000 });
+    // voice / video scans run speech and vision models on the CPU: allow them longer
+    const timeoutMs = mod.id === "deepfake" ? 120000 : 60000;
+    const result = await apiClient.post<AnalysisResult>("/api/analysis/scan", form, { timeoutMs });
     clearInterval(stageTimer);
     onStage?.(STANDARD_SCAN_STAGES[STANDARD_SCAN_STAGES.length - 1], STANDARD_SCAN_STAGES.length - 1, STANDARD_SCAN_STAGES.length);
     return result;

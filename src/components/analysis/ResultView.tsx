@@ -12,6 +12,9 @@ import { useToast } from "@/context/ToastContext";
 import { escalateScan } from "@/services/api/incidentsService";
 import { MitreAttackCard, MitreIdChip } from "@/components/mitre/MitreAttack";
 import { ResultExtras } from "@/components/analysis/ResultExtras";
+import { InsiderRiskCard } from "@/components/analysis/InsiderRiskCard";
+import { MalwareCard } from "@/components/analysis/MalwareCard";
+import { WindowsEventsCard } from "@/components/analysis/WindowsEventsCard";
 import { askThreatora } from "@/lib/threatora";
 
 const PRIORITY_META: Record<ResponseAction["priority"], { label: string; color: string; bg: string }> = {
@@ -114,6 +117,14 @@ export function ResultView({ result, onNewScan, onSave, newScanLabel = "Run Anot
           ))}
         </CardBody>
       </Card>
+
+      {/* Windows event-log findings (Security / Sysmon / PowerShell / Defender) */}
+      {result.windowsEvents && <WindowsEventsCard we={result.windowsEvents} />}
+
+      {/* Insider Risk triage queue (activity logs) */}
+      {result.insiderRisk && <InsiderRiskCard ir={result.insiderRisk} />}
+      {/* Malware check of an uploaded file */}
+      {result.malwareAnalysis && <MalwareCard ma={result.malwareAnalysis} />}
 
       {/* MITRE ATT&CK techniques, explained */}
       <MitreAttackCard techniques={mitre} />

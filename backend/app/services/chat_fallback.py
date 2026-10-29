@@ -98,23 +98,32 @@ TEXT = {
 }
 
 
+def _scan_lines(s: dict, t: dict) -> str:
+    lines = [f"{t['checked_as']}: {s['checked_as']}."]
+    if s["main_reasons"]:
+        lines.append(f"{t['reasons']}:\n" + "\n".join(f"• {r}" for r in s["main_reasons"][:4]))
+    if s["recommended_actions"]:
+        lines.append(f"{t['todo']}:\n" + "\n".join(f"• {r}" for r in s["recommended_actions"][:3]))
+    return "\n\n".join(lines)
+
+
 def answer(db, user_id: str, message: str, reason: str, cache: dict | None = None,
-           language: str | None = None) -> tuple[str, list[dict]]:
+           language: str | None = None, pre_scans: list[dict] | None = None,
+           allow_scan: bool = True) -> tuple[str, list[dict]]:
     """-> (reply text, [chat scan summaries]). reason: "busy" | "not_configured" (or a sentence), shown to the user
-    in the chosen reply language (en / hi / or)."""
+    in the chosen reply language (en / hi / or). pre_scans: scans already made for an attachment (screenshot) -
+    they are explained instead of scanning again; allow_scan=False never scans the message text."""
     from app.services.chat_tools import build_tools
     t = TEXT.get(language or "en", TEXT["en"])
     head = f"⚠️ {t.get(reason, reason)} {t['head']}\n\n"
-    if _looks_like_content_to_check(message):
+    done = [p for p in pre_scans or [] if "scan_id" in p]
+    if done:
+        return head + "\n\n".join(_scan_lines(p, t) for p in done), []
+    if allow_scan and _looks_like_content_to_check(message):
         s = chat_scan.run(db, user_id, _strip_question(message), cache)
         if "error" in s:
             return head + s["error"], []
-        lines = [f"{t['checked_as']}: {s['checked_as']}."]
-        if s["main_reasons"]:
-            lines.append(f"{t['reasons']}:\n" + "\n".join(f"• {r}" for r in s["main_reasons"][:4]))
-        if s["recommended_actions"]:
-            lines.append(f"{t['todo']}:\n" + "\n".join(f"• {r}" for r in s["recommended_actions"][:3]))
-        return head + "\n\n".join(lines), [s]
+        return head + _scan_lines(s, t), [s]
 
     tools = {f.__name__: f for f in build_tools(db, user_id)}
     intent = next((name for name, rx in _INTENTS if rx.search(message)), None)

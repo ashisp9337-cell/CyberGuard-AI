@@ -100,7 +100,8 @@ BRAND_DOMAINS = {
     "icicibank": {"icicibank.com", "icici.bank.in"},
     "axisbank": {"axisbank.com", "axis.bank.in"},
     "onlinesbi": {"onlinesbi.sbi", "onlinesbi.com", "sbi.co.in", "sbicard.com", "sbi.bank.in"},
-    "paytm": {"paytm.com", "paytmbank.com", "paytmmoney.com"},
+    "paytm": {"paytm.com", "paytmbank.com", "paytmmoney.com", "paytm.me"},        # paytm.me: its payment links
+    "razorpay": {"razorpay.com", "razorpay.me", "rzp.io"},     # Indian payment links on shop QR codes
     "phonepe": {"phonepe.com"},
     "flipkart": {"flipkart.com"},
     # --- more Indian brands that phishing targets (short names only match as a whole word) -------

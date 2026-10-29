@@ -66,6 +66,8 @@ async def lifespan(_app):
         logger.error("DATABASE: %s", _schema)
     if settings.AUTOMATION_ENABLED:
         manager.start_all()
+    from app.services.telegram_inbox import inbox as telegram_inbox
+    telegram_inbox.start()                 # only if TELEGRAM_INBOX, the bot token and the owner chat id are set
     if settings.WARM_UP_MODELS:
         import threading
 
@@ -78,6 +80,7 @@ async def lifespan(_app):
         threading.Thread(target=_warm, name="model-warm-up", daemon=True).start()
     yield
     manager.stop_all()
+    telegram_inbox.stop()
 
 
 _docs = settings.ENABLE_API_DOCS and not settings.is_production   # the API map is never public in production

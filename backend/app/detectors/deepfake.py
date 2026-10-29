@@ -8,7 +8,9 @@ IMAGES: three independent checks, the strongest decides (see _image_model_result
 Both models are trained on Google Colab (docs/colab/). If no check can run, the old static metadata check is
 used and the result clearly says why -- never a made-up verdict.
 
-VIDEOS: no trained video model yet (next subtopic) -> reported as "model unavailable", not as "real".
+VIDEOS: provenance check (app/detectors/video_provenance.py) + face-swap video model on 16 sampled frames
+(app/detectors/deepfake_video.py, trained on Celeb-DF v2 on Kaggle). No face / no model -> "unverified", never
+"real". Fully AI-generated video (no face swap) has no model yet.
 """
 import uuid
 from app.detectors.base import build_result
@@ -316,8 +318,14 @@ def _image_metadata_signals(file_path: str) -> list[dict]:
     return indicators
 
 
-def analyze_media(file_path: str | None, file_name: str, subtopic_title: str = "Deepfake Detection") -> dict:
+def analyze_media(file_path: str | None, file_name: str, subtopic_title: str = "Deepfake Detection",
+                  reference_path: str | None = None) -> dict:
     is_video = file_name.lower().endswith((".mp4", ".mov", ".avi", ".mkv", ".webm"))
+    if file_path:
+        from app.services.subtopic_router import file_kind
+        if file_kind(file_path, file_name) == "audio":       # voice notes / recordings (added 24 Oct)
+            from app.detectors import voice
+            return voice.analyze_voice(file_path, file_name, subtopic_title, reference_path=reference_path)
 
     why_no_model = "no file was uploaded"
     if file_path and not is_video:

@@ -1,0 +1,20 @@
+{
+ "model": "speechbrain/spkrec-ecapa-voxceleb (ECAPA-TDNN), spectrogram as convolution",
+ "sample_rate": 16000,
+ "max_seconds": 30,
+ "onnx_sha256": "4969db4522e4ed9aaa2d387b6c0972091361e5ecd6a30c4a71e5ee812786eb4e",
+ "mismatch_level": 0.28461591362953187,
+ "rule": "cosine similarity below this = only 1% of same-speaker pairs (LibriSpeech test-clean)",
+ "results": {
+  "speakers": 40,
+  "same-speaker pairs": 800,
+  "different-speaker pairs": 800,
+  "EER": 0.0188,
+  "AUC": 0.9992,
+  "different speakers below the mismatch level": 0.9738,
+  "same speaker wrongly below it": 0.01,
+  "same speaker, one side WhatsApp-Opus, wrongly below it": 0.0175
+ },
+ "smoke_test": false,
+ "trained_at": "2026-10-25T19:21:13Z"
+}

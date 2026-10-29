@@ -66,6 +66,121 @@ def save_result(db, *, user_id: str, module_id: str, subtopic_id: str, subtopic_
     return scan_row
 
 
+def _log_analysis(la) -> dict | None:
+    """Whole-log summary (lines read, time range, incidents) - only plain, size-limited values."""
+    if not isinstance(la, dict):
+        return None
+    return {"linesRead": _int(la.get("linesRead")), "timeRange": la.get("timeRange") if isinstance(la.get("timeRange"), list) else None,
+            "truncated": bool(la.get("truncated")),
+            "format": str(la["format"])[:80] if la.get("format") else None, "formatRecognised": bool(la.get("format")),
+            "incidents": [{"label": str(i.get("label", ""))[:80], "severity": str(i.get("severity", ""))[:10],
+                           "lines": _int(i.get("lines")), "sources": [str(x)[:60] for x in (i.get("sources") or [])][:10]}
+                          for i in (la.get("incidents") or []) if isinstance(i, dict)][:10]}
+
+
+def _voice_analysis(va) -> dict | None:
+    """Voice summary: model score + levels, language, a short transcript excerpt, voice-match result (no audio, no
+    voiceprint is ever stored)."""
+    if not isinstance(va, dict):
+        return None
+    ai = va.get("aiVoice") if isinstance(va.get("aiVoice"), dict) else None
+    sp = va.get("speech") if isinstance(va.get("speech"), dict) else None
+    vm = va.get("voiceMatch") if isinstance(va.get("voiceMatch"), dict) else None
+    lv = (ai or {}).get("levels") if isinstance((ai or {}).get("levels"), dict) else {}
+    return {"speechSeconds": _num(va.get("speechSeconds")), "clipsScored": _int(va.get("clipsScored")),
+            "aiVoice": {"score": _num(ai.get("score")), "alert": _num(lv.get("alert")), "verify": _num(lv.get("verify"))}
+            if ai else None,
+            "aiVoiceUnavailable": str(va["aiVoiceUnavailable"])[:200] if va.get("aiVoiceUnavailable") else None,
+            "speech": {"language": str(sp.get("language") or "")[:10], "transcriptExcerpt": str(sp.get("transcriptExcerpt") or "")[:200],
+                       "contentScore": _int(sp.get("contentScore")) if sp.get("contentScore") is not None else None}
+            if sp else None,
+            "voiceMatch": {"done": bool(vm.get("done")), "similarity": _num(vm.get("similarity")),
+                           "mismatchLevel": _num(vm.get("mismatchLevel")), "match": vm.get("match") if vm.get("done") else None,
+                           "reason": str(vm.get("reason") or "")[:200] or None} if vm else None}
+
+
+def _network_analysis(na) -> dict | None:
+    """Network traffic summary (connections read, top talkers, incidents) - only plain, size-limited values."""
+    if not isinstance(na, dict):
+        return None
+    m = na.get("model") if isinstance(na.get("model"), dict) else None
+    return {"format": str(na.get("format") or "")[:60], "connections": _int(na.get("connections")),
+            "httpRequests": _int(na.get("httpRequests")), "sources": _int(na.get("sources")),
+            "targets": _int(na.get("targets")),
+            "timeRange": _strs(na.get("timeRange"), 2, 30) if isinstance(na.get("timeRange"), list) else None,
+            "topTalkers": [{"address": str(t.get("address", ""))[:45], "connections": _int(t.get("connections")),
+                            "internal": bool(t.get("internal"))}
+                           for t in (na.get("topTalkers") or []) if isinstance(t, dict)][:5],
+            "incidents": [{"label": str(i.get("label", ""))[:80], "severity": str(i.get("severity", ""))[:10],
+                           "connections": _int(i.get("connections")), "mitre": str(i.get("mitre", ""))[:12],
+                           "sources": _strs(i.get("sources"), 10, 45), "targets": _strs(i.get("targets"), 10, 45)}
+                          for i in (na.get("incidents") or []) if isinstance(i, dict)][:10],
+            "model": {"connections": _int(m.get("connections")), "flagged": _int(m.get("flagged"))} if m else None}
+
+
+def _windows_events(we) -> dict | None:
+    """Windows event-log incidents - only plain, size-limited values."""
+    if not isinstance(we, dict):
+        return None
+    return {"format": str(we.get("format") or "")[:60], "events": _int(we.get("events")),
+            "hosts": _int(we.get("hosts")), "users": _int(we.get("users")),
+            "timeRange": _strs(we.get("timeRange"), 2, 30) if isinstance(we.get("timeRange"), list) else None,
+            "activityDays": _int(we.get("activityDays")),
+            "incidents": [{"rule": str(i.get("rule", ""))[:30], "label": str(i.get("label", ""))[:120],
+                           "user": str(i.get("user", ""))[:80], "host": str(i.get("host", ""))[:80],
+                           "severity": str(i.get("severity", ""))[:10], "mitre": str(i.get("mitre", ""))[:12],
+                           "lens": str(i.get("lens", ""))[:40], "count": _int(i.get("count")),
+                           "first": str(i.get("first") or "")[:30], "last": str(i.get("last") or "")[:30],
+                           "examples": _strs(i.get("examples"), 3, 300)}
+                          for i in (we.get("incidents") or []) if isinstance(i, dict)][:30]}
+
+
+def _malware_analysis(ma) -> dict | None:
+    """Uploaded-file malware summary - only plain, size-limited values (never the file itself)."""
+    if not isinstance(ma, dict):
+        return None
+    return {"fileName": str(ma.get("fileName") or "")[:200], "size": _int(ma.get("size")),
+            "sha256": str(ma.get("sha256") or "")[:64], "detectedType": str(ma.get("detectedType") or "")[:40],
+            "modelAvailable": bool(ma.get("modelAvailable")), "virusTotal": str(ma.get("virusTotal") or "")[:20],
+            "targets": [{"name": str(t.get("name", ""))[:200], "fileType": str(t.get("fileType", ""))[:10],
+                         "score": _num(t.get("score")), "level": str(t.get("level", ""))[:10],
+                         "alertLevel": _num(t.get("alertLevel")), "checkLevel": _num(t.get("checkLevel"))}
+                        for t in (ma.get("targets") or []) if isinstance(t, dict)][:20],
+            "archiveFiles": _strs(ma.get("archiveFiles"), 30, 200), "notes": _strs(ma.get("notes"), 5, 300)}
+
+
+def _insider_risk(ir) -> dict | None:
+    """Insider Risk summary (triage queue, three lenses) - only plain, size-limited values."""
+    if not isinstance(ir, dict):
+        return None
+    lenses = ir.get("lenses") if isinstance(ir.get("lenses"), dict) else {}
+    queue = []
+    for q in (ir.get("queue") or [])[:15]:
+        if not isinstance(q, dict):
+            continue
+        pat = q.get("pattern") if isinstance(q.get("pattern"), dict) else None
+        queue.append({
+            "user": str(q.get("user", ""))[:64], "level": str(q.get("level", ""))[:10], "risk": _num(q.get("risk")),
+            "score": _int(q.get("score")), "date": str(q.get("date", ""))[:10],
+            "flaggedDays": _int(q.get("flaggedDays")), "alertDays": _int(q.get("alertDays")),
+            "historyDays": _int(q.get("historyDays")),
+            "exfiltration": _strs(q.get("exfiltration"), 6, 160), "abnormal": _strs(q.get("abnormal"), 6, 160),
+            "pattern": {"name": str(pat.get("name", ""))[:80], "strength": str(pat.get("strength", ""))[:10],
+                        "why": str(pat.get("why", ""))[:200]} if pat else None,
+            "mitre": _strs(q.get("mitre"), 6, 12),
+            "timeline": [{"date": str(t.get("date", ""))[:10], "risk": _num(t.get("risk")),
+                          "level": str(t.get("level", ""))[:10]}
+                         for t in (q.get("timeline") or []) if isinstance(t, dict)][:30]})
+    return {"format": str(ir.get("format") or "")[:60], "events": _int(ir.get("events")),
+            "people": _int(ir.get("people")), "userDays": _int(ir.get("userDays")), "trained": bool(ir.get("trained")),
+            "timeRange": _strs(ir.get("timeRange"), 2, 30) if isinstance(ir.get("timeRange"), list) else None,
+            "alerts": _int(ir.get("alerts")), "reviews": _int(ir.get("reviews")),
+            "reviewLevel": _num(ir.get("reviewLevel")), "alertLevel": _num(ir.get("alertLevel")),
+            "lenses": {k: _int(lenses.get(k)) for k in ("exfiltration", "abnormal", "insider")},
+            "falseAlertsPerDay": _num(ir.get("falseAlertsPerDay")), "testCaught": _int(ir.get("testCaught")),
+            "testOf": _int(ir.get("testOf")), "notes": _strs(ir.get("notes"), 4, 300), "queue": queue}
+
+
 def detail_fields(result: dict) -> dict:
     """Extra result details for the API (live scan response and Scan History detail):
     MITRE ATT&CK techniques with explanations, IOC 'seen before' hits, the URL model's own assessment,
@@ -87,6 +202,12 @@ def detail_fields(result: dict) -> dict:
         "liveCheck": _live_check(result.get("liveCheck")),
         "checkedDetectors": [{"detector": str(d.get("detector", ""))[:80], "riskScore": _int(d.get("riskScore"))}
                              for d in (result.get("checkedDetectors") or []) if isinstance(d, dict)][:10],
+        "logAnalysis": _log_analysis(result.get("logAnalysis")),
+        "networkAnalysis": _network_analysis(result.get("networkAnalysis")),
+        "voiceAnalysis": _voice_analysis(result.get("voiceAnalysis")),
+        "insiderRisk": _insider_risk(result.get("insiderRisk")),
+        "malwareAnalysis": _malware_analysis(result.get("malwareAnalysis")),
+        "windowsEvents": _windows_events(result.get("windowsEvents")),
     }
     em = result.get("email") or {}
     if em:

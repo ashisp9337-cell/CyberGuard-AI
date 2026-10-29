@@ -81,6 +81,8 @@ def build_actions(result: dict, module_id: str, subtopic_id: str, target: str = 
             hosts.insert(0, h)
     hosts = [h for h in hosts if not _is_official(h)]   # never block a real bank/brand site
     ips = _public_ips(target)
+    if result.get("insiderRisk") and not result.get("networkAnalysis"):
+        ips = []          # addresses inside a user-activity log are not attackers to block
     if (result.get("category") or "").startswith("Possible account takeover"):
         module_id = "credential"   # a genuine security alert about the user's own account
     high = classification in ("high_risk", "critical")
@@ -184,11 +186,37 @@ def build_actions(result: dict, module_id: str, subtopic_id: str, target: str = 
 
     # ---------------- Cyber threat (malware, network, API, exfil) ----------------
     if module_id == "cyber-threat":
-        if subtopic_id == "malware-detection" or _has(labels, "hash", "powershell", "mimikatz", "malware", "command"):
+        ma = result.get("malwareAnalysis") or {}
+        if ma:                          # an uploaded file (added 26 Oct): it has not necessarily been run anywhere
+            add("warn_user", "Do not open or run this file",
+                f"Delete {ma.get('fileName') or 'the file'} and do not forward it. If you need what it claims to be, "
+                "get it again from the official source.", "immediate", "user")
+            if ma.get("sha256"):
+                add("block_hash", "Block the file's fingerprint",
+                    f"Add SHA-256 {ma['sha256']} to the antivirus / EDR block list so this exact file cannot run "
+                    "anywhere in the organisation.", "immediate" if high else "high")
+            add("isolate_host", "If it was already opened: isolate that computer",
+                "Disconnect that computer from the network (EDR isolation) and scan it; do not switch it off.",
+                "immediate" if high else "high")
+        elif subtopic_id == "malware-detection" or _has(labels, "hash", "powershell", "mimikatz", "malware", "command"):
             add("isolate_host", "Isolate the affected machine",
                 "Disconnect it from the network (EDR isolation) before the malware spreads; do not switch it off.", "immediate")
         for ip in ips[:3]:
             add("block_ip", f"Block IP {ip}", f"Block traffic to/from {ip} at the firewall.", "immediate" if high else "high")
+        # sources of network incidents (packet captures / flow records; added 24 Oct)
+        from app.detectors.network_traffic import is_internal
+        net_srcs = list(dict.fromkeys(s for i in ((result.get("networkAnalysis") or {}).get("incidents") or [])
+                                      for s in (i.get("sources") or [])))
+        for src in net_srcs[:3]:
+            if not re.fullmatch(r"[0-9a-fA-F:.]{3,45}", src):
+                continue
+            if is_internal(src):
+                add("isolate_host", f"Check / isolate {src}",
+                    f"{src} is inside your network and is attacking other machines - it may be infected or misused. "
+                    "Isolate it and find out who or what runs it.", "immediate" if high else "high")
+            else:
+                add("block_ip", f"Block IP {src}", f"Block traffic from {src} at the firewall and check whether "
+                    "any of its connections succeeded.", "immediate" if high else "high")
         if subtopic_id == "data-exfiltration" or _has(labels, "exfil", "upload", "transfer"):
             add("contain_data", "Stop the outbound transfer",
                 "Block the destination and disable the account or API key doing the transfer.", "immediate")
@@ -198,6 +226,53 @@ def build_actions(result: dict, module_id: str, subtopic_id: str, target: str = 
         if subtopic_id == "insider-threat":
             add("escalate_incident", "Involve HR / management",
                 "Insider cases need HR and legal involvement; preserve evidence before confronting anyone.", "high")
+        # Windows event-log incidents (added 26 Oct): what to do depends on what was seen
+        win = [i for i in ((result.get("windowsEvents") or {}).get("incidents") or [])
+               if isinstance(i, dict) and i.get("severity") in ("critical", "high", "medium")]
+        rules = {i.get("rule") for i in win}
+        hosts = sorted({i.get("host") for i in win if i.get("host") not in (None, "", "?")})[:3]
+        if rules & {"cred_dump", "lsass_read"}:
+            add("reset_credentials", "Reset passwords used on the affected computers",
+                f"Passwords and hashes on {', '.join(hosts) or 'that computer'} must be treated as stolen: reset every "
+                "account that logged on there (admins first) and isolate the computer.", "immediate")
+        if rules & {"security_off", "log_cleared", "audit_policy", "defender_off", "firewall_open"}:
+            add("remove_persistence", "Switch the security controls back on",
+                "Re-enable Defender / the firewall / event logging and audit policy, and find out who changed them - "
+                "attackers do this to hide.", "immediate" if high else "high")
+        if rules & {"user_created", "group_add", "add_user", "pwd_reset"}:
+            add("remove_persistence", "Review new accounts and group changes",
+                "Disable accounts nobody asked for and remove unexpected members from admin groups; confirm every "
+                "change with its owner.", "immediate" if high else "high")
+        if rules & {"sched_task", "service_install", "run_key"}:
+            add("remove_persistence", "Remove the auto-start entries",
+                "Delete the scheduled task / service / Run-key entry listed above after saving a copy for evidence.",
+                "high")
+        if rules & {"remote_exec", "encoded_ps", "lolbin", "office_child", "recovery_off"} and hosts:
+            add("isolate_host", f"Isolate {', '.join(hosts)}",
+                "Attacker tools ran there: disconnect it from the network (EDR isolation) and investigate; do not "
+                "switch it off.", "immediate" if high else "high")
+        # Insider Risk (one subtopic for exfiltration, abnormal activity and insider threat; added 26 Oct)
+        ir = result.get("insiderRisk") or {}
+        flagged = [q for q in (ir.get("queue") or []) if isinstance(q, dict) and q.get("level")]
+        if flagged:
+            if any(q.get("exfiltration") for q in flagged):
+                add("contain_data", "Stop the data leaving",
+                    "For the flagged people: block USB storage on their computers, block the file-sharing / leak "
+                    "sites they used, and find out what was copied or sent - treat that data as exposed.",
+                    "immediate" if high else "high")
+            for q in flagged[:3]:
+                pat = (q.get("pattern") or {}).get("name") or "unusual activity"
+                add("revoke_session", f"Review {q.get('user')}'s access",
+                    f"{q.get('user')} is at {q.get('level')} level ({pat}, {q.get('date')}). Check the activity with "
+                    "their manager first; if it is confirmed, end their sessions and remove access to sensitive "
+                    "shares while it is investigated.", "immediate" if q.get("level") == "alert" and high else "high")
+            if any((q.get("pattern") or {}).get("name", "").startswith("Spying") for q in flagged):
+                add("remove_persistence", "Check the affected computers for keyloggers",
+                    "Scan the computers this person used - and their colleagues' computers they logged on to - for "
+                    "keylogger / monitoring software, and reset passwords typed on them.", "immediate")
+            add("escalate_incident", "Involve HR / legal before acting",
+                "Insider cases need HR and legal involvement. Keep the original logs unchanged and do not confront "
+                "the person before the facts are checked - many flags have an innocent explanation.", "high")
 
     # ---------------- Everyone, by severity ----------------
     if not any(a["action"] == "warn_user" for a in actions):

@@ -30,6 +30,8 @@ export function AnalysisWorkspace({ module: mod, subtopic }: { module: Detection
   const [extraValues, setExtraValues] = useState<Record<string, string>>({});
   const [file, setFile] = useState<UploadedFileMeta | null>(null);
   const [fileBlob, setFileBlob] = useState<File | null>(null);
+  const [refFile, setRefFile] = useState<UploadedFileMeta | null>(null);
+  const [refBlob, setRefBlob] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
 
@@ -38,7 +40,11 @@ export function AnalysisWorkspace({ module: mod, subtopic }: { module: Detection
 
   const needsFile = subtopic.inputKind === "file";
   // Auto-detect pages may take EITHER pasted text OR a file (e.g. phishing: a message or an .eml / QR image).
-  const optionalFile = subtopic.id === "auto" && !needsFile && !!subtopic.acceptedFileTypes?.length;
+  // Cyber-threat log pages also take a whole log file (.log / .txt), read entirely by the backend.
+  const optionalFile = (subtopic.id === "auto" || subtopic.moduleId === "cyber-threat") && !needsFile
+    && !!subtopic.acceptedFileTypes?.length;
+  // Voice & Audio Analysis: an optional genuine recording of the person, for the voice match
+  const allowsReference = subtopic.id === "audio-analysis";
   const needsUrl = subtopic.inputKind === "url";
   const needsText = subtopic.inputKind === "text" || subtopic.inputKind === "email" || subtopic.inputKind === "identity";
 
@@ -49,8 +55,25 @@ export function AnalysisWorkspace({ module: mod, subtopic }: { module: Detection
     setExtraValues({});
     setFile(null);
     setFileBlob(null);
+    setRefFile(null);
+    setRefBlob(null);
     setError(null);
     setResult(null);
+  }
+
+  function handleReferenceSelect(f: File) {
+    const ext = "." + f.name.split(".").pop()?.toLowerCase();
+    if (subtopic.acceptedFileTypes?.length && !subtopic.acceptedFileTypes.includes(ext)) {
+      setError(`Unsupported file type for the genuine recording. Accepted: ${subtopic.acceptedFileTypes.join(", ")}`);
+      return;
+    }
+    if (f.size > (subtopic.maxFileSizeMb ?? 50) * 1024 * 1024) {
+      setError(`Genuine recording too large. Maximum size is ${subtopic.maxFileSizeMb ?? 50}MB.`);
+      return;
+    }
+    setError(null);
+    setRefFile({ id: generateId("FILE"), name: f.name, size: f.size, type: f.type || ext, progress: 100 });
+    setRefBlob(f);
   }
 
   function handleFileSelect(f: File) {
@@ -107,6 +130,7 @@ export function AnalysisWorkspace({ module: mod, subtopic }: { module: Detection
       urlInput: needsUrl ? urlValue : undefined,
       file: (needsFile || optionalFile) && file ? file : undefined,
       fileBlob: (needsFile || optionalFile) && fileBlob ? fileBlob : undefined,
+      referenceBlob: allowsReference && refFile && refBlob ? refBlob : undefined,
       extraFieldValues: extraValues,
     };
 
@@ -185,6 +209,24 @@ export function AnalysisWorkspace({ module: mod, subtopic }: { module: Detection
                   onRemove={() => setFile(null)}
                   error={error ?? undefined}
                 />
+              )}
+
+              {allowsReference && (
+                <div className="space-y-2">
+                  <p className="text-sm text-slate-300">
+                    Optional: a genuine recording of the person it claims to be (for a voice match)
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Both recordings are deleted from the server right after the scan; no voiceprint is stored.
+                  </p>
+                  <FileUploader
+                    accepted={subtopic.acceptedFileTypes}
+                    maxSizeMb={subtopic.maxFileSizeMb ?? 50}
+                    file={refFile}
+                    onSelect={handleReferenceSelect}
+                    onRemove={() => { setRefFile(null); setRefBlob(null); }}
+                  />
+                </div>
               )}
 
               {subtopic.extraFields?.map((f) => (

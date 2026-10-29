@@ -31,14 +31,32 @@ backend/app/ml/training/data/phishing-links*
 backend/automation_state.json*
 backend/app/ml/training/data/youtube*
 backend/app/ml/models/*.onnx
+backend/app/ml/models/whisper-small/
+backend/app/ml/models/EMBER2024_all.model
 
 # URL-security training data collected on this PC (large / regenerated)
 backend/app/ml/training/data/urlscan/
 backend/app/ml/training/data/domain_facts.jsonl
+backend/app/ml/training/data/crux/
+backend/app/ml/training/data/api_abuse/
+backend/app/ml/training/data/log_analysis/
+backend/app/ml/training/data/network/
+backend/app/ml/training/data/insider/
+backend/app/ml/training/data/malware/
+backend/app/ml/training/data/otrf/
+backend/app/ml/training/data/evtx_samples/
+backend/app/ml/training/windows_rules_report.txt
+backend/app/ml/models/api_abuse.previous.joblib
 
 # Quarantined downloads (dangerous files moved here by CyberGuard - never commit them)
 backend/quarantine/
 backend/app/ml/training/data/urlscan_phish_domains.csv
 backend/fl_sample/
+# In-the-Wild voice test downloads (add_voice_itw_results.py copies the numbers into voice_ai.json)
+backend/itw_results.json
+backend/itw_scores.csv.gz
+backend/app/ml/models/voice_ai.json.tmp
 # live-check reports (run outputs on this PC, not code)
 backend/*_check.txt
+# demo-day files (your own photos / videos for the deepfake part)
+backend/demo_samples/
