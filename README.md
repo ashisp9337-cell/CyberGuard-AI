@@ -19,7 +19,7 @@ An AI assistant, **Threatora**, explains results in **English, Hindi and Odia**.
 
 | Module | Subtopics | How it decides |
 |---|---|---|
-| **Phishing** | Email, SMS, social-media messages, QR codes, fraudulent websites, malicious URLs | Text models (SMS, email, social media), scam-pattern rules (parcel fee, KYC, task scam, OTP request …), every embedded link scored by the URL engine, QR decoder (UPI / Wi-Fi / links) |
+| **Phishing** | Email, SMS, social-media messages, QR codes, fraudulent websites, malicious URLs | Text models (SMS, email, social media), scam-pattern rules (parcel fee, KYC, task scam, OTP request …; also in **Hindi, Hinglish and Odia**), every embedded link scored by the URL engine, QR decoder (UPI / Wi-Fi / links) |
 | **URL security** | Domain spoofing, look-alike domains, URL manipulation, redirect analysis, SSL & domain age, fake login pages | Six trained URL models, live registry (RDAP/WHOIS) and SSL checks, safe read-only page fetch that follows redirects, **Fake Login Page model** on the page's HTML |
 | **Impersonation** | Government / police, senior management (CEO fraud), teacher / university, bank, brand, friend or relative ("new number") | A router model picks the category; each category has its own model and rules (e.g. "digital arrest", gift-card requests, scholarship / KYC scams) |
 | **Credential theft & account takeover** | Failed logins, password spraying, unusual location, unknown device, session activity, behaviour change | Parses pasted auth logs (SSH, Windows 4625/4624, web logins); trained on 31 million real logins (RBA dataset); rules for brute force, impossible travel, MFA disabled, mail forwarding |
@@ -72,6 +72,7 @@ time periods. "Caught at alert" is measured at a threshold where only about 1% o
 | Insider Risk (exfiltration + abnormal activity + insider threat) | CERT Insider Threat r4.2 (CMU SEI, **synthetic**): 1,000 people, 330,452 person-days, 70 insiders in 3 scenarios. Per person-day: own 30-day baseline, same-role colleagues that day, novelties (first USB, new PC, rare site); a model for known insider playbooks + a label-free "unlike themselves" score - the higher one counts | Trained before 1 Oct 2010, tested after it on **35 insiders it never saw**: with 10 reviews a day (1% of staff) **35 of 35** caught (random picking: 6.5), AUC 0.990; without any web signal 34 of 35. **Never-seen insider patterns** (one scenario left out of training each time): **40 of 70** (random 11.5) - slow job-hunt theft only 11 of 30. False alert-level person-days: 0.8 per day out of ~600 |
 | Voice: AI / cloned voice | XLS-R speech model (frozen) + logistic regression, trained in Colab on ASVspoof 2019 LA + MLAAD (modern TTS / cloning) + LibriSpeech, with phone / WhatsApp codecs applied to real and fake alike | Tested on data it never saw: In-the-Wild (real vs deepfake celebrities from the internet), ASVspoof 2019 eval (unseen attacks), held-out MLAAD systems, In-the-Wild after WhatsApp-style compression. Numbers: `python show_auc.py` after the Colab run + the In-the-Wild Kaggle test (`voice_ai.json`) |
 | E-mail phishing (text model) | 18,634 real phishing / genuine e-mails | AUC **0.996** on the 20% it never trained on (proved: a copy trained on the other 80% gives the same scores); **0.998** on e-mails unlike any training e-mail; the model alone: 98.8% caught, 3.8% false alarms |
+| Hindi / Hinglish / Odia scam rules (added 30 Oct) | No open real Hindi / Odia scam-SMS dataset exists, so 11 rules were written from public warnings (RBI, DoT, I4C, power companies): electricity cut-off, KYC block, OTP ask, lottery / KBC fee, task jobs, digital arrest, drugs-in-parcel, instant loan, UPI refund, "new number", SIM block | False alarms: **0** of 29,001 real ordinary texts (Hindi + Odia news sentences, people's Hinglish requests) and 0 of 6,034 SMS-sized chunks; 35 of 55,143 SMS-corpus rows labelled legitimate - read by hand: all are scam texts with a wrong label. Real scam messages quoted by banks / news: held-out **2 of 2**, dev 8 of 10 (shortened quotes: 1 of 4). Before: the same Hindi KYC / electricity messages scored 4-60 |
 | SMS phishing (text model) | 77,891 SMS; the 3,500 template genuine messages added in cleaning are left out of the test | AUC **0.987** on 14,915 held-out real messages; the model alone: 96.3% caught, 6.5% false alarms (rules and link checks are added on top in the app) |
 | Social-media messages | UCI YouTube Spam + real SMS | AUC 0.99 on an unseen video, 0.98 on held-out SMS |
 | Impersonation: bank / brand / government | real scam and genuine SMS | **91% / 89% / 87%** of scams caught; 1–4% false alarms on real messages on the same topic |
@@ -91,6 +92,7 @@ time periods. "Caught at alert" is measured at a threshold where only about 1% o
   built to match). Test it on your own recordings: `python -m app.ml.training.check_voice_samples <folder> --expect real`.
 - **Attackers who reuse the victim's own country and network:** caught far less often than foreign logins.
 - **Teacher / university scams:** very little real data is public.
+- **Hindi / Hinglish / Odia messages:** the text models read English only; these messages are judged by the scam rules (and the English words in them). A scam worded unlike the 11 rules gets a low score with a note saying the result is less certain. The real test set is small (21 quoted messages, 9 of them shortened; no Odia scam text was found published) - real messages from family phones would make it stronger.
 - **Network traffic** catches noisy attacks (scans, floods, brute force). Slow or encrypted attacks (a botnet's occasional check-in, Heartbleed, web attacks over HTTPS) can hide in normal traffic; botnet "beaconing" was tested and left out because normal software checks in on a timer too.
 - **Windows event rules** see what Windows records: with process-creation auditing (event 4688 with command lines) or Sysmon switched off, most rules have nothing to read. Not covered yet: DLL hijacking, DCSync, Kerberos ticket attacks, LDAP-only discovery. The admin-pipe rule can also fire for real IT admins' remote tools (it says so and is "medium" for account queries).
 - **Malware:** files are only read, never run, so malware that hides until it runs (or arrives encrypted) can look clean; a clean result is not proof. The model covers Windows programs, Android apps, PDFs and Linux programs (also inside zips); scripts and Office files get the static checks only.
@@ -174,12 +176,14 @@ results are (`*.metrics.json`, `deepfake_video.json`).
   `python -I app\ml\training\add_voice_itw_results.py <path>\itw_results.json` adds the results to `voice_ai.json`.
 - **E-mail / SMS results:** `python -I app\ml\training\measure_text_models.py` (about 1 minute) measures both models on
   the 20% they never trained on, proves that, and saves the results for `show_auc.py`.
+- **Hindi / Hinglish / Odia scam rules:** `python -I app\ml\training\test_indic_scams.py app\ml\training\data\indic`
+  (download commands at the top of that file, about 130 MB) re-measures false alarms and catches.
 - **If a model file is missing:** that check is reported as *unavailable*, never as a made-up verdict.
 
 ### 5. Checks
 ```
 cd backend
-python -m pytest -q          # 833 tests (uses cyberguard_test, never your real database)
+python -m pytest -q          # 854 tests (uses cyberguard_test, never your real database)
 python demo_check.py         # demo-day pre-flight: models, database, internet, chat backup, every demo input
 python phase2_live_check.py  # live services + 30 real / phishing URLs (phishing sites are never contacted)
 ```
@@ -193,14 +197,15 @@ python phase2_live_check.py  # live services + 30 real / phishing URLs (phishing
 - **Secrets:** stay in `backend/.env` (never in git). Only public `VITE_*` values reach the browser.
 - **Uploads:** allow-listed file types, size-limited, stored under random names and never executed.
 - **Chat privacy:** private details are masked before reaching the AI; the AI's tools only see the user's own data.
-- **Scam examples in tests and the demo** are invented; the scam web addresses used are unregistered names.
+- **Scam examples in tests and the demo** are invented or quoted from public warnings (sources in `test_indic_scams.py`); the scam web addresses used are unregistered names.
 
 ---
 
 ## Datasets and credits
 - **Phishing pages and links:** urlscan.io, OpenPhish, PhishTank, Tranco top-1M, PhiUSIIL (UCI), DEPHIDES (MIT),
   Kaggle malicious URLs
-- **Messages:** UCI SMS Spam Collection, UCI YouTube Spam Collection (CC BY 4.0), SMS phishing corpora
+- **Messages:** UCI SMS Spam Collection, UCI YouTube Spam Collection (CC BY 4.0), SMS phishing corpora; false-alarm
+  test of the Hindi / Odia rules: Universal Dependencies UD_Hindi-HDTB, UD_Hindi-PUD, UD_Odia-ODTB, Google Hinglish-TOP
 - **Logins:** RBA dataset (Wiefling et al., CC BY 4.0)
 - **Malware:** EMBER2024 (Joyce, Raff et al., KDD 2025; github.com/FutureComputing4AI/EMBER2024, Apache-2.0) - its
   feature code (thrember) is included unchanged in `backend/app/detectors/ember_features.py` with its licence

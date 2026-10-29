@@ -177,6 +177,24 @@ def show_saved():
     except (OSError, ValueError, KeyError):
         say(f"{'Cyber threat':13s} {'Insider risk':30s} not trained yet: python -I app\\ml\\training\\train_insider_risk.py")
     try:
+        ix = json.load(open(os.path.join(MODELS, "indic_scams.json"), encoding="utf-8"))
+        fa = ix["false_alarms"]
+        one = [v for k, v in fa.items() if not k.startswith("SMS corpus") and "chunks" not in k]
+        chunks = [v for k, v in fa.items() if "chunks" in k]
+        q = ix["quotes"]
+        say(f"{'Phishing':13s} {'Hindi / Hinglish / Odia rules':30s} rules, not AUC: fired on {sum(v['fired'] for v in one)} of "
+            f"{sum(v['texts'] for v in one):,} real ordinary Hindi / Odia / Hinglish texts and "
+            f"{sum(v['fired'] for v in chunks)} of {sum(v['texts'] for v in chunks):,} 3-sentence chunks")
+        say(f"{'':13s} {'':30s} real scam quotes caught: held-out {q['held-out']['caught']} of {q['held-out']['of']}, "
+            f"dev {q['dev']['caught']} of {q['dev']['of']} (cut quotes: held-out "
+            f"{q.get('held-out (cut quotes)', {}).get('caught', 0)} of {q.get('held-out (cut quotes)', {}).get('of', 0)})")
+        sl = fa.get("SMS corpus - rows labelled legitimate")
+        if sl:
+            say(f"{'':13s} {'':30s} SMS corpus rows labelled legitimate: {sl['fired']} of {sl['texts']:,} fired "
+                "(read by hand 30 Oct: all are scam texts with a wrong label)")
+    except (OSError, ValueError, KeyError):
+        say(f"{'Phishing':13s} {'Hindi / Hinglish / Odia rules':30s} not tested yet: app\\ml\\training\\test_indic_scams.py")
+    try:
         wr = json.load(open(os.path.join(MODELS, "windows_rules.json"), encoding="utf-8"))
         tot = wr["total"]
         say(f"{'Cyber threat':13s} {'Windows event rules':30s} rules, not AUC: technique seen in {tot['technique_seen']} of "

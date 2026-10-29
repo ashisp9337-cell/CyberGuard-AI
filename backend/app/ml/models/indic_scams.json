@@ -1,0 +1,87 @@
+{
+ "false_alarms": {
+  "Hindi sentences (UD HDTB)": {
+   "texts": 16649,
+   "fired": 0,
+   "rate": 0.0,
+   "by_pattern": {}
+  },
+  "Hindi 3-sentence chunks (UD HDTB)": {
+   "texts": 5549,
+   "fired": 0,
+   "rate": 0.0,
+   "by_pattern": {}
+  },
+  "Hindi sentences (UD PUD)": {
+   "texts": 1000,
+   "fired": 0,
+   "rate": 0.0,
+   "by_pattern": {}
+  },
+  "Hindi 3-sentence chunks (UD PUD)": {
+   "texts": 333,
+   "fired": 0,
+   "rate": 0.0,
+   "by_pattern": {}
+  },
+  "Odia sentences (UD ODTB)": {
+   "texts": 456,
+   "fired": 0,
+   "rate": 0.0,
+   "by_pattern": {}
+  },
+  "Odia 3-sentence chunks (UD ODTB)": {
+   "texts": 152,
+   "fired": 0,
+   "rate": 0.0,
+   "by_pattern": {}
+  },
+  "Hinglish requests (Hinglish-TOP)": {
+   "texts": 10896,
+   "fired": 0,
+   "rate": 0.0,
+   "by_pattern": {}
+  },
+  "SMS corpus - rows labelled legitimate": {
+   "texts": 55143,
+   "fired": 35,
+   "rate": 0.00063,
+   "by_pattern": {
+    "Work-from-home task job (Hindi / Hinglish / Odia)": 29,
+    "KYC / Aadhaar update or your account is blocked (Hindi / Hinglish / Odia)": 4,
+    "Electricity cut-off tonight - call the 'officer' (Hindi / Hinglish / Odia)": 2
+   }
+  }
+ },
+ "quotes": {
+  "dev": {
+   "caught": 8,
+   "of": 10
+  },
+  "dev (cut quotes)": {
+   "caught": 0,
+   "of": 5
+  },
+  "held-out": {
+   "caught": 2,
+   "of": 2
+  },
+  "held-out (cut quotes)": {
+   "caught": 1,
+   "of": 4
+  }
+ },
+ "sms_corpus_scam_rows": {
+  "texts": 22748,
+  "fired": 675,
+  "by_pattern": {
+   "KYC / Aadhaar update or your account is blocked (Hindi / Hinglish / Odia)": 426,
+   "SIM / mobile number blocked in hours (fake TRAI / DoT)": 61,
+   "Lottery / prize - pay a fee first (Hindi / Hinglish / Odia)": 76,
+   "Electricity cut-off tonight - call the 'officer' (Hindi / Hinglish / Odia)": 66,
+   "Work-from-home task job (Hindi / Hinglish / Odia)": 23,
+   "Refund / cashback that needs your UPI PIN": 22,
+   "Instant loan without CIBIL / documents (Hindi / Hinglish / Odia)": 1
+  }
+ }
+}

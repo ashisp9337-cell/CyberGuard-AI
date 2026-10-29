@@ -15,6 +15,7 @@ import uuid
 import joblib
 
 from app.core.config import get_settings
+from app.detectors import indic_scams
 from app.detectors.base import build_result
 
 settings = get_settings()
@@ -228,6 +229,10 @@ SCAM_PATTERNS = [
 ]
 
 
+# Hindi / Hinglish / Odia scam patterns (added 30 Oct; see app/detectors/indic_scams.py)
+SCAM_PATTERNS += indic_scams.PATTERNS
+
+
 # which patterns belong to which detector (a pattern raising an unrelated detector would mislabel the threat --
 # e.g. CEO fraud must stay "Business Email Compromise", not become "Brand impersonation")
 PATTERNS_FOR = {
@@ -240,12 +245,14 @@ PATTERNS_FOR = {
     "contact": ("Emergency money request",),
     "government": (),
 }
+for _topic, _names in indic_scams.FOR_TOPIC.items():
+    PATTERNS_FOR[_topic] = tuple(PATTERNS_FOR.get(_topic, ())) + tuple(_names)
 
 
 def scam_patterns(text: str, topic: str | None = None) -> tuple[list[dict], int]:
     """-> (indicators of the scam patterns that match, minimum score they justify). topic limits the patterns to the
     ones that belong to that impersonation detector (None = all, for the SMS / social / message checks)."""
-    low = (text or "").lower()
+    low = (text or "").lower().translate(indic_scams.DIGITS)      # Hindi / Odia digits -> 0-9
     if not low.strip():
         return [], 0
     has_link = bool(LINK_RE.search(text) or bare_domains(text))
@@ -399,6 +406,9 @@ def analyze_text(text: str, sender: str | None = None, subtopic_title: str = "Ph
 
     model = _get_model(subtopic_id)
     model_used = model is not None and bool(text)
+    # The text models read English only: for a message written mostly in Hindi / Odia script the model sees just the
+    # English words in it (KYC, OTP, a link), so the Hindi / Odia scam patterns carry the score and the result says so.
+    lang = indic_scams.main_language(text) if text else None
     proba = None
     if model_used:
         try:
@@ -424,6 +434,10 @@ def analyze_text(text: str, sender: str | None = None, subtopic_title: str = "Ph
         explanation = "No content was submitted to analyze."
         blended = 0
         confidence = 0
+    elif not triggered and lang:
+        explanation = (f"No scam pattern was found in this {lang} message. CyberGuard's text models read English only, so "
+                       f"it was checked mainly with the {lang} scam patterns - a low score here is less certain than for "
+                       "an English message. Never share an OTP or PIN, and call the company on its official number if unsure.")
     elif not triggered and not model_used:
         explanation = "No rule-based phishing indicators were detected in the submitted text, and no trained model was available to provide a second opinion."
     elif not triggered:
@@ -431,7 +445,10 @@ def analyze_text(text: str, sender: str | None = None, subtopic_title: str = "Ph
     else:
         top = sorted(triggered, key=lambda i: -i["weight"])[:3]
         names = ", ".join(i["label"].lower() for i in top)
-        model_note = f" A trained classifier corroborated this with a phishing probability of {proba*100:.0f}%." if model_used else " (Trained model unavailable — indicators are rule-based only.)"
+        model_note = (f" (The message is in {lang}: the text models read English only, so it was judged mainly by the scam "
+                      "rules and link checks.)" if lang
+                      else f" A trained classifier corroborated this with a phishing probability of {proba*100:.0f}%." if model_used
+                      else " (Trained model unavailable — indicators are rule-based only.)")
         explanation = f"Detected {len(triggered)} indicator(s), most notably: {names}.{model_note}"
 
     # links that were checked and found NOT risky do not count as a scam sign; the bare "contains a link" note neither
@@ -453,7 +470,8 @@ def analyze_text(text: str, sender: str | None = None, subtopic_title: str = "Ph
         indicators=rule_indicators,
         base_score=blended,
         confidence=confidence,
-        engine_name=f"CYBERGUARD Phishing Engine — {'TF-IDF+LogReg' if model_used else 'Rule-Based (model unavailable)'}",
+        engine_name=(f"CYBERGUARD Phishing Engine — {'TF-IDF+LogReg' if model_used else 'Rule-Based (model unavailable)'}"
+                     + (f" + {lang} scam patterns" if lang else "")),
         threat_type=subtopic_title,
         explanation=explanation,
     )
