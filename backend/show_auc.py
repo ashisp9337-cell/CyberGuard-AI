@@ -210,6 +210,18 @@ def show_saved():
     except (OSError, ValueError, KeyError):
         say(f"{'Cyber threat':13s} {'Windows event rules':30s} not tested yet: app\\ml\\training\\test_windows_rules.py")
     try:
+        sc = json.load(open(os.path.join(MODELS, "script_checks.json"), encoding="utf-8"))
+        bad, ok = sc["mpsd_malicious_test"], sc["mpsd_ordinary_test"]
+        say(f"{'Cyber threat':13s} {'Script checks (malware)':30s} rules, not AUC: malicious PowerShell (mpsd, test half) "
+            f"{bad['alert']} of {bad['scripts']} at alert; ordinary scripts {ok['alert']} of {ok['scripts']}")
+        inst = sc.get("Software installers (chocolatey-packages)")
+        if inst:
+            say(f"{'':13s} {'':30s} software installer scripts at alert: {inst['alert']} of {inst['scripts']}; "
+                f"Downloads watcher quarantines {bad['downloads_quarantined']} of {bad['scripts']} malicious")
+    except (OSError, ValueError, KeyError):
+        say(f"{'Cyber threat':13s} {'Script checks (malware)':30s} not tested yet: app/ml/training/test_script_checks.py "
+            "(run it on Linux / the cloud, not on Windows)")
+    try:
         mm = json.load(open(os.path.join(MODELS, "malware_model.json"), encoding="utf-8"))["results"]
         a = mm["all"]
         say(f"{'Cyber threat':13s} {'Malware (EMBER2024 model)':30s} AUC {a['auc']:.3f} on files first seen Nov-Dec 2024 "

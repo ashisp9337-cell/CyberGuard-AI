@@ -48,6 +48,8 @@ backend/app/ml/training/data/evtx_samples/
 backend/app/ml/training/windows_rules_report.txt
 backend/app/ml/training/data/indic/
 backend/app/ml/training/indic_scams_report.txt
+backend/app/ml/training/data/scripts/
+backend/app/ml/training/script_checks_report.txt
 backend/app/ml/models/api_abuse.previous.joblib
 
 # Quarantined downloads (dangerous files moved here by CyberGuard - never commit them)

@@ -10,6 +10,9 @@ Static checks only - nothing is ever opened or executed:
   * PDFs: JavaScript, auto-open actions, launch actions, embedded files, links
   * HTML/SVG attachments: login forms, scripts, redirects
   * SHA-256 lookup on VirusTotal (only when VIRUSTOTAL_API_KEY is set)
+  * (30 Oct) the EICAR antivirus test file (also inside a zip), files inside a zip disguised with a double extension
+    (holiday/IMG_001.jpg.exe), and what scripts would do if run (app/detectors/script_checks.py) - also for
+    scripts inside a zip
 
 Returns a CYBERGUARD result dict plus "extracted_links" (links found inside
 PDFs/HTML attachments, which the orchestrator sends to the URL engine) and
@@ -21,6 +24,7 @@ import re
 import uuid
 import zipfile
 
+from app.detectors import script_checks
 from app.detectors.base import build_result
 from app.email_pipeline.schemas import Attachment
 
@@ -52,6 +56,10 @@ EXT_FAMILY = {".pdf": "pdf", ".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg", ".g
               ".dll": "windows-executable", ".scr": "windows-executable", ".rar": "rar", ".7z": "7z"}
 URL_RE = re.compile(rb"""https?://[^\s<>"'\)\]\\]+""", re.I)
 PDF_URI_RE = re.compile(rb"/URI\s*\(([^)]+)\)")
+# The harmless EICAR antivirus test string, built from two halves so this source file itself never contains it whole
+# (an antivirus such as Windows Defender could otherwise quarantine this file).
+EICAR = b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$" + b"EICAR-STANDARD-" + b"ANTIVIRUS-TEST-FILE!$H+H*"
+MAX_INNER_SCRIPT = 1024 * 1024        # scripts inside a zip are read (in memory) up to this size
 RTLO = "\u202e"   # Right-To-Left Override: makes "invoice\u202efdp.exe" display as "invoiceexe.pdf"
 
 
@@ -72,6 +80,18 @@ def _ind(triggered, label, description, severity, weight, mitre=None):
     return {"id": f"IND_{uuid.uuid4().hex[:12]}", "label": label, "description": description,
             "severity": severity, "weight": weight, "triggered": bool(triggered),
             "source": "attachment", "mitre": mitre}
+
+
+def is_eicar(data: bytes) -> bool:
+    """The EICAR test file: the 68-character string at the start, optionally followed by whitespace (max 128 bytes)."""
+    return data.startswith(EICAR) and len(data) <= 128 and not data[len(EICAR):].strip()
+
+
+def _disguised(filename: str) -> bool:
+    """photo.jpg.exe / invoice\u202efdp.exe: a harmless-looking name hiding a program."""
+    exts = _exts(filename.rsplit("/", 1)[-1])
+    risky = EXECUTABLE_EXT | CONTAINER_EXT | MACRO_EXT | WEB_EXT
+    return RTLO in filename or (len(exts) >= 2 and exts[-2] in DECOY_EXT and exts[-1] in risky)
 
 
 def _has_macros(name: str, data: bytes) -> bool:
@@ -138,6 +158,15 @@ def scan_attachment(att: Attachment, *, network: bool = True) -> dict:
     ind.append(_ind(RTLO in name, "Hidden reversed filename",
                     "The filename uses an invisible right-to-left character to disguise its real extension.",
                     "critical", 35, "T1036.002"))
+    if is_eicar(data):
+        ind.append(_ind(True, "EICAR antivirus test file",
+                        "This is the standard, harmless EICAR test file that every antivirus is expected to flag. It is "
+                        "not real malware - CyberGuard treats it like malware so you can test the alerts and quarantine.",
+                        "high", 71, "T1204.002"))
+    floor = 0
+    if last in script_checks.SCRIPT_EXT:
+        found, floor = script_checks.check(name, data)
+        ind += found
     expected = EXT_FAMILY.get(last)
     ind.append(_ind(bool(expected and magic and expected != magic and not (expected == "zip" and magic == "zip")),
                     "File content does not match its extension",
@@ -157,6 +186,33 @@ def scan_attachment(att: Attachment, *, network: bool = True) -> dict:
                                 "delivery trick (the password is usually in the email body).", "high", 30, "T1027.013"))
                 ind.append(_ind(bool(risky_inner), "Dangerous file inside archive",
                                 f"Contains {', '.join(risky_inner[:3])}.", "critical", 40, "T1204.002"))
+                disguised = [n for n in inner if _disguised(n)]
+                ind.append(_ind(bool(disguised), "Disguised file inside archive",
+                                f"Contains {', '.join(disguised[:3])}: a program dressed up with a harmless-looking "
+                                "name (double extension or reversed text). Real photos and documents never do this.",
+                                "critical", 40, "T1036.007"))
+                eicar_inner, script_found = [], []
+                for i in infos[:200]:
+                    if i.is_dir() or i.flag_bits & 0x1:
+                        continue
+                    ext = os.path.splitext(i.filename.lower())[1]
+                    if i.file_size <= 128:
+                        with z.open(i) as f:
+                            if is_eicar(f.read(129)):
+                                eicar_inner.append(i.filename)
+                    elif ext in script_checks.SCRIPT_EXT and i.file_size <= MAX_INNER_SCRIPT and len(script_found) < 10:
+                        with z.open(i) as f:          # read in memory only - nothing is written to disk
+                            found, fl = script_checks.check(i.filename, f.read(MAX_INNER_SCRIPT))
+                        for s in found:
+                            s["label"] = f"Inside archive: {s['label']}"
+                            s["description"] = f"{i.filename}: {s['description']}"
+                        script_found += found
+                        floor = max(floor, fl)
+                ind.append(_ind(bool(eicar_inner), "EICAR antivirus test file",
+                                f"The archive contains the harmless EICAR antivirus test file ({', '.join(eicar_inner[:2])})"
+                                " - treated like malware so you can test the alerts and quarantine.", "high", 71,
+                                "T1204.002"))
+                ind += script_found
         except zipfile.BadZipFile:
             ind.append(_ind(True, "Corrupted archive", "The archive could not be opened.", "medium", 10))
     elif last in ARCHIVE_EXT and magic != "zip":
@@ -233,13 +289,13 @@ def scan_attachment(att: Attachment, *, network: bool = True) -> dict:
                             "critical", 60, "T1204.002"))
 
     return {"indicators": ind, "extracted_links": list(dict.fromkeys(links)), "qr_candidates": qr_candidates,
-            "details": details}
+            "details": details, "floor": floor}
 
 
 def scan_attachments(attachments: list[Attachment], *, network: bool = True) -> dict:
     """Scan every non-inline attachment and return one CYBERGUARD result."""
     real = [a for a in attachments if not (a.is_inline and a.content_type.startswith("image/"))]
-    all_ind, links, qrs, details = [], [], [], []
+    all_ind, links, qrs, details, floor = [], [], [], [], 0
     for a in attachments:
         if a in real:
             r = scan_attachment(a, network=network)
@@ -250,11 +306,13 @@ def scan_attachments(attachments: list[Attachment], *, network: bool = True) -> 
             links += r["extracted_links"]
             qrs += r["qr_candidates"]
             details.append(r["details"])
+            floor = max(floor, r.get("floor", 0))
         elif a.content_type.startswith("image/"):
             qrs.append((a.filename, a.data))
 
     triggered = [i for i in all_ind if i["triggered"]]
-    score = min(100, sum(i["weight"] for i in triggered))
+    # a strong script finding (e.g. hidden Base64 command) justifies a minimum score of its own
+    score = min(100, max(sum(i["weight"] for i in triggered), floor))
     if not real:
         explanation = "No attachments."
     elif triggered:

@@ -9,7 +9,9 @@ Every DOWNLOADS_POLL_SECONDS:
       is READ into memory (max DOWNLOADS_MAX_MB) and checked WITHOUT opening or running it:
         program/script types, fake double extensions (invoice.pdf.exe), content that does not match the
         name (an .exe renamed .pdf), Office macros, PDF JavaScript, password-protected archives,
-        HTML login forms, and -- with a VirusTotal key -- the file's SHA-256 against 70+ antivirus engines
+        HTML login forms, what a script would do if run (hidden Base64 PowerShell, download-and-run, Defender
+        switched off ... - app/detectors/script_checks.py), disguised files inside zips (IMG_001.jpg.exe), the
+        EICAR antivirus test file, and -- with a VirusTotal key -- the file's SHA-256 against 70+ antivirus engines
    3. risky files are saved as a Cyber Threat scan + alert.
    4. a DANGEROUS file (risk >= FILE_QUARANTINE_MIN_SCORE) is MOVED -- never deleted -- into CyberGuard's
       quarantine folder and renamed so it cannot be run by a double-click (see file_quarantine.py).
@@ -50,7 +52,8 @@ def scan_file(path: Path, *, network: bool = True) -> dict:
 class DownloadsWatcher(Watcher):
     name = "downloads"
     title = "Downloads folder"
-    what = "Every new file you download is checked for malware signs (fake extensions, macros, scripts, known-bad hashes)."
+    what = ("Every new file you download is checked for malware signs (fake extensions, disguised files in zips, "
+            "macros, what scripts would do, known-bad hashes).")
     modules = ["Cyber threat (malware)"]
     technology = "Folder polling (os.scandir) + SHA-256 + static file analysis + VirusTotal hash lookup (optional)"
 

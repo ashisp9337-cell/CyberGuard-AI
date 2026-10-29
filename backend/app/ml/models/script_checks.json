@@ -1,0 +1,218 @@
+{
+ "mpsd_malicious_dev": {
+  "scripts": 609,
+  "alert": 538,
+  "alert_rate": 0.8834,
+  "check": 7,
+  "any_finding": 549,
+  "downloads_quarantined": 539,
+  "by_check": {
+   "Script loads machine code into memory (shellcode / injection)": 499,
+   "Script hides its command in Base64 (encoded PowerShell)": 8,
+   "Script runs hidden": 9,
+   "Script downloads code and runs it in memory": 12,
+   "Script contains a known attack tool": 23,
+   "Script downloads a program and starts it": 15,
+   "Script downloads a program from a bare IP address and starts it": 5,
+   "Script sets itself to start automatically": 7,
+   "Script deletes backups / shadow copies (ransomware sign)": 1,
+   "Script switches off antivirus / security logging": 1,
+   "Script uses a Windows program to run code from the internet": 1,
+   "Script bypasses Windows' admin prompt (UAC) or adds a password-stealing module": 2
+  }
+ },
+ "mpsd_ordinary_dev": {
+  "scripts": 2149,
+  "alert": 15,
+  "alert_rate": 0.007,
+  "check": 3,
+  "any_finding": 39,
+  "downloads_quarantined": 15,
+  "by_check": {
+   "Script runs hidden": 10,
+   "Script sets itself to start automatically": 16,
+   "Script hides its command in Base64 (encoded PowerShell)": 6,
+   "Script downloads code and runs it in memory": 3,
+   "Script downloads a program and starts it": 2,
+   "Script contains a known attack tool": 6,
+   "Script switches off antivirus / security logging": 1,
+   "Script loads machine code into memory (shellcode / injection)": 4,
+   "Script pretends to be a web browser while downloading": 1,
+   "Script bypasses Windows' admin prompt (UAC) or adds a password-stealing module": 1,
+   "Script clears Windows event logs": 1
+  }
+ },
+ "mpsd_malicious_test": {
+  "scripts": 607,
+  "alert": 521,
+  "alert_rate": 0.8583,
+  "check": 3,
+  "any_finding": 530,
+  "downloads_quarantined": 521,
+  "by_check": {
+   "Script downloads a program and starts it": 7,
+   "Script downloads a program from a bare IP address and starts it": 3,
+   "Script runs hidden": 11,
+   "Script loads machine code into memory (shellcode / injection)": 475,
+   "Script downloads code and runs it in memory": 24,
+   "Script contains a known attack tool": 17,
+   "Script sets itself to start automatically": 4,
+   "Script pretends to be a web browser while downloading": 2,
+   "Script hides its command in Base64 (encoded PowerShell)": 10,
+   "Script bypasses Windows' admin prompt (UAC) or adds a password-stealing module": 3,
+   "Script opens a remote command line for an attacker (reverse shell)": 1
+  }
+ },
+ "mpsd_ordinary_test": {
+  "scripts": 2128,
+  "alert": 16,
+  "alert_rate": 0.0075,
+  "check": 5,
+  "any_finding": 43,
+  "downloads_quarantined": 18,
+  "by_check": {
+   "Script sets itself to start automatically": 22,
+   "Script downloads a program and starts it": 6,
+   "Script contains a known attack tool": 5,
+   "Script loads machine code into memory (shellcode / injection)": 4,
+   "Script hides its command in Base64 (encoded PowerShell)": 7,
+   "Script runs hidden": 8,
+   "Script downloads code and runs it in memory": 5,
+   "Script switches off antivirus / security logging": 1,
+   "Script uses a Windows program to run code from the internet": 1,
+   "Script clears Windows event logs": 1
+  }
+ },
+ "Software installers (chocolatey-packages)": {
+  "scripts": 746,
+  "alert": 1,
+  "alert_rate": 0.0013,
+  "check": 1,
+  "any_finding": 5,
+  "downloads_quarantined": 1,
+  "by_check": {
+   "Script runs hidden": 2,
+   "Script sets itself to start automatically": 2,
+   "Script downloads code and runs it in memory": 1,
+   "Script clears Windows event logs": 1
+  }
+ },
+ "PowerShell's own scripts (PowerShell/PowerShell)": {
+  "scripts": 498,
+  "alert": 2,
+  "alert_rate": 0.004,
+  "check": 3,
+  "any_finding": 10,
+  "downloads_quarantined": 3,
+  "by_check": {
+   "Script downloads code and runs it in memory": 1,
+   "Script downloads a program and starts it": 2,
+   "Script sets itself to start automatically": 4,
+   "Script clears Windows event logs": 3,
+   "Script hides its command in Base64 (encoded PowerShell)": 1,
+   "Script runs hidden": 2
+  }
+ },
+ "PSScriptAnalyzer": {
+  "scripts": 224,
+  "alert": 0,
+  "alert_rate": 0.0,
+  "check": 1,
+  "any_finding": 1,
+  "downloads_quarantined": 0,
+  "by_check": {
+   "Script clears Windows event logs": 1
+  }
+ },
+ "dotnet install scripts": {
+  "scripts": 58,
+  "alert": 0,
+  "alert_rate": 0.0,
+  "check": 0,
+  "any_finding": 0,
+  "downloads_quarantined": 0,
+  "by_check": {}
+ },
+ "attack_commands": {
+  "T1059.001": {
+   "commands": 21,
+   "alert": 10,
+   "check": 0
+  },
+  "T1027": {
+   "commands": 9,
+   "alert": 1,
+   "check": 0
+  },
+  "T1105": {
+   "commands": 29,
+   "alert": 0,
+   "check": 2
+  },
+  "T1490": {
+   "commands": 12,
+   "alert": 6,
+   "check": 0
+  },
+  "T1218.005": {
+   "commands": 10,
+   "alert": 2,
+   "check": 0
+  },
+  "T1218.010": {
+   "commands": 5,
+   "alert": 2,
+   "check": 0
+  },
+  "T1218.011": {
+   "commands": 16,
+   "alert": 1,
+   "check": 0
+  },
+  "T1197": {
+   "commands": 4,
+   "alert": 0,
+   "check": 0
+  },
+  "T1140": {
+   "commands": 3,
+   "alert": 1,
+   "check": 0
+  },
+  "T1548.002": {
+   "commands": 28,
+   "alert": 11,
+   "check": 0
+  },
+  "T1055": {
+   "commands": 13,
+   "alert": 2,
+   "check": 0
+  },
+  "T1620": {
+   "commands": 3,
+   "alert": 2,
+   "check": 0
+  },
+  "T1059.005": {
+   "commands": 3,
+   "alert": 2,
+   "check": 0
+  },
+  "T1059.007": {
+   "commands": 5,
+   "alert": 0,
+   "check": 0
+  },
+  "T1547.001": {
+   "commands": 21,
+   "alert": 1,
+   "check": 0
+  },
+  "T1053.005": {
+   "commands": 14,
+   "alert": 4,
+   "check": 0
+  }
+ }
+}
