@@ -77,6 +77,11 @@ async def lifespan(_app):
             done = warm_up()
             slow = {k: v for k, v in done.items() if not isinstance(v, int) or v > 200}
             logger.info("models loaded in the background in %.1f s%s", time.time() - t0, f" ({slow})" if slow else "")
+            if settings.WARM_UP_MEDIA_MODELS:          # (30 Oct) voice / image / video models: no slow first scan
+                from app.services.analysis_service import warm_up_media
+                t1 = time.time()
+                media = warm_up_media(settings.WARM_UP_MIN_FREE_GB)
+                logger.info("voice / image / video models ready in %.1f s: %s", time.time() - t1, media)
         threading.Thread(target=_warm, name="model-warm-up", daemon=True).start()
     yield
     manager.stop_all()

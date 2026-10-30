@@ -149,8 +149,8 @@ def run_scan(
         if file_path and os.path.exists(file_path):
             # an uploaded log / text file is read WHOLE (the upload is already limited to MAX_UPLOAD_MB); it is only
             # read as text, never run (added 23 Oct - before, uploaded files were ignored by this module)
-            from app.services.subtopic_router import file_kind
-            kind = file_kind(file_path, file_name)
+            from app.services.subtopic_router import cyber_file_kind
+            kind = cyber_file_kind(file_path, file_name)     # (30 Oct) 'script' = scripts, web pages, shortcuts, EICAR
             if kind == "capture":         # Wireshark / tcpdump capture: parsed, never replayed (added 24 Oct)
                 result = cyber_threat.analyze_network_capture(file_path, file_name or "capture", subtopic_title)
                 return result | {"_target": file_name or "packet capture", "_target_type": "file"}
@@ -169,7 +169,9 @@ def run_scan(
                 if note:
                     result["explanation"] = note + " " + result["explanation"]
                 return result | {"_target": file_name or "event log", "_target_type": "file"}
-            if kind in ("executable", "archive", "pdf", "unknown"):   # (26 Oct) Malware Detection: never run
+            # (26 Oct) Malware Detection: never run. (30 Oct) also scripts / web pages / shortcuts, and on the Malware
+            # Detection card every uploaded file (e.g. the EICAR test file saved as .txt) - never read as log lines there
+            if kind in ("executable", "archive", "pdf", "unknown", "script") or subtopic_id == "malware-detection":
                 from app.detectors import malware
                 result = malware.analyze_file(file_path, file_name or "file", subtopic_title)
                 return result | {"_target": file_name or "uploaded file", "_target_type": "file"}
@@ -232,5 +234,92 @@ def warm_up() -> dict:
         out["email-analysis"] = round((time.perf_counter() - t) * 1000)
     except Exception as exc:  # noqa: BLE001
         out["email-analysis"] = f"error: {type(exc).__name__}"
+    return out
+
+
+def free_ram_gb() -> float | None:
+    """Memory the computer has free right now, in GB (None if it cannot be read). Standard library only."""
+    try:
+        if os.name == "nt":
+            import ctypes
+
+            class _Mem(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+            m = _Mem()
+            m.dwLength = ctypes.sizeof(_Mem)
+            if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m)):
+                return None
+            return m.ullAvailPhys / 1024 ** 3
+        with open("/proc/meminfo", encoding="ascii") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) / 1024 ** 2
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def warm_up_media(min_free_gb: float = 3.0) -> dict:
+    """(30 Oct) Load the voice, speech-to-text, image and video models before the first scan needs them - the first
+    voice scan took about 30 s because every model was read from disk then. Runs in the same background thread after
+    warm_up(); uses only made-up input (a second of quiet noise, a grey picture), makes no network calls and saves
+    nothing. Skipped when the computer has less than `min_free_gb` of free memory, so it never pushes the PC into
+    swapping - the models then load on their first scan, as before. Returns {what: milliseconds or note}."""
+    import time
+    import numpy as np
+    free = free_ram_gb()
+    if free is not None and free < min_free_gb:
+        return {"skipped": f"only {free:.1f} GB of memory free (needs {min_free_gb:g} GB) - models load on first scan"}
+    out = {}
+
+    def step(name, fn):
+        t = time.perf_counter()
+        try:
+            note = fn()
+            out[name] = note if isinstance(note, str) else round((time.perf_counter() - t) * 1000)
+        except Exception as exc:  # noqa: BLE001 -- warm-up must never break startup
+            out[name] = f"not loaded: {type(exc).__name__}"
+
+    from app.detectors import voice
+    noise = (np.random.default_rng(0).normal(0, 0.01, 16_000 * 4)).astype(np.float32)
+
+    def ai_voice():
+        if voice.ai_model()[0] is None:
+            return "model not installed"
+        voice.ai_voice_score([noise])                  # the first run also prepares the model's maths
+
+    def voiceprint():
+        if voice.voiceprint_model()[0] is None:
+            return "model not installed"
+        voice.voiceprint(noise)
+
+    def speech_to_text():
+        if not voice.whisper_available():
+            return "not installed"
+        voice.transcribe(np.zeros(16_000, np.float32))
+
+    def image_models():
+        from app.detectors import ai_image, deepfake_image
+        loaded = []
+        for name, mod in (("AI-image", ai_image), ("face-swap image", deepfake_image)):
+            try:
+                mod.load()
+                loaded.append(name)
+            except Exception:  # noqa: BLE001 - e.g. ModelUnavailable: loads (or reports) on first scan
+                pass
+        return None if loaded else "models not installed"
+
+    def video_model():
+        from app.detectors import deepfake_video
+        deepfake_video.load()
+
+    for name, fn in (("voice: AI-voice model", ai_voice), ("voice: voiceprint", voiceprint),
+                     ("voice: speech-to-text", speech_to_text), ("image models", image_models),
+                     ("video model", video_model)):
+        step(name, fn)
     return out
 

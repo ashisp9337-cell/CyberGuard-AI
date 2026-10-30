@@ -13,3 +13,14 @@ def _quiet_cpu_count(platform: str, environ, logical_cpus) -> None:
 
 
 _quiet_cpu_count(_sys.platform, _os.environ, _os.cpu_count())
+
+
+def _no_onnx_telemetry(environ) -> None:
+    """(30 Oct) ONNX Runtime (the engine that runs the voice, image, video and OCR models) has a built-in Microsoft
+    usage-telemetry client: tested on 30 Oct, onnxruntime 1.31 tried to reach mobile.events.data.microsoft.com a few
+    seconds after a model was used. CyberGuard promises that scans stay on this computer, so it is switched off for
+    every model, before onnxruntime is ever imported. A value already set by the user is kept."""
+    environ.setdefault("ORT_DISABLE_TELEMETRY", "1")
+
+
+_no_onnx_telemetry(_os.environ)

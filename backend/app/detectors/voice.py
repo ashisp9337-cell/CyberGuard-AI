@@ -70,6 +70,7 @@ def _load_pair(onnx_path: str, json_path: str, key: str):
                          "copy both files from the same Colab run")
         else:
             import onnxruntime as ort
+            getattr(ort, "disable_telemetry_events", lambda: None)()   # (30 Oct) no usage telemetry to Microsoft
             out = (ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"]), meta)
     except Exception as exc:   # noqa: BLE001 - a broken model file never breaks a scan
         out = (None, f"the model could not be loaded ({type(exc).__name__})")

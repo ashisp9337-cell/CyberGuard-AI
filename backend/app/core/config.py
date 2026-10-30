@@ -89,6 +89,10 @@ class Settings(BaseSettings):
     LIVE_PAGE_CHECKS: bool = True
     # Load every model into memory in the background when the backend starts (no slow first scan).
     WARM_UP_MODELS: bool = True
+    # (30 Oct) ...also the voice, speech-to-text, image and video models (several GB) - only when at least
+    # WARM_UP_MIN_FREE_GB of memory is free, so the PC never starts swapping; otherwise they load on first scan.
+    WARM_UP_MEDIA_MODELS: bool = True
+    WARM_UP_MIN_FREE_GB: float = 3.0
 
     # ---- Automatic protection (background watchers, see app/automation/) ----
     AUTOMATION_ENABLED: bool = True        # master switch; each watcher also has an on/off in Settings

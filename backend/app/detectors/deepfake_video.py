@@ -46,6 +46,7 @@ def load():
     if _cache.get("key") != key:
         try:
             import onnxruntime as ort
+            getattr(ort, "disable_telemetry_events", lambda: None)()   # (30 Oct) no usage telemetry to Microsoft
         except ImportError as e:
             raise ModelUnavailable("onnxruntime is not installed (pip install onnxruntime)") from e
         with open(META_PATH, encoding="utf-8") as f:
