@@ -155,9 +155,24 @@ class Classification:
 # ---------------------------------------------------------------------------
 # File-type detection (magic bytes first, extension second)
 # ---------------------------------------------------------------------------
-IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
-VIDEO_EXT = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v"}
-AUDIO_EXT = {".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".opus"}
+IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic", ".heif"}
+VIDEO_EXT = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".3gp", ".3g2"}
+AUDIO_EXT = {".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".opus", ".amr", ".awb", ".3ga"}
+# (30 Oct) ISO-media "brands" of HEIC / HEIF / AVIF pictures - these files start like an MP4 video ("ftyp")
+HEIF_BRANDS = {b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"hevm", b"hevs", b"mif1", b"msf1", b"avif", b"avis"}
+
+
+def _sound_only(file_path: str | None) -> bool:
+    """True when an MP4 / 3GP file has audio but no video track (phone call recorders save calls like that)."""
+    if not file_path:
+        return False
+    try:
+        import av
+        with av.open(file_path) as c:
+            kinds = [s.type for s in c.streams]
+        return "audio" in kinds and "video" not in kinds
+    except Exception:                                        # PyAV missing or unreadable: keep the old answer
+        return False
 EMAIL_EXT = {".eml", ".msg"}
 TEXT_EXT = {".txt", ".log", ".csv", ".json"}
 
@@ -185,7 +200,13 @@ def file_kind(file_path: str | None, file_name: str | None) -> str | None:
     if head[:4] == b"RIFF" and head[8:12] == b"AVI ":
         return "video"
     if head[4:8] == b"ftyp":            # MP4 family: many phones label voice recordings with a generic brand ("isom")
-        return "audio" if head[8:11] in (b"M4A", b"M4B") or ext in (".m4a", ".m4b", ".aac") else "video"
+        if head[8:12] in HEIF_BRANDS:                           # (30 Oct) iPhone HEIC / HEIF / AVIF photo
+            return "image"
+        if head[8:11] in (b"M4A", b"M4B") or ext in (".m4a", ".m4b", ".aac", ".3ga"):
+            return "audio"
+        return "audio" if _sound_only(file_path) else "video"  # (30 Oct) .3gp / .mp4 call recordings: sound only
+    if head.startswith(b"#!AMR"):                               # (30 Oct) AMR voice recording (#!AMR / #!AMR-WB)
+        return "audio"
     if head.startswith(b"\x1aE\xdf\xa3"):                       # Matroska / WebM
         return "video"
     if len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xF6) == 0xF0:   # AAC (ADTS) stream
@@ -210,6 +231,29 @@ def file_kind(file_path: str | None, file_name: str | None) -> str | None:
     if head and all(b in b"\t\r\n" or 32 <= b < 127 or b >= 128 for b in head):
         return "text"
     return "unknown"
+
+
+# (30 Oct) files the Cyber Threat module always checks for MALWARE, even when they are plain text inside (scripts, web
+# pages, shortcuts) - before, a .ps1 / .bat / .html upload was read as log lines
+MALWARE_FILE_EXT = {".ps1", ".psm1", ".psd1", ".bat", ".cmd", ".vbs", ".vbe", ".js", ".jse", ".wsf", ".wsh", ".hta",
+                    ".sct", ".sh", ".lnk", ".url", ".reg", ".scf", ".html", ".htm", ".shtml", ".xhtml", ".svg",
+                    ".mht", ".mhtml", ".iqy", ".slk", ".one"}
+
+
+def cyber_file_kind(file_path: str | None, file_name: str | None) -> str | None:
+    """file_kind(), plus 'script' for a text file the Cyber Threat module must check for malware: a script / web page /
+    shortcut by its extension, or the EICAR antivirus test file whatever its name."""
+    kind = file_kind(file_path, file_name)
+    if kind in ("text", "unknown"):
+        ext = os.path.splitext(file_name or file_path or "")[1].lower()
+        if ext in MALWARE_FILE_EXT:
+            return "script"
+        if kind == "text" and file_path and os.path.exists(file_path):
+            from app.email_pipeline.attachments import is_eicar
+            with open(file_path, "rb") as f:
+                if is_eicar(f.read(129)):
+                    return "script"
+    return kind
 
 
 def _read_text(file_path: str | None, limit: int = 200_000) -> str:
@@ -421,6 +465,9 @@ ACADEMIC_CONTEXT_RE = re.compile(
     r"\b(dear (student|students|candidate|candidates|parent|parents)|hall ?ticket|admit ?card|semester|exam(ination)? fee|"
     r"tuition fee|college fee|university fee|scholarship|admission|marksheet|mark sheet|internal marks|attendance shortage|"
     r"convocation|degree certificate|migration certificate|re-?evaluation|backlog|supplementary exam)\b", re.I)
+CLAIM_TIE_REASON = "the sender introduces themself this way (other kinds were close, so every detector also checks it)"
+SELF_CLAIM_RE = re.compile(r"\b(this is|it'?s|i am|i'm|on behalf of|calling from|writing from|speaking from)\s+"
+                           r"([^.!?\n]{2,60})", re.I)
 SELF_ID_RE = re.compile(r"\b(this is|i am|i'm|we are|on behalf of|from (the )?|team|dear [a-z ]{2,30} (customer|user|student|employee|member))", re.I)
 
 
@@ -451,6 +498,7 @@ def _classify_impersonation(text, extra, db, user_id) -> Classification:
         raise RoutingError("undetermined", "Paste the message that claims to come from someone.")
     scores: dict[str, float] = {}
     reasons: dict[str, set] = {}
+
 
     def vote(sub, w, why):
         scores[sub] = scores.get(sub, 0) + w
@@ -495,6 +543,27 @@ def _classify_impersonation(text, extra, db, user_id) -> Classification:
             pass
 
     ranked = sorted(scores.items(), key=lambda kv: -kv[1])
+    # identities the sender claims in their OWN words: "this is / I am / calling from <...>" up to the end of that
+    # sentence ("I'm in a meeting" names nobody; "this is Principal Dr. Mishra" names a principal)
+    own = " ".join(mt.group(2) for mt in SELF_CLAIM_RE.finditer(text))
+    self_claimed = {ENTITY_TO_SUBTOPIC[e["category"]] for e in orgs.find_entities(own)
+                    if e["category"] in ENTITY_TO_SUBTOPIC} if own else set()
+    if own and orgs.EXECUTIVE_TITLES.search(own):
+        self_claimed.add("management-impersonation")
+    if own and orgs.ACADEMIC_TITLES.search(own):
+        self_claimed.add("teacher-impersonation")
+    if own and RELATION_RE.search("this is " + own):
+        self_claimed.add("contact-impersonation")
+    # (31 Oct) a tie between identities is settled by who the sender SAYS they are: "Hi, this is Principal Dr. Mishra
+    # ... buy Amazon gift cards" is a principal, not Amazon (Amazon is only what they ask for)
+    if ranked and ranked[0][1] >= 2.0 and len(ranked) > 1 and ranked[1][1] >= ranked[0][1] * 0.8:
+        close = [s for s, v in ranked if v >= ranked[0][1] * 0.8]
+        claimed_close = [s for s in close if s in self_claimed]
+        if len(claimed_close) == 1:
+            top = claimed_close[0]
+            return Classification(m, top, "claimed-identity",
+                                  sorted(reasons[top]) + [CLAIM_TIE_REASON],
+                                  secondary=[s for s, v in ranked if s != top and v >= 2.0][:2])
     if not ranked or ranked[0][1] < 2.0 or (len(ranked) > 1 and ranked[1][1] >= ranked[0][1] * 0.8):
         why = ("no claimed identity found" if not ranked else
                "competing identity claims: " + ", ".join(f"{s} ({v:.1f})" for s, v in ranked[:3]))
@@ -669,19 +738,24 @@ CYBER_PATTERNS = [
         r"^[^\n]*\b(Src|Source) ?IP\b[^\n]*,[^\n]*\b(Dst|Destination) ?Port\b)", re.I),   # flow-record CSV header
         "network flow / firewall records"),
     ("insider-risk", re.compile(
-        r"\b(usb|removable (media|storage|drive)|mass storage|print(ed)? job|printer|"
-        r"forward(ed)? to (personal|external)|personal (e-?mail|gmail|drive)|"
-        r"(hr|payroll|salary|confidential|restricted|source code) (share|folder|files?|database|repo))\b", re.I),
+        # (31 Oct) letters / digits around the word, not \b: "action=usb_copy" and "print_job" count too
+        r"(?<![a-z0-9])(usb|removable[ _](media|storage|drive)|mass[ _]storage|print(ed)?[ _]job|printer|"
+        r"forward(ed)?[ _]to[ _](personal|external)|personal[ _](e-?mail|gmail|drive)|"
+        r"(hr|payroll|salary|confidential|restricted|source[ _]code)[ _](share|folder|files?|database|repo))(?![a-z0-9])",
+        re.I),
         "internal data-handling audit records"),
-    ("insider-risk", re.compile(
-        r"\b(user(name)?|account|uid)\s*[=:]\s*\S+[^\n]{0,80}\b(action|activity|event|operation|op)\s*[=:]\s*\S+", re.I),
-        "per-user activity audit records"),
     ("log-analysis", re.compile(
         r"(^\s*<?\d{0,3}>?[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\S+\s+\S+(\[\d+\])?:|"
         r"^\s*\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[^\n]{0,40}\b(DEBUG|INFO|NOTICE|WARN|WARNING|ERROR|CRITICAL|FATAL)\b|"
         r"\"(GET|POST|HEAD|PUT|DELETE) \S+ HTTP/[\d.]+\" \d{3}|"
         r"\b(event ?id|eventcode)\s*[=:]?\s*\d{3,5}\b)", re.I | re.M),
         "system / application log lines"),
+    # (31 Oct) after the log formats: a normal application log that names the user ("INFO app=erp user=ashis
+    # action=view_timetable") is an application log, not insider risk. The insider engine still reads it either way
+    # (every cyber check runs on the text); this only decides the label shown.
+    ("insider-risk", re.compile(
+        r"\b(user(name)?|account|uid)\s*[=:]\s*\S+[^\n]{0,80}\b(action|activity|event|operation|op)\s*[=:]\s*\S+", re.I),
+        "per-user activity audit records"),
 ]
 
 
@@ -692,10 +766,11 @@ def _classify_cyber(text, kind, file_text) -> Classification:
     if kind == "evtx":                                       # (26 Oct) Windows Event Viewer file
         return Classification(m, "insider-risk", "file-type", ["Windows event log file (.evtx) - account, process and "
                                                                "security-control checks"])
-    if kind in ("executable", "archive", "pdf", "unknown"):   # (26 Oct) uploaded files: static checks + EMBER2024
+    if kind in ("executable", "archive", "pdf", "unknown", "script"):   # (26 Oct) uploaded files: static checks + EMBER
         return Classification(m, "malware-detection", "file-type",
                               [{"executable": "program file (Windows / Linux)", "archive": "archive or Office document",
-                                "pdf": "PDF document", "unknown": "binary file"}[kind] + " - checked without running it"])
+                                "pdf": "PDF document", "unknown": "binary file",
+                                "script": "script, web page or shortcut"}[kind] + " - checked without running it"])
     if kind in ("image", "video", "audio", "email"):
         raise RoutingError("unavailable", f"This is {'an' if kind in ('image', 'audio', 'email') else 'a'} {kind} "
                            "file: open the Deepfake or Phishing module for it. The Cyber Threat module checks programs, "
@@ -747,7 +822,7 @@ def classify(*, module_id: str, text_input: str | None, url_input: str | None, f
     if module_id == "url-security":
         return _classify_url(text_input, url_input)
     if module_id == "cyber-threat":
-        return _classify_cyber(text_input, kind, file_text)
+        return _classify_cyber(text_input, cyber_file_kind(file_path, file_name), file_text)
     raise RoutingError("unsupported", f"Unknown module '{module_id}'.")
 
 
@@ -765,9 +840,19 @@ def route(*, module_id: str, text_input: str | None, url_input: str | None, file
     # Subtopics that have no id of their own in run_scan use the id run_scan already handles.
     run_id = {"video-call": "video-analysis", "generic": "identity-generic", "general": "general"}.get(
         c.subtopic_id, c.subtopic_id)
+    close_call = module_id == "impersonation" and CLAIM_TIE_REASON in c.reasons
+    if close_call:                 # (31 Oct) labelled by the sender's own claim, but every detector still checks it
+        run_id = "identity-generic"
     result = analysis_service.run_scan(
         module_id=module_id, subtopic_id=run_id, subtopic_title=c.subtopic_title,
         text_input=text_input, url_input=url_input, file_path=file_path, file_name=file_name,
         extra_field_values=extra_field_values, db=db, user_id=user_id,
     )
+    if close_call:
+        result["analysisEngine"] = str(result.get("analysisEngine", "")).replace(
+            "Impersonation (category unclear)", f"Impersonation ({c.subtopic_title}, close call)", 1)
+        result["explanation"] = str(result.get("explanation", "")).replace(
+            "The sender's claimed identity was unclear, so every impersonation detector checked the message",
+            f"The sender introduces themself as a {c.subtopic_title.split(' Impersonation')[0].lower()}, but the "
+            "message also fits other kinds of impersonation, so every impersonation detector checked it", 1)
     return result, c
