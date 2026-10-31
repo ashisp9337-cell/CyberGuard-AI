@@ -21,10 +21,23 @@ negatives.
 The TRAP SET below uses the exact real false positives found during live
 testing (a food-delivery notice, a bill reminder, a dentist reminder), so
 this gate checks the actual problem that was found, not a generic proxy.
+
+(31 Oct) MODEL v2: word 1-2-grams + character 2-5-grams (catches spelling tricks such as "acc0unt", "P4YTM",
+"K Y C") with logistic regression, C=10 - chosen on a validation split INSIDE the 80% training part (the 20% test
+part was not used to choose it). The new model is only saved when it beats the model already installed on the
+same never-trained-on 20% test part (real messages only, the template rows left out), as the APP scores them
+(model + scam rules, risk 51+ = flagged):
+  * AUC higher, AND
+  * genuine SMS flagged in the app: not more than now, AND
+  * scams flagged in the app: at most 0.5 point fewer than now, AND
+  * the trap set passes.
+Otherwise the installed model is kept and nothing is written. The old model is kept as phishing_sms.previous.joblib.
 """
 import argparse
 import os
+import shutil
 import sys
+import warnings
 
 import joblib
 import pandas as pd
@@ -32,7 +45,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.model_selection import train_test_split
-from sklearn.pipeline import Pipeline
+from sklearn.pipeline import FeatureUnion, Pipeline
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.join(HERE, "..", "models")
@@ -63,6 +76,32 @@ TRAP_PHISH = [
 ]
 LEGIT_MAX_FLAG_RATE = 0.10
 PHISH_MIN_CATCH_RATE = 0.85
+ORIGINAL = os.path.join(HERE, "data", "phishing_sms.tsv")      # rows not in it are the added template messages
+MAX_CATCH_DROP = 0.005
+
+
+def make_pipeline():
+    words = TfidfVectorizer(lowercase=True, stop_words="english", ngram_range=(1, 2), min_df=2, max_df=0.95,
+                            sublinear_tf=True)
+    chars = TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 5), min_df=3, sublinear_tf=True, max_features=300_000)
+    return Pipeline([("features", FeatureUnion([("words", words), ("chars", chars)])),
+                     ("clf", LogisticRegression(max_iter=2000, class_weight="balanced", C=10.0))])
+
+
+def app_rates(model, texts, labels):
+    """Share of genuine / scam messages the APP flags (risk 51+), scoring with `model` - rules included, link
+    destinations not looked up (no network)."""
+    from app.detectors import phishing
+    real_get = phishing._get_model
+    phishing._get_model = lambda subtopic_id: model
+    try:
+        flagged = [phishing.analyze_text(t, subtopic_id="sms-analysis", scan_links=False)["riskScore"] >= 51
+                   for t in texts]
+    finally:
+        phishing._get_model = real_get
+    g = [f for f, y in zip(flagged, labels) if y == 0]
+    s = [f for f, y in zip(flagged, labels) if y == 1]
+    return sum(g) / max(len(g), 1), sum(s) / max(len(s), 1)
 
 
 def main() -> int:
@@ -79,12 +118,10 @@ def main() -> int:
     X_train, X_test, y_train, y_test = train_test_split(
         df["text"], df["y"], test_size=0.2, random_state=42, stratify=df["y"]
     )
-    pipeline = Pipeline([
-        ("tfidf", TfidfVectorizer(lowercase=True, stop_words="english", ngram_range=(1, 2),
-                                   min_df=2, max_df=0.95, sublinear_tf=True)),
-        ("clf", LogisticRegression(max_iter=1000, class_weight="balanced", C=3.0)),
-    ])
-    pipeline.fit(X_train, y_train)
+    pipeline = make_pipeline()
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=UserWarning)
+        pipeline.fit(X_train, y_train)
     proba = pipeline.predict_proba(X_test)[:, 1]
     pred = (proba >= 0.5).astype(int)
     print("\nHeld-out split of the cleaned data:")
@@ -116,6 +153,28 @@ def main() -> int:
 
     os.makedirs(MODELS_DIR, exist_ok=True)
     out_path = os.path.join(MODELS_DIR, args.out)
+
+    # ---- keep rule: beat the INSTALLED model on the same real test messages, as the app scores them ----
+    sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "..", "..")))
+    if os.path.exists(out_path) and os.path.exists(ORIGINAL):
+        orig = set(pd.read_csv(ORIGINAL, sep="\t", header=None, names=["label", "text"], on_bad_lines="skip",
+                               engine="python", quoting=3)["text"].dropna().astype(str))
+        real = X_test.astype(str).isin(orig).values
+        texts, labels = list(X_test[real]), list(y_test[real])
+        old = joblib.load(out_path)
+        auc_old = roc_auc_score(labels, old.predict_proba(texts)[:, 1])
+        auc_new = roc_auc_score(labels, pipeline.predict_proba(texts)[:, 1])
+        print(f"\nReal held-out test messages ({len(texts):,}, template rows left out) - scored the way the app does:")
+        g_old, s_old = app_rates(old, texts, labels)
+        g_new, s_new = app_rates(pipeline, texts, labels)
+        print(f"  installed model: AUC {auc_old:.4f}  genuine flagged {g_old:.2%}  scams flagged {s_old:.2%}")
+        print(f"  new model:       AUC {auc_new:.4f}  genuine flagged {g_new:.2%}  scams flagged {s_new:.2%}")
+        better = auc_new > auc_old and g_new <= g_old and s_new >= s_old - MAX_CATCH_DROP
+        if not better and not args.force:
+            print("\nThe new model is NOT better on every count - the installed model is kept, nothing written.")
+            return 3
+        shutil.copy2(out_path, os.path.join(MODELS_DIR, "phishing_sms.previous.joblib"))
+        print("  better on every count: the installed model is kept as phishing_sms.previous.joblib")
     joblib.dump(pipeline, out_path)
     print(f"\n{'Bar met. ' if passed else 'FORCED. '}Saved -> {out_path}")
     return 0

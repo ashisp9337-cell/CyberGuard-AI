@@ -162,6 +162,9 @@ def show_saved():
             f"CIC-IDS2017 days {caught} of {total}; false incidents on held-out normal traffic {false}")
         missed = sorted(k for d in held.values() for k, v in d["attacks"].items() if not v["caught_by"])
         say(f"{'':13s} {'':30s} missed: {', '.join(missed)}")
+        if any(m.startswith("Web Attack") for m in missed):
+            say(f"{'':13s} {'':30s} (flow records have no request contents - for web attacks in packet captures see "
+                "the 'web attacks in HTTP' row)")
         aucs = ", ".join(f"{d[:3]} {v['auc']:.3f}" for d, v in nt["model_held_out_days"].items())
         say(f"{'Cyber threat':13s} {'Network: connection model':30s} supporting only - AUC on held-out days: {aucs}")
     except (OSError, ValueError, KeyError):
