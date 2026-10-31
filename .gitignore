@@ -52,6 +52,8 @@ backend/app/ml/training/data/scripts/
 backend/app/ml/training/script_checks_report.txt
 backend/app/ml/models/api_abuse.previous.joblib
 backend/app/ml/models/link_2026.rejected.metrics.json
+backend/app/ml/models/*.rejected.metrics.json
+backend/app/ml/models/cred_training_summary.json
 
 # Quarantined downloads (dangerous files moved here by CyberGuard - never commit them)
 backend/quarantine/

@@ -22,33 +22,122 @@
     "asn_freq"
   ],
   "dataset": "RBA login dataset (Wiefling et al., CC BY 4.0), subsets from extract_rba_subsets.py",
-  "label": "simulated attacker: real attacker IP/country/network on a real account",
-  "train_rows": 600000,
-  "train_positives": 299717,
-  "alert_threshold": 0.8415,
-  "verify_threshold": 0.6539,
+  "label": "simulated attacker: real attacker IP/country/network on a real account; plus the real first attacker logins of training accounts (weight 20, chosen on calibration accounts)",
+  "real_attacker_weight": 20,
+  "train_rows": 606257,
+  "train_positives": 305974,
+  "alert_threshold": 0.9364,
+  "verify_threshold": 0.7633,
   "metrics": {
     "test": {
       "n": 356710,
       "positives": 178355,
-      "roc_auc": 0.9836,
-      "pr_auc": 0.9838,
-      "caught_at_alert": 0.763,
+      "roc_auc": 0.9809,
+      "pr_auc": 0.9808,
+      "caught_at_alert": 0.7235,
       "false_alarm_at_alert": 0.0099,
-      "caught_at_verify": 0.878,
-      "false_alarm_at_verify": 0.0518
+      "caught_at_verify": 0.8568,
+      "false_alarm_at_verify": 0.0504
     },
     "real_attacker_logins_vs_normal": {
       "n": 53774,
       "positives": 9167,
-      "roc_auc": 0.6251,
-      "pr_auc": 0.2773,
-      "caught_at_alert": 0.0572,
+      "roc_auc": 0.588,
+      "pr_auc": 0.3425,
+      "caught_at_alert": 0.116,
       "false_alarm_at_alert": 0.0102,
-      "caught_at_verify": 0.1217,
-      "false_alarm_at_verify": 0.051
+      "caught_at_verify": 0.254,
+      "false_alarm_at_verify": 0.0509
+    },
+    "real_attacker_logins_by_kind": {
+      "first": {
+        "n": 46325,
+        "positives": 1718,
+        "roc_auc": 0.9519,
+        "pr_auc": 0.5058,
+        "caught_at_alert": 0.3696,
+        "false_alarm_at_alert": 0.0102,
+        "caught_at_verify": 0.7264,
+        "false_alarm_at_verify": 0.0509
+      },
+      "repeat": {
+        "n": 52037,
+        "positives": 7430,
+        "roc_auc": 0.5029,
+        "pr_auc": 0.1988,
+        "caught_at_alert": 0.0563,
+        "false_alarm_at_alert": 0.0102,
+        "caught_at_verify": 0.144,
+        "false_alarm_at_verify": 0.0509
+      },
+      "ato": {
+        "n": 44626,
+        "positives": 19,
+        "roc_auc": 0.9486,
+        "pr_auc": 0.0785,
+        "caught_at_alert": 0.5263,
+        "false_alarm_at_alert": 0.0102,
+        "caught_at_verify": 0.5263,
+        "false_alarm_at_verify": 0.0509
+      }
     }
   },
-  "trained_at": "2026-10-15T18:31:03+00:00",
-  "seconds": 76
+  "installed_model_same_test": {
+    "test": {
+      "n": 356710,
+      "positives": 178355,
+      "roc_auc": 0.9836,
+      "pr_auc": 0.9837,
+      "caught_at_alert": 0.764,
+      "false_alarm_at_alert": 0.0101,
+      "caught_at_verify": 0.8818,
+      "false_alarm_at_verify": 0.054
+    },
+    "real_attacker_logins_vs_normal": {
+      "n": 53774,
+      "positives": 9167,
+      "roc_auc": 0.6254,
+      "pr_auc": 0.2775,
+      "caught_at_alert": 0.0578,
+      "false_alarm_at_alert": 0.0104,
+      "caught_at_verify": 0.1241,
+      "false_alarm_at_verify": 0.0531
+    },
+    "real_attacker_logins_by_kind": {
+      "first": {
+        "n": 46325,
+        "positives": 1718,
+        "roc_auc": 0.906,
+        "pr_auc": 0.2922,
+        "caught_at_alert": 0.1967,
+        "false_alarm_at_alert": 0.0104,
+        "caught_at_verify": 0.3562,
+        "false_alarm_at_verify": 0.0531
+      },
+      "repeat": {
+        "n": 52037,
+        "positives": 7430,
+        "roc_auc": 0.5598,
+        "pr_auc": 0.1707,
+        "caught_at_alert": 0.0246,
+        "false_alarm_at_alert": 0.0104,
+        "caught_at_verify": 0.0696,
+        "false_alarm_at_verify": 0.0531
+      },
+      "ato": {
+        "n": 44626,
+        "positives": 19,
+        "roc_auc": 0.9173,
+        "pr_auc": 0.0732,
+        "caught_at_alert": 0.4737,
+        "false_alarm_at_alert": 0.0104,
+        "caught_at_verify": 0.4737,
+        "false_alarm_at_verify": 0.0531
+      }
+    }
+  },
+  "kept": true,
+  "keep_reason": "real first attacker logins AUC 0.906 -> 0.9519, false alarms and simulated AUC held",
+  "trained_at": "2026-10-31T17:41:21+00:00",
+  "seconds": 69
 }
