@@ -92,7 +92,11 @@ def _vet(url: str) -> tuple[str | None, str]:
 
 def _vet_all(url: str) -> tuple[list[str], str]:
     """([checked ips to try], '') if the URL may be fetched, else ([], reason)."""
-    p = urlparse(url)
+    try:
+        p = urlparse(url)
+        hostname = p.hostname
+    except ValueError:                       # e.g. "http://[::1:bad/" - also from a website's own redirect
+        return [], "invalid link"
     if p.scheme not in ("http", "https"):
         return [], f"scheme '{p.scheme}' is not fetched"
     try:
@@ -101,7 +105,7 @@ def _vet_all(url: str) -> tuple[list[str], str]:
         return [], "invalid port"
     if port not in ALLOWED_PORTS:
         return [], f"port {port} is not fetched"
-    if not p.hostname:
+    if not hostname:
         return [], "no host"
     return _resolve_public_all(p.hostname)
 
@@ -156,6 +160,14 @@ def _encoding(ctype: str) -> str:
     return m.group(1) if m else "utf-8"
 
 
+def _join(base: str, ref: str) -> str | None:
+    """The absolute link a redirect points to, or None when the website sent a broken one."""
+    try:
+        return urljoin(base, ref)
+    except ValueError:
+        return None
+
+
 def fetch(url: str) -> dict:
     """Follow the link safely. Returns
     {'status': 'ok'|'refused'|'error', 'chain': [{'url','status','how'}], 'final_url', 'html', 'reason'}."""
@@ -182,7 +194,11 @@ def fetch(url: str) -> dict:
             return {"status": "error", "chain": chain, "final_url": current, "html": "", "reason": err.reason}
         chain.append({"url": current, "status": status, "how": how})
         if 300 <= status < 400 and location:
-            current, how = urljoin(current, location), f"HTTP {status} redirect"
+            nxt_url = _join(current, location)
+            if nxt_url is None:
+                return {"status": "refused", "chain": chain, "final_url": current, "html": "",
+                        "reason": "the website redirects to a broken link"}
+            current, how = nxt_url, f"HTTP {status} redirect"
             continue
         try:
             html = body.decode(encoding, errors="replace")
@@ -190,8 +206,8 @@ def fetch(url: str) -> dict:
             html = body.decode("utf-8", errors="replace")
         nxt = _META_REFRESH.search(html[:20000]) or _JS_LOCATION.search(html[:20000])
         if nxt and len(html) < 20000:          # a tiny page whose only job is to send you elsewhere
-            target = urljoin(current, nxt.group(1).strip("'\""))
-            if target != current:
+            target = _join(current, nxt.group(1).strip("'\""))
+            if target is not None and target != current:
                 current, how = target, ("meta-refresh redirect" if nxt.re is _META_REFRESH else "JavaScript redirect")
                 continue
         return {"status": "ok", "chain": chain, "final_url": current, "html": html, "reason": ""}

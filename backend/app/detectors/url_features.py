@@ -30,6 +30,14 @@ def _entropy(s: str) -> float:
     return -sum(p * math.log2(p) for p in probs)
 
 
+def _has_port(parsed) -> int:
+    """1 if the link names a port. A broken port (':abc', ':99999') also counts - it is unusual - and never crashes."""
+    try:
+        return 1 if parsed.port else 0
+    except ValueError:
+        return 1
+
+
 def extract_url_features(url: str) -> list:
     try:
         parsed = urlparse(url if "://" in url else f"http://{url}")
@@ -56,7 +64,7 @@ def extract_url_features(url: str) -> list:
         # typed without http(s):// -> unknown, not "no HTTPS" (the scheme is only known when given)
         1 if parsed.scheme == "https" or "://" not in url else 0,
         1 if IP_RE.match(host) else 0,
-        1 if parsed.port else 0,
+        _has_port(parsed),
         1 if "xn--" in host else 0,
         1 if tld in SUSPICIOUS_TLDS else 0,
         round(_entropy(url), 3),

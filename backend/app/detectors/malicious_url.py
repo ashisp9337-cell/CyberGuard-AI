@@ -120,7 +120,10 @@ def _registry(host: str):
 
 
 def _live_indicators(url: str, registry_out: dict | None = None) -> list[dict]:
-    host = urlparse(url if "://" in url else f"http://{url}").netloc.split("@")[-1].split(":")[0]
+    try:
+        host = urlparse(url if "://" in url else f"http://{url}").netloc.split("@")[-1].split(":")[0]
+    except ValueError:         # a broken link (e.g. "http://[::1:bad/") is still scored offline; no live lookups
+        return []
     if not host:
         return []
     indicators: list[dict] = []

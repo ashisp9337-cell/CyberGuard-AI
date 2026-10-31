@@ -1,54 +1,57 @@
 {
  "what": "2026 link model (app/detectors/link_2026.py): character pieces of the whole link, logistic regression",
- "data": "urlscan.io collection on this PC (OpenPhish / PhishTank phishing + real sites' pages, Sep-Oct 2026) + Chrome UX Report real 2026 sites",
+ "data": "urlscan.io collection on this PC (OpenPhish / PhishTank phishing + real sites' pages, 2026) + Chrome UX Report real 2026 sites",
  "split": {
-  "train": "before 2026-10-12",
-  "calibration": "2026-10-12 to 2026-10-14 + 25% of the real sites",
-  "test": "2026-10-14 and later, sites never seen in training + another 25% of the real sites",
-  "train_links": 9777,
-  "calibration_links": 3392,
-  "test_links": 7043
+  "train": "before 2026-10-23",
+  "calibration": "2026-10-23 to 2026-10-25 + 25% of the real sites",
+  "test": "2026-10-25 and later, sites never seen in training + another 25% of the real sites",
+  "train_links": 20897,
+  "calibration_links": 3125,
+  "test_links": 5030
  },
- "thr_alert": 0.8799,
- "thr_verify": 0.6713,
+ "thr_alert": 0.8697,
+ "thr_verify": 0.661,
  "level_rule": "alert: only 0.5% of each kind of real calibration link reaches it (raises the score); verify: 5% (a note only)",
  "results": {
   "model_alone": {
-   "links": 7043,
-   "phishing": 1673,
-   "auc": 0.8448,
-   "auc_urlscan_links_only": 0.7822,
+   "links": 5030,
+   "phishing": 1150,
+   "auc": 0.8571,
+   "auc_urlscan_links_only": 0.8648,
    "at_alert": {
-    "caught": 0.1704,
-    "real_flagged": 0.0099
+    "caught": 0.187,
+    "real_flagged": 0.0018
    },
    "at_verify": {
-    "caught": 0.4722,
-    "real_flagged": 0.0585
+    "caught": 0.5052,
+    "real_flagged": 0.0198
    },
    "crux_real_sites_flagged_at_alert": 0.0,
    "real_free_hosted_sites_flagged_at_alert": 0.0
   },
   "whole_url_engine_offline": {
    "before": {
-    "auc": 0.7582,
-    "caught": 0.2666,
-    "real_flagged": 0.0333
+    "auc": 0.6993,
+    "caught": 0.1913,
+    "real_flagged": 0.0191,
+    "crux_real_sites_flagged_at_51": 0.0146,
+    "real_free_hosted_sites_flagged_at_51": 0.0064
+   },
+   "installed": {
+    "auc": 0.7205,
+    "caught": 0.2713,
+    "real_flagged": 0.0214,
+    "crux_real_sites_flagged_at_51": 0.0146,
+    "real_free_hosted_sites_flagged_at_51": 0.0064
    },
    "after": {
-    "auc": 0.7774,
-    "caught": 0.3963,
-    "real_flagged": 0.0359
+    "auc": 0.7363,
+    "caught": 0.3278,
+    "real_flagged": 0.0209,
+    "crux_real_sites_flagged_at_51": 0.0146,
+    "real_free_hosted_sites_flagged_at_51": 0.0064
    },
-   "crux_real_sites_flagged_at_51": {
-    "before": 0.0115,
-    "after": 0.0115
-   },
-   "real_free_hosted_sites_flagged_at_51": {
-    "before": 0.0045,
-    "after": 0.0045
-   },
-   "real_free_hosted_test_sites": 1101,
+   "real_free_hosted_test_sites": 1100,
    "plain_projects_scores": [
     14,
     14,
@@ -57,7 +60,8 @@
   }
  },
  "kept": true,
- "keep_rule": "kept only if the whole engine's AUC and catch rate rise, with at most 1 point more real links flagged AND at most 1 point more real free-hosted sites flagged, and plain personal projects (my-portfolio.vercel.app ...) stay below 51",
- "trained_at": "2026-10-26T09:18:54Z",
- "seconds": 115
+ "keep_rule": "kept only if, on the same later links, the whole engine with the new model has a higher AUC and catch rate than without a 2026 model (at most 1 point more real links / real free-hosted sites flagged) AND than with the installed model (catches at least as many, at most 0.2 points more real links / real free-hosted sites flagged), and plain personal projects (my-portfolio.vercel.app ...) stay below 51",
+ "note": "the installed model may have trained on a few of the real Chrome UX Report test sites (their split depends on the collection), which can only make the installed model look better - not the new one",
+ "trained_at": "2026-10-31T10:24:26Z",
+ "seconds": 166
 }
