@@ -7,6 +7,9 @@ Input -> connections ("flows") -> behaviour per source -> incidents:
     answer (host sweep), failed / half-open connections (SYN flood, slow DoS), connections to one login service
     (brute force), connections to one web service (DoS flood), connections to well-known backdoor ports, and web
     attack payloads inside unencrypted HTTP requests (captures only; reuses the API-abuse attack patterns)
+  * (31 Oct) captures: the FORM BODY of POST requests is read too (SQL injection / XSS sent in a login or search
+    form), every request of a keep-alive connection is read (not only the first), and many guesses at one web login
+    form from one source (password-guessing tools such as Hydra / Burp Intruder) are reported
   * the alert levels are learned from real normal traffic in CIC-IDS2017 (corrected by KU Leuven) by
     app/ml/training/train_network_traffic.py and saved in app/ml/models/network_traffic.json
   * a per-connection model (network_flow.joblib) adds SUPPORTING evidence only: on attack types it never saw it
@@ -37,6 +40,13 @@ MAX_PACKETS = 3_000_000         # packets read from one capture
 MAX_SECONDS = 60                # a capture is read for at most this long
 FLOW_TIMEOUT = 120              # a connection idle this long ends (same as CICFlowMeter)
 DEFAULTS = {"port_scan": 97, "host_sweep": 5, "failed_flood": 498, "brute_force": 9, "dos_flood": 2553}   # = network_traffic.json
+MAX_HTTP = 20_000               # HTTP requests kept from one capture
+MAX_BODY = 8_192                # bytes of one request body read (forms / JSON; file uploads are skipped)
+MAX_BODIES = 16 * 1024 * 1024   # bytes of request bodies kept from one capture in total (memory limit)
+# (31 Oct) requests to one web login form from one source in 10 minutes that count as password guessing: a person
+# who mistypes tries a few times; guessing tools send hundreds. The CIC-IDS2017 web brute force sent 1,365 in an hour.
+WEB_LOGIN_GUESSES = 20
+_PASSWORD_FIELD = re.compile(r"(^|[&?;])[\w.\[\]-]*(pass(word|wd)?|pwd|passcode|pin)[\w\[\]-]*=", re.I)
 
 # interactive login services only: mail clients poll IMAP/POP often and Windows opens many SMB connections to file
 # servers, so those ports gave false "brute force" alarms on normal CIC-IDS2017 traffic (tested 24 Oct)
@@ -58,6 +68,9 @@ CATEGORY = {   # label, severity, weight, MITRE, plain explanation
                     "(e.g. Hydra, Patator)."),
     "web_attack": ("Web attack in captured HTTP requests", "critical", 40, "T1190",
                    "Unencrypted HTTP requests in the capture carry attack code (SQL injection, XSS, path traversal ...)."),
+    "web_login_guessing": ("Password guessing against a web login", "critical", 40, "T1110.001",
+                           "One source sent a long run of logins to the same web login form within minutes - a "
+                           "password-guessing tool (e.g. Hydra, Burp Intruder), not a person mistyping."),
     "port_scan": ("Port scan", "high", 35, "T1046",
                   "One source tried many different ports on the same machine - a port scan (e.g. nmap)."),
     "host_sweep": ("Host sweep / network discovery", "high", 35, "T1018",
@@ -394,10 +407,8 @@ def read_capture(path: str) -> dict:
                     if flags & 0x01:
                         c["fin"] += 1
                         c["fin_f" if forward else "fin_b"] = True
-                    if forward and payload and len(http) < 5000 and c["fpk"] <= 3:
-                        m = _HTTP_START.match(payload[:4100])
-                        if m:
-                            http.append((ts, src, dst, dport, m.group(1).decode(), m.group(2).decode("latin-1")))
+                    if forward and payload:
+                        _http_payload(c, payload, ts, src, dst, dport, http, stats)
                     if flags & 0x04 or (c["fin_f"] and c["fin_b"]):
                         c["ended"] = True       # the last ACKs still belong to it: it is closed at the next SYN / end
         except (dpkt.dpkt.NeedData, dpkt.dpkt.UnpackError, ValueError, struct.error):
@@ -405,7 +416,49 @@ def read_capture(path: str) -> dict:
         for key in list(live):
             close(key)
     done.sort(key=lambda f: f.ts or 0)
+    http = [(ts, src, dst, dport, method, target, bytes(body).decode("latin-1"))
+            for ts, src, dst, dport, method, target, body in http]
     return {"flows": done, "http": http, "stats": dict(stats)}
+
+
+_CONTENT_LENGTH = re.compile(rb"\r\ncontent-length:\s*(\d{1,9})", re.I)
+_MULTIPART = re.compile(rb"\r\ncontent-type:\s*multipart/", re.I)
+
+
+def _http_payload(c: dict, payload: bytes, ts, src, dst, dport, http: list, stats) -> None:
+    """(31 Oct) One forward TCP payload of a connection: a new HTTP request (any request of a keep-alive connection),
+    or the next piece of the body of the request before it. Bodies are read up to MAX_BODY bytes; file uploads
+    (multipart) are skipped. Nothing is decoded or run here."""
+    m = _HTTP_START.match(payload[:4100])
+    if m:
+        c["req"] = None
+        if len(http) >= MAX_HTTP:
+            return
+        head, sep, body = payload.partition(b"\r\n\r\n")
+        entry = [ts, src, dst, dport, m.group(1).decode(), m.group(2).decode("latin-1"), bytearray()]
+        http.append(entry)
+        if m.group(1) in (b"POST", b"PUT", b"PATCH") and not _MULTIPART.search(head) \
+                and stats["http_body_bytes"] < MAX_BODIES:
+            cl = _CONTENT_LENGTH.search(head)
+            want = min(int(cl.group(1)) if cl else MAX_BODY, MAX_BODY)
+            if sep:
+                entry[6] += body[:want]
+                stats["http_body_bytes"] += len(body[:want])
+            if len(entry[6]) < want:
+                c["req"] = (entry, want, bool(sep))
+        return
+    pending = c.get("req")
+    if pending:                                  # the rest of a request: more headers, or the body
+        entry, want, in_body = pending
+        if not in_body:
+            _, sep, body = payload.partition(b"\r\n\r\n")
+            if not sep:
+                return
+            payload, in_body = body, True
+        piece = payload[:want - len(entry[6])]
+        entry[6] += piece
+        stats["http_body_bytes"] += len(piece)
+        c["req"] = (entry, want, in_body) if len(entry[6]) < want else None
 
 
 def _ip_layer(dpkt, link, buf):
@@ -548,11 +601,24 @@ def incidents(flows, cfg: dict | None = None, http=None, measured=None) -> list[
     if http:
         from app.detectors import api_abuse
         hits = defaultdict(list)
-        for ts, src, dst, dport, method, target in http:
+        logins = defaultdict(list)
+        for req in http:
+            ts, src, dst, dport, method, target = req[:6]
+            body = req[6] if len(req) > 6 else ""
             path, _, query = target.partition("?")
-            types = api_abuse.attack_types(api_abuse.decode(api_abuse.request_text(path, query)).lower())
+            types = api_abuse.attack_types(api_abuse.decode(api_abuse.request_text(path, query, body)).lower())
             if types:
-                hits[(src, dst, dport)].append((ts, method, target, [t[0] for t in types]))
+                shown = target + (f"  [form: {body[:120]}]" if body else "")
+                hits[(src, dst, dport)].append((ts, method, shown, [t[0] for t in types]))
+            if _PASSWORD_FIELD.search("&" + query) or _PASSWORD_FIELD.search("&" + body):
+                logins[(src, dst, dport, path.lower())].append(ts)
+        for key, times in logins.items():             # (31 Oct) many guesses at one web login form
+            burst, t0, t1 = _max_count(times)
+            if burst >= cfg.get("web_login_guessing", WEB_LOGIN_GUESSES):
+                found.append({"category": "web_login_guessing", "key": key[:3], "source": key[0], "burst": burst,
+                              "count": len(times), "first": t0, "last": t1,
+                              "text": f"{key[0]} -> {key[1]}:{key[2]}{key[3]}: {burst} login attempts within 10 "
+                                      f"minutes ({len(times)} in total)."})
         for key, rows in hits.items():
             kinds = sorted({k for r in rows for k in r[3]})
             found.append({"category": "web_attack", "key": key, "source": key[0], "burst": len(rows),

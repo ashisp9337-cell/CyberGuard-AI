@@ -167,6 +167,18 @@ def show_saved():
     except (OSError, ValueError, KeyError):
         say(f"{'Cyber threat':13s} {'Network traffic':30s} not trained yet: python -m app.ml.training.train_network_traffic")
     try:
+        nw = json.load(open(os.path.join(MODELS, "network_web.json"), encoding="utf-8"))
+        an, no = nw["anomalous"], nw["normal"]
+        say(f"{'Cyber threat':13s} {'Network: web attacks in HTTP':30s} rules, not AUC: CSIC 2010 requests packed into captures - "
+            f"attack code found in {an['attack_code_found_with_form_body']:,} of {an['requests']:,} anomalous requests "
+            f"(request line only: {an['attack_code_found_request_line_only']:,}); normal requests flagged "
+            f"{no['attack_code_found_with_form_body']} of {no['requests']:,}")
+        g = {x["attempts"]: x["reported"] for x in nw.get("login_guessing", [])}
+        say(f"{'':13s} {'':30s} web login guessing: 60 tries from one client reported = {g.get(60)}; "
+            f"5 tries = {g.get(5)}; normal CSIC logins reported = {'web_login_guessing' in no['incidents']}")
+    except (OSError, ValueError, KeyError):
+        say(f"{'Cyber threat':13s} {'Network: web attacks in HTTP':30s} not tested yet: python -I app\\ml\\training\\test_network_web.py")
+    try:
         ir = json.load(open(os.path.join(MODELS, "insider_risk.json"), encoding="utf-8"))["results"]
         ts, nw, un = ir["time_split"], ir["time_split_no_web"], ir["unseen_total"]
         say(f"{'Cyber threat':13s} {'Insider risk (UEBA, 3 lenses)':30s} AUC {ts['auc']:.3f} (user-days after 1 Oct 2010); "

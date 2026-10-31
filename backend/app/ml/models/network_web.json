@@ -1,0 +1,30 @@
+{
+ "anomalous": {
+  "requests": 25065,
+  "post_requests": 9580,
+  "read_from_capture": 25065,
+  "attack_code_found_request_line_only": 2040,
+  "attack_code_found_with_form_body": 4080,
+  "incidents": {
+   "web_attack": 4064
+  }
+ },
+ "normal": {
+  "requests": 36000,
+  "post_requests": 8000,
+  "read_from_capture": 36000,
+  "attack_code_found_request_line_only": 0,
+  "attack_code_found_with_form_body": 0,
+  "incidents": {}
+ },
+ "login_guessing": [
+  {
+   "attempts": 60,
+   "reported": true
+  },
+  {
+   "attempts": 5,
+   "reported": false
+  }
+ ]
+}
