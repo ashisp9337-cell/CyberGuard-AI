@@ -3124,6 +3124,32 @@
    "real flagged at verify": 0.0254,
    "AUC": 0.9993,
    "EER": 0.01
+  },
+  "In-the-Wild (real-world, outside test)": {
+   "recordings": 28319,
+   "real": 17492,
+   "fake": 10827,
+   "fake caught at alert": 0.977,
+   "fake caught at verify": 0.9935,
+   "real flagged at alert (false alarms)": 0.2379,
+   "real flagged at verify": 0.4568,
+   "AUC": 0.9668,
+   "EER": 0.0869,
+   "not scored (unreadable or under 1 s of speech)": 3460,
+   "speakers": 54
+  },
+  "In-the-Wild after WhatsApp-style Opus 16 kbps": {
+   "recordings": 2679,
+   "real": 1669,
+   "fake": 1010,
+   "fake caught at alert": 0.9733,
+   "fake caught at verify": 0.9881,
+   "real flagged at alert (false alarms)": 0.1774,
+   "real flagged at verify": 0.4116,
+   "AUC": 0.9722,
+   "EER": 0.0721,
+   "not scored (unreadable or under 1 s of speech)": 321,
+   "speakers": 54
   }
  },
  "validation_eer": 0.016883464619971027,
@@ -3138,5 +3164,25 @@
  "versions": {
   "torch": "2.11.0+cu128",
   "transformers": "5.20.2"
+ },
+ "in_the_wild_test": {
+  "dataset": {
+   "repo": "mueller91/In-The-Wild",
+   "file": "release_in_the_wild.zip",
+   "revision": "eee168f92c367f8c82ff2cf42b6f61e362fd6211",
+   "sha256": "46665f30a6758b45642c659c7e0e80da2ba3d121b064716824a56a010ddf9e1a",
+   "licence": "CC BY-SA 4.0 (Hugging Face dataset card)"
+  },
+  "labels_from": "release_in_the_wild/meta.csv",
+  "opus_test_recordings": 3000,
+  "scored_with": "CUDAExecutionProvider",
+  "gpu_vs_cpu_largest_score_difference": 3.7185255639393677e-06,
+  "tested_at": "2026-11-01T10:42:18Z",
+  "versions": {
+   "python": "3.13.15",
+   "onnxruntime": "1.23.2",
+   "av": "19.0.2",
+   "scikit-learn": "1.6.1"
+  }
  }
 }

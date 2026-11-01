@@ -83,10 +83,10 @@ time periods. "Caught at alert" is measured at a threshold where only about 1% o
 | Login subtopic models (6) | RBA dataset subsets | AUC 0.77–0.998, depending on the subtopic. Since 31 Oct the four account models also learn from real attacker logins; on an attacker's **first** real login to a test account: location 0.906 → **0.952** (caught at alert 19% → 37%), device 0.490 → **0.745**, session 0.957 → **0.968**, behaviour 0.841 → **0.871**, with false alarms still about 1% |
 | AI-generated image | real photos vs modern AI generators, StyleGAN faces | AUC **0.98**; 80% caught at alert, 1.3% false alarms |
 | Face-swap image | OpenForensics faces | AUC 0.95 |
-| Face-swap video | Celeb-DF v2 (official test list held out) | AUC **0.996**; **87%** caught at alert with **0** false alarms; still 83% after heavy JPEG compression |
+| Face-swap video (v2, 1 Nov) | Celeb-DF v2 + FaceForensics++ c23 (5 methods), official test lists held out; 107,417 training faces | Celeb-DF test AUC **0.999** (89% caught at alert, **0** false alarms; 83% after heavy JPEG compression). FaceForensics++ test AUC **0.942** (before 0.639). **DFDC, a dataset it never trained on: AUC 0.839** (before 0.721), 0 real videos flagged at alert |
 
 **Where it is weaker (said openly):**
-- **Face-swap video on other datasets:** AUC is only 0.72 on DFDC videos (Meta). FaceForensics++ would fix that.
+- **Face-swap video on other datasets:** on DFDC (Meta) the AUC is 0.839, but the strict alert level catches only 17% of its fakes (39% at "check carefully") - the level is set so real videos are not flagged. NeuralTextures (expression-only edits) is the hardest method: AUC 0.86.
 - **Fully AI-generated video** (no face swap): no model yet; the app says *unverified*, never *real*.
 - **GIF pictures** have at most 256 colours and the image models were trained on photos, so GIF results are less reliable (the result says so); for an animated GIF / WebP only the first frame is checked. iPhone **HEIC** photos need the pillow-heif package from requirements.txt - without it the result says the photo could not be read.
 - **Voice:** no public training set has Hindi or Odia deepfakes, and brand-new cloning tools may not be caught; the
@@ -228,5 +228,5 @@ python phase2_live_check.py  # live services + 30 real / phishing URLs (phishing
   (Willi Ballenthin, Apache-2.0)
 - **Insider threat:** CERT Insider Threat Test Dataset r4.2, Carnegie Mellon University Software Engineering Institute
   (CERT Division) and ExactData, doi:10.1184/R1/12841247 (KiltHub, CC BY 4.0) - synthetic data
-- **Images and video:** Celeb-DF v2, OpenForensics, DFDC sample videos (Meta), real-vs-AI image sets
+- **Images and video:** Celeb-DF v2, FaceForensics++ (Rössler et al., used under its terms of use), OpenForensics, DFDC sample videos (Meta), real-vs-AI image sets
 - **Face detector:** YuNet (OpenCV Zoo)

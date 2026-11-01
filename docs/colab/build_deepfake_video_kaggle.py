@@ -21,7 +21,7 @@ def code(s):
 
 
 md("""
-# CyberGuard - Deepfake **Video** model (Kaggle) - face-swap videos
+# CyberGuard - Deepfake **Video** model v2 (Kaggle) - Celeb-DF + FaceForensics++
 
 Trains the face model behind **Deepfake -> Video Analysis**. Output: 2 files for your PC.
 
@@ -36,6 +36,12 @@ finder CyberGuard uses) -> each face is scored -> the video score is the average
 **Data**
 * **Train:** Celeb-DF v2 (590 real celebrity videos + 300 YouTube real videos + 5,639 face-swap videos), *without*
   its official test list. Downloaded from your private Drive link (Kaggle secret `CELEBDF_URL`).
+* **Train (new, v2):** FaceForensics++ (c23 = normal YouTube quality): 1,000 real YouTube videos and their fakes made
+  with 5 methods - Deepfakes, FaceSwap, FaceShifter (face swap), Face2Face, NeuralTextures (face re-enactment).
+  Only the official FaceForensics++ *train* + *val* lists are used for training; its official *test* list is held out.
+  Downloaded with the authors' script from your private link (Kaggle secret `FFPP_SCRIPT_URL`, server EU2).
+  More kinds of fake in training = better on fakes it has never seen (the DFDC test).
+* **Test 1b (new):** FaceForensics++ official test list (never trained on), per method.
 * **Test 1:** Celeb-DF v2 official test list (518 videos, never trained on). Alert levels are chosen on one random
   half and reported on the other half.
 * **Test 2 (independent):** the 400 labelled DFDC sample videos (Meta). A completely different dataset - the
@@ -43,12 +49,16 @@ finder CyberGuard uses) -> each face is scored -> the video score is the average
 
 **Before you press Run All**
 1. Right panel -> **Session options** -> Accelerator **GPU T4 x2** (or P100), Internet **On**.
-2. **Add-ons -> Secrets** -> add `CELEBDF_URL` = your Celeb-DF Drive link -> tick it for this notebook.
+2. **Add-ons -> Secrets** -> `CELEBDF_URL` (your Celeb-DF Drive link) and `FFPP_SCRIPT_URL` (the download-script
+   link from the FaceForensics e-mail) -> tick **both** for this notebook. Links are never printed.
 3. **Add Input** -> Competitions -> **Deepfake Detection Challenge**.
-4. Optional (baseline): Add Input -> your private dataset with `deepfake_image.onnx` + `deepfake_image.json`.
+4. **Add Input** -> your private dataset with your INSTALLED `deepfake_video.onnx` + `deepfake_video.json` (from the
+   PC's `backend\\app\\ml\\models\\`). The notebook then scores the installed model on exactly the same test videos,
+   so the PC can decide fairly whether the new model is better. Optional: also `deepfake_image.onnx` + `.json`.
 
 Then **Save Version -> Save & Run All (Commit)**: it runs on Kaggle by itself (2-3 hours) even if you close the
-browser. The 2 files appear in the version's **Output** tab.
+browser (3-5 hours). The 2 files appear in the version's **Output** tab - download them into a NEW folder on the
+PC (not into `models`); the PC's check script installs them only if they are better.
 """)
 
 md("## 1. Settings and GPU check")
@@ -69,6 +79,9 @@ OUT = os.environ.get('CG_OUT', '/kaggle/working')            # the 2 result file
 INPUT = os.environ.get('CG_INPUT', '/kaggle/input')
 os.makedirs(WORK, exist_ok=True); os.makedirs(OUT, exist_ok=True)
 IMG, BATCH, EPOCHS, LR, SEED = 224, 64, 4, 3e-4, 42
+FFPP_METHODS = ['Deepfakes', 'FaceSwap', 'FaceShifter', 'Face2Face', 'NeuralTextures']
+FFPP_QUALITY = 'c23'                              # the quality most papers use (like normal YouTube videos)
+FFPP_TIMEOUT = 100 * 60                           # longest wait per part of the download (seconds)
 TRAIN_FRAMES_REAL, TRAIN_FRAMES_FAKE = 32, 8     # more frames from the (fewer) real videos -> balanced training
 MEAN, STD = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
 WORKERS = min(4, os.cpu_count() or 2)
@@ -82,7 +95,7 @@ torch.manual_seed(SEED)
 DEV = 'cuda' if torch.cuda.is_available() else 'cpu'
 if not SMOKE:
     assert DEV == 'cuda', 'No GPU: Session options -> Accelerator -> GPU T4 x2, then run again'
-    assert free > 25, 'Less than 25 GB free disk - Celeb-DF needs about 20 GB while unpacking'
+    assert free > 40, 'Less than 40 GB free disk - Celeb-DF + FaceForensics++ need about 35 GB'
     print('GPU:', torch.cuda.get_device_name(0))
 ''')
 
@@ -110,6 +123,14 @@ if not os.path.exists(YUNET):
 assert os.path.getsize(YUNET) > 100_000, 'YuNet download failed - run this cell again'
 make_detector(YUNET)
 print('YuNet OK')
+if SMOKE:                       # ONLY for the tiny fake test data (no real faces in it): use the middle of the frame
+    def video_faces(path, det, k=FRAMES):
+        cap = cv2.VideoCapture(path); out = []; n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
+        for i in range(min(k, n)):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(i * n / max(1, k))); ok, fr = cap.read()
+            if ok:
+                h, w = fr.shape[:2]; out.append((i, fr[h // 4: 3 * h // 4, w // 4: 3 * w // 4]))
+        cap.release(); return out
 ''')
 
 md("""
@@ -147,6 +168,55 @@ assert CDF, 'Celeb-DF folders (Celeb-real, Celeb-synthesis) not found'
 print('Celeb-DF at', CDF)
 for d in ('Celeb-real', 'YouTube-real', 'Celeb-synthesis'):
     print(f'  {d:16s} {len(glob.glob(os.path.join(CDF, d, "*.mp4"))):5d} videos')
+''')
+
+md("""
+## 5b. FaceForensics++ (new in v2)
+Fetches the authors' download script from your private link (secret `FFPP_SCRIPT_URL`; never printed), checks it
+is the FaceForensics script, then downloads the real videos and the 5 fake methods in `c23` quality from server
+**EU2** (the e-mail says it is the only one working). The script asks you to accept the FaceForensics terms of use:
+this notebook answers it, because you accepted them when you asked for access. Videos go to temporary space only.
+""")
+code(r'''
+import hashlib, urllib.request
+FFPP = os.path.join(WORK, 'ffpp')
+os.makedirs(FFPP, exist_ok=True)
+script = os.path.join(WORK, 'ffpp_download.py')
+if SMOKE:
+    shutil.copy(os.environ['FFPP_SCRIPT_FILE'], script)          # a fake script, only for the smoke test
+else:
+    from kaggle_secrets import UserSecretsClient
+    url = UserSecretsClient().get_secret('FFPP_SCRIPT_URL').strip()
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    with urllib.request.urlopen(req, timeout=60) as r, open(script, 'wb') as f:
+        f.write(r.read(2_000_000))
+code_text = open(script, encoding='utf-8', errors='replace').read()
+assert 'argparse' in code_text and ('FaceForensics' in code_text or 'faceforensics' in code_text), (
+    'The FFPP_SCRIPT_URL link did not give the FaceForensics download script. Check the secret: it must be the '
+    'link behind the first "here" in the e-mail (the FaceForensics++ script).')
+print('download script OK, sha256', hashlib.sha256(code_text.encode()).hexdigest()[:16])
+
+def ffpp_get(part):
+    """One part ('original' or a method) in FFPP_QUALITY videos; the terms-of-use question is answered with Enter."""
+    t0 = time.time()
+    cmd = [sys.executable, script, FFPP, '-d', part, '-c', FFPP_QUALITY, '-t', 'videos', '--server', 'EU2']
+    try:
+        r = subprocess.run(cmd, input='\n' * 5, text=True, capture_output=True, timeout=FFPP_TIMEOUT)
+        msg = (r.stdout + r.stderr)[-400:]
+        ok = r.returncode == 0
+    except subprocess.TimeoutExpired:
+        ok, msg = False, f'stopped after {FFPP_TIMEOUT // 60} min - the videos downloaded so far are used'
+    n = len(glob.glob(os.path.join(FFPP, '**', part if part != 'original' else 'youtube', '**', '*.mp4'), recursive=True))
+    print(f'  {part:15s} {n:5d} videos  ({(time.time() - t0) / 60:.0f} min){"" if ok else "  NOTE: " + msg.strip()}', flush=True)
+    return n
+
+FFPP_COUNT = {p: ffpp_get(p) for p in ['original'] + FFPP_METHODS}
+assert FFPP_COUNT['original'] > 0 and sum(FFPP_COUNT[m] for m in FFPP_METHODS) > 0, (
+    'No FaceForensics++ videos were downloaded - see the NOTE lines above (server EU2 may be busy: run again later).')
+
+def ffpp_videos(part):
+    sub = 'original_sequences/youtube' if part == 'original' else f'manipulated_sequences/{part}'
+    return sorted(glob.glob(os.path.join(FFPP, sub, FFPP_QUALITY, 'videos', '*.mp4')))
 ''')
 
 md("## 6. DFDC sample videos (independent test)")
@@ -195,6 +265,36 @@ SPLIT = {'train': [r for r in rest if person_of(r) not in val_people],
          'test': sorted(r for r in test_rel if os.path.exists(os.path.join(CDF, r)))}
 for k, v in SPLIT.items():
     print(f'{k:5s}: {sum(1 - label_of(r) for r in v):4d} real  {sum(label_of(r) for r in v):5d} fake')
+
+# FaceForensics++: the authors' official train / val / test lists (pairs of YouTube video ids). A fake "a_b" belongs
+# to the part that holds the pair (a, b); a real video "a" to the part that holds a. If the lists cannot be fetched,
+# the 1,000 ids are split 72 / 14 / 14 with a fixed seed, by pair, the same way.
+def ffpp_lists():
+    base = 'https://raw.githubusercontent.com/ondyari/FaceForensics/master/dataset/splits/'
+    try:
+        parts = {s: json.loads(urllib.request.urlopen(base + f'{s}.json', timeout=30).read()) for s in ('train', 'val', 'test')}
+        return parts, 'official FaceForensics++ lists (dataset/splits/*.json)'
+    except Exception as e:
+        ids = [f'{i:03d}' for i in range(1000)]
+        random.Random(SEED).shuffle(ids)
+        pairs = [[ids[i], ids[i + 1]] for i in range(0, 1000, 2)]
+        return {'train': pairs[:360], 'val': pairs[360:430], 'test': pairs[430:]}, f'fixed-seed split (lists not reachable: {type(e).__name__})'
+
+FF_LISTS, FF_SPLIT_HOW = ffpp_lists()
+FF_PART_OF = {}
+for s, pairs in FF_LISTS.items():
+    for a, b in pairs:
+        FF_PART_OF[a] = FF_PART_OF[b] = s
+        FF_PART_OF[f'{a}_{b}'] = FF_PART_OF[f'{b}_{a}'] = s
+FF_SPLIT = {'train': [], 'val': [], 'test': []}
+for part in ['original'] + FFPP_METHODS:
+    for v in ffpp_videos(part):
+        s = FF_PART_OF.get(os.path.splitext(os.path.basename(v))[0])
+        if s:
+            FF_SPLIT[s].append((v, 0 if part == 'original' else 1))
+print('FaceForensics++ split:', FF_SPLIT_HOW)
+for k, v in FF_SPLIT.items():
+    print(f'  ff++ {k:5s}: {sum(1 - y for _, y in v):4d} real  {sum(y for _, y in v):5d} fake')
 ''')
 
 md("## 8. Cut the faces (16 frames per video for val/test; more from real training videos)")
@@ -223,6 +323,9 @@ def jobs_for(split, items):
         yield split, src, key, label, k
 
 VIDEOS = {s: [(os.path.join(CDF, r), label_of(r)) for r in SPLIT[s]] for s in SPLIT}
+VIDEOS['train'] += FF_SPLIT['train']          # FaceForensics++ train + val lists join training / validation
+VIDEOS['val'] += FF_SPLIT['val']
+VIDEOS['ffpp_test'] = FF_SPLIT['test']        # its official test list: reported separately, never trained on
 if DFDC:
     VIDEOS['dfdc'] = DFDC
 FACE_LIST = {s: [] for s in VIDEOS}           # split -> [(video_key, label, [face paths])]
@@ -402,11 +505,87 @@ RESULTS = {'validation_celebdf_unseen_people': report(sv, yv),
 if DFDC:
     sd, yd = video_scores('dfdc')
     RESULTS['test_dfdc_independent'] = report(sd, yd)
+
+def ffpp_method_of(key):
+    for m in FFPP_METHODS:
+        if f'_{m}_' in key:
+            return m
+    return 'real'
+
+def ffpp_by_method(scores, labels):
+    keys = [FACE_LIST['ffpp_test'][i][0] for i, (_, _, p) in enumerate(FACE_LIST['ffpp_test']) if p]
+    meth = np.array([ffpp_method_of(k) for k in keys])
+    out = {}
+    for m in FFPP_METHODS:
+        sel = (meth == m) | (meth == 'real')
+        if (meth == m).any():
+            out[m] = report(scores[sel], labels[sel])
+    return out
+
+if FACE_LIST.get('ffpp_test'):
+    sf, yf = video_scores('ffpp_test')
+    RESULTS['test_ffpp_official_test'] = report(sf, yf)
+    RESULTS['test_ffpp_by_method'] = ffpp_by_method(sf, yf)
 NO_FACE = {s: sum(1 for _, _, p in FACE_LIST[s] if not p) for s in FACE_LIST}
 print(f'alert level {thr_alert:.4f}   verify level {thr_verify:.4f}')
 for k, r in RESULTS.items():
     print('\n' + k); [print(f'   {a:24s} {b}') for a, b in r.items()]
 print('\nvideos without any face (no verdict):', NO_FACE)
+''')
+
+md("""
+## 12b. Your INSTALLED video model on exactly the same test videos (for the keep-or-not decision on the PC)
+Only runs if you attached your current `deepfake_video.onnx` + `deepfake_video.json`. It is scored at ITS OWN alert
+levels on the same faces, so old and new can be compared fairly.
+""")
+code(r'''
+INSTALLED = None
+old = [p for p in glob.glob(INPUT + '/**/deepfake_video.onnx', recursive=True) if os.path.exists(p[:-5] + '.json')]
+if old:
+    import onnxruntime as ort
+    ometa = json.load(open(old[0][:-5] + '.json'))
+    osess = ort.InferenceSession(old[0], providers=['CPUExecutionProvider'])
+    oname = osess.get_inputs()[0].name
+    def oprep(bgr):
+        size = int(ometa.get('input_size', 224))
+        img = cv2.cvtColor(cv2.resize(bgr, (size, size), interpolation=cv2.INTER_LINEAR), cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        img = (img - np.array(ometa['mean'], np.float32)) / np.array(ometa['std'], np.float32)
+        return np.transpose(img, (2, 0, 1)).astype(np.float32)
+    def o_scores(split, q=None):
+        items = frames_of(split)
+        if not items:
+            return np.zeros(0), np.zeros(0)
+        p = []
+        for i in range(0, len(items), 64):
+            batch = []
+            for t in items[i:i + 64]:
+                bgr = cv2.imread(t[0], cv2.IMREAD_COLOR)
+                if q:
+                    bgr = cv2.imdecode(cv2.imencode('.jpg', bgr, [cv2.IMWRITE_JPEG_QUALITY, q])[1], cv2.IMREAD_COLOR)
+                batch.append(oprep(bgr))
+            p.append(sig(osess.run(None, {oname: np.stack(batch)})[0].ravel()))
+        p = np.concatenate(p); vids = np.array([t[2] for t in items]); u = sorted(set(vids))
+        return np.array([p[vids == v].mean() for v in u]), np.array([FACE_LIST[split][v][1] for v in u])
+    keep_alert, keep_verify = thr_alert, thr_verify
+    thr_alert, thr_verify = float(ometa['thr_alert']), float(ometa['thr_verify'])     # report() uses these
+    ost, oyt = o_scores('test')
+    oq, oyq = o_scores('test', q=35)
+    INSTALLED = {'trained_at': ometa.get('trained_at'), 'thr_alert': thr_alert, 'thr_verify': thr_verify,
+                 'test_celebdf_half_B_honest': report(ost[ev], oyt[ev]),
+                 'test_celebdf_half_B_jpeg_quality_35': report(oq[ev], oyq[ev])}
+    if DFDC:
+        INSTALLED['test_dfdc_independent'] = report(*o_scores('dfdc'))
+    if FACE_LIST.get('ffpp_test'):
+        osf, oyf = o_scores('ffpp_test')
+        INSTALLED['test_ffpp_official_test'] = report(osf, oyf)
+        INSTALLED['test_ffpp_by_method'] = ffpp_by_method(osf, oyf)
+    thr_alert, thr_verify = keep_alert, keep_verify
+    print('installed model (its own levels) on the same test videos:')
+    for k in ('test_celebdf_half_B_honest', 'test_dfdc_independent', 'test_ffpp_official_test'):
+        if k in INSTALLED:
+            print(f"  {k:30s} AUC {INSTALLED[k].get('auc')}  (new model: {RESULTS.get(k, {}).get('auc')})")
+else:
+    print('installed model not attached - the PC check will compare with the numbers saved in its .json instead')
 ''')
 
 md("""
@@ -431,7 +610,7 @@ if onx and os.path.exists(onx[0].replace('.onnx', '.json')):
         u = sorted(set(vids))
         return np.array([p[vids == v].mean() for v in u]), np.array([FACE_LIST[split][v][1] for v in u])
     BASELINE = {}
-    for s in ['test'] + (['dfdc'] if DFDC else []):
+    for s in ['test'] + (['dfdc'] if DFDC else []) + (['ffpp_test'] if FACE_LIST.get('ffpp_test') else []):
         bsc, by = b_scores(s)
         BASELINE[s] = {'n': int(len(by)), 'auc': round(safe_auc(by, bsc), 4)}
     print('existing image model on video faces (AUC):', BASELINE)
@@ -462,11 +641,14 @@ md("## 15. The description file CyberGuard reads")
 code(r'''
 import datetime
 meta = {
-    'kind': 'cyberguard-deepfake-video', 'version': 1,
+    'kind': 'cyberguard-deepfake-video', 'version': 2,
     'architecture': 'EfficientNet-B0 on face crops; video score = mean face probability',
     'output': 'logit per face; sigmoid(logit) = probability the face is manipulated',
-    'detects': 'face swap / face re-enactment (Celeb-DF style). NOT fully AI-generated scenes, NOT lip-sync, NOT voice.',
-    'dataset': 'Celeb-DF v2 (train, official test list held out); independent test: DFDC sample videos (Meta)',
+    'detects': 'face swap and face re-enactment (Celeb-DF, Deepfakes, FaceSwap, FaceShifter, Face2Face, NeuralTextures). '
+               'NOT fully AI-generated scenes, NOT lip-sync, NOT voice.',
+    'dataset': 'Celeb-DF v2 (official test list held out) + FaceForensics++ ' + FFPP_QUALITY + ' (' + FF_SPLIT_HOW +
+               '; its test list held out); independent test: DFDC sample videos (Meta)',
+    'ffpp_videos_downloaded': FFPP_COUNT,
     'input_size': IMG, 'mean': MEAN, 'std': STD,
     'face_margin': MARGIN, 'frames_per_video': FRAMES, 'min_face': MIN_FACE, 'max_side': MAX_SIDE,
     'aggregation': 'mean', 'min_faces_for_verdict': 3,
@@ -474,8 +656,10 @@ meta = {
     'training': {'faces': len(train_items), 'real_faces': n_real, 'fake_faces': n_fake, 'epochs': EPOCHS,
                  'batch': BATCH, 'lr': LR, 'label_smoothing': SMOOTH,
                  'augmentations': 'crop, flip, brightness/contrast, colour, grayscale, low resolution, blur, noise, JPEG 20-90',
-                 'split': 'by person (Celeb-DF id); levels chosen on half A of the official test list'},
-    'results': RESULTS, 'baseline_image_model_auc': BASELINE, 'videos_without_face': NO_FACE,
+                 'split': 'Celeb-DF by person (id); FaceForensics++ by its train/val/test lists; levels chosen on '
+                          'half A of the Celeb-DF official test list'},
+    'results': RESULTS, 'installed_model_same_test': INSTALLED, 'baseline_image_model_auc': BASELINE,
+    'videos_without_face': NO_FACE,
     'trained_at': datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
 }
 json.dump(meta, open(os.path.join(OUT, 'deepfake_video.json'), 'w'), indent=2)
