@@ -81,7 +81,8 @@ ATTACK_TYPES = [
         r"\b(wp-config|web\.config|\.env|\.git/config|id_rsa)\b(?!\w)"), "T1083",
      "The request tries to climb out of the web folder (../../) or read system / secret files."),
     ("Command injection", re.compile(
-        r"(;|\||&&|`|\$\()\s*(cat|ls|id|whoami|uname|wget|curl|nc|ncat|ping|bash|sh|powershell|cmd)\b[^&]{0,60}|"
+        # (6 Nov) a command word followed by "=" is a parameter NAME ("&&ID=SERP" in every Bing search click), not a command
+        r"(;|\||&&|`|\$\()\s*(cat|ls|id|whoami|uname|wget|curl|nc|ncat|ping|bash|sh|powershell|cmd)\b(?!\s*=)[^&]{0,60}|"
         r"\b(cmd|exec|command|run)=[^&]*(\||;|`|\$\()"), "T1059",
      "The request tries to make the server run operating-system commands."),
     ("Server-side request forgery (SSRF)", re.compile(
@@ -98,6 +99,20 @@ ATTACK_TYPES = [
 
 def attack_types(decoded_lower: str) -> list[tuple[str, str, str]]:
     return [(name, mitre, desc) for name, rx, mitre, desc in ATTACK_TYPES if rx.search(decoded_lower)]
+
+
+# (6 Nov) Attacks hidden in request HEADERS (User-Agent, Referer, Cookie ...), which the checks above never see. Found
+# on real WRCCDC 2018 traffic: 804 Shellshock requests whose URLs were ordinary, in two variants ("() { ignored; };" and
+# "() { _; } >_[$($())] {"). A bash function definition "() { ... }" in a header is never sent by real browsers or apps.
+SHELLSHOCK = ("Shellshock (bash CVE-2014-6271)", re.compile(r"\(\)\s*\{[^}]{0,200}\}"), "T1190",   # also the 6278 variant
+              "A request header starts with a bash function definition '() { ...; };' followed by a command - the "
+              "Shellshock attack, which makes old bash-based web scripts (CGI) run the attacker's command.")
+
+
+def header_attack_types(headers: str) -> list[tuple[str, str, str]]:
+    """Attack types found in request header values (raw headers, a User-Agent or a Referer)."""
+    name, rx, mitre, desc = SHELLSHOCK
+    return [(name, mitre, desc)] if headers and rx.search(headers[:8000]) else []
 
 
 # ---- finding requests in pasted text -------------------------------------------------------------------------
@@ -126,8 +141,10 @@ def extract_requests(text: str) -> list[dict]:
         if m:
             method, target = m.groups()
             i += 1
+            head_start = i
             while i < len(lines) and lines[i].strip() and not _RAW_LINE.match(lines[i]):
                 i += 1                                              # headers
+            headers = "\n".join(lines[head_start:i])[:8000]
             body = ""
             if method in ("POST", "PUT", "PATCH"):
                 j = i
@@ -137,7 +154,8 @@ def extract_requests(text: str) -> list[dict]:
                         and ":" not in lines[j].split("=", 1)[0]:
                     body, i = lines[j].strip()[:4000], j + 1
             path, query = _split_target(target)
-            out.append({"method": method, "path": path, "query": query, "body": body, "line": line.strip()[:300]})
+            out.append({"method": method, "path": path, "query": query, "body": body, "line": line.strip()[:300],
+                        "headers": headers})
             continue
         m = _LOG_LINE.search(line) or _BARE.search(line)
         if m:
@@ -178,9 +196,10 @@ def assess(text: str) -> dict | None:
         [None] * len(reqs)
     scored = []
     for r, t, p in zip(reqs, texts, probs):
-        types = attack_types(decode(t).lower())
+        types = attack_types(decode(t).lower()) + header_attack_types(r.get("headers", ""))
         level = None if p is None else "high" if p >= b["thr_alert"] else "medium" if p >= b["thr_verify"] else "low"
-        scored.append({**r, "probability": None if p is None else float(p), "level": level, "attackTypes": types})
+        scored.append({**{k: v for k, v in r.items() if k != "headers"},   # headers may hold cookies / tokens: not kept
+                       "probability": None if p is None else float(p), "level": level, "attackTypes": types})
     rank = {"high": 2, "medium": 1, "low": 0, None: 0}
     top = max(scored, key=lambda s: (len(s["attackTypes"]) > 0, rank[s["level"]], s["probability"] or 0))
     found = {}

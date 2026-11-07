@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CyberGuard AI - Safe Browsing settings</title><link rel="stylesheet" href="style.css">
+<style>main{max-width:720px;margin:32px auto;padding:0 16px}</style></head>
+<body><main>
+  <h1>CyberGuard AI - Safe Browsing</h1>
+  <p>This extension asks <strong>your own CyberGuard AI on this computer</strong> about each website before it opens,
+     and warns you about dangerous ones. Nothing is sent to any other server. Protection stays OFF until you switch it on.</p>
+
+  <div class="card">
+    <h2>1. Connect to your CyberGuard</h2>
+    <p>In CyberGuard go to <strong>Settings &rarr; Browser extension</strong>, press <em>Connect a browser</em> and paste the key here.</p>
+    <label for="backend">CyberGuard address (this computer)</label>
+    <input type="text" id="backend" spellcheck="false">
+    <label for="token">Connection key</label>
+    <input type="password" id="token" spellcheck="false" autocomplete="off" placeholder="cgx_...">
+    <div class="row" style="margin-top:10px"><button id="connect">Connect</button><span id="conn" class="small"></span></div>
+  </div>
+
+  <div class="card">
+    <h2>2. Your permission</h2>
+    <div class="switch"><input type="checkbox" id="enabled"><label for="enabled" style="margin:0;color:var(--text);font-size:14px">
+      <strong>Check each website I open</strong><br><span class="small">Sends the address of each page you open (and the
+      addresses it was redirected through) to CyberGuard on this computer. Pages on this computer or your home network
+      are never sent.</span></label></div>
+    <div class="switch"><input type="checkbox" id="pageCheck"><label for="pageCheck" style="margin:0;color:var(--text);font-size:14px">
+      <strong>Also check login pages</strong><br><span class="small">Only on a page that asks for a password, card or OTP:
+      its page code (with everything you typed removed) is checked by the fake-login-page model. Your browser will ask you
+      to allow the extension to read pages.</span></label></div>
+    <div class="row" style="margin-top:8px"><button id="off" class="danger">Turn everything off</button>
+      <span id="perm" class="small"></span></div>
+  </div>
+
+  <div class="card">
+    <h2>3. Websites you trust</h2>
+    <p>One website name per line (for example <span class="mono">intranet.mycollege.ac.in</span>). These are never checked.</p>
+    <textarea id="allow" rows="4" spellcheck="false"></textarea>
+    <div class="row" style="margin-top:8px"><button id="saveAllow" class="ghost">Save list</button><span id="allowMsg" class="small"></span></div>
+  </div>
+  <p class="small">Works in Chrome, Edge, Brave, Opera and Firefox. Open source: the extension folder of your CyberGuard project.</p>
+</main><script src="options.js"></script></body></html>

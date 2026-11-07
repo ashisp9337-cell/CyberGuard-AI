@@ -206,6 +206,11 @@ CHECKS = [
      _Near(r"(webclient|invoke-webrequest|xmlhttp)", r"user-agent[^\n]{0,40}mozilla/", 400, ordered=True),
      "medium", 15, 55, "T1071.001",
      "It downloads with a fake web-browser identity (User-Agent), as attack tools do to blend in with normal browsing."),
+    ("Script is scrambled with Microsoft's Script Encoder",
+     _Rx(r"#@~\^?[a-z0-9+/]{6}=="),
+     "critical", 30, 75, "T1027",
+     "The script is scrambled with Microsoft's old Script Encoder (.vbe / .jse) so it cannot be read. This tool has "
+     "been obsolete for years; today it is used almost only to hide malware."),
     ("Script runs hidden",
      _Any(_Rx(r"(powershell|pwsh)(\.exe)?[^\n]{0,200}\s-w(i|in|ind|indo|indow|indows|indowst\w*)?\s+h(idden)?\b|"
               r"-windowstyle\s+hidden"),

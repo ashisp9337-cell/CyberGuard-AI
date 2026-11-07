@@ -6,6 +6,8 @@ export interface BackendSettings {
   notificationsEnabled: boolean;
   emailNotifications: boolean;
   integrationSettings: Record<string, unknown>;
+  /** (4 Nov) alerts for the background watchers' findings: "critical" (default) or "same" as my scans */
+  automaticAlerts?: "critical" | "same";
   updatedAt: string;
 }
 
@@ -15,6 +17,7 @@ export async function getSettings(): Promise<BackendSettings> {
 
 export async function updateSettings(patch: Partial<{
   sensitivity: string; notificationsEnabled: boolean; emailNotifications: boolean; integrationSettings: Record<string, unknown>;
+  automaticAlerts: "critical" | "same";
 }>): Promise<BackendSettings> {
   return apiClient.put<BackendSettings>("/api/settings", patch);
 }

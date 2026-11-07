@@ -29,7 +29,7 @@
   }
  },
  "rates_note": "the model alone at 50%; the app also adds its rules and link checks",
- "measured_at": "2026-10-29T21:18:43Z",
+ "measured_at": "2026-10-31T05:43:03Z",
  "versions": {
   "scikit-learn": "1.5.2",
   "python": "3.13.15"

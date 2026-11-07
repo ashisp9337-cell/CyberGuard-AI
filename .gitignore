@@ -1,6 +1,12 @@
 node_modules
 dist
 .env
+# (6 Nov audit) Vite's other env files can hold secrets too; keys and Kaggle credentials never belong in Git
+.env.*
+!.env.example
+*.pem
+*.key
+kaggle.json
 *.tsbuildinfo
 .DS_Store
 

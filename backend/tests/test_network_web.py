@@ -85,3 +85,12 @@ def test_request_bodies_have_a_memory_limit(tmp_path, monkeypatch):
     _write(tmp_path / "m.pcap", pk)
     bodies = [r[6] for r in NT.read_capture(str(tmp_path / "m.pcap"))["http"]]
     assert sum(len(b) for b in bodies) <= 100 + 92 and bodies[-1] == ""
+
+
+def test_shellshock_in_a_captured_request_header(tmp_path):
+    """(6 Nov) WRCCDC 2018: the attack code was in the User-Agent header, the URL was ordinary."""
+    req = (b"GET /cgi-bin/status HTTP/1.1\r\nHost: 10.0.0.5\r\nUser-Agent: () { ignored; }; echo ; /bin/cat /etc/passwd"
+           b"\r\nAccept: */*\r\n\r\n")
+    assert "web_attack" in _cats(tmp_path, _conn(1_700_000_000, 40001, [req]))
+    ok = b"GET /cgi-bin/status HTTP/1.1\r\nHost: 10.0.0.5\r\nUser-Agent: Mozilla/5.0 (X11; Linux x86_64)\r\n\r\n"
+    assert "web_attack" not in _cats(tmp_path, _conn(1_700_000_000, 40002, [ok]), "ok.pcap")

@@ -189,3 +189,34 @@ def test_existing_email_analysis_screen_uses_pipeline(auth_client):
 
 def test_email_api_requires_login(client):
     assert client.post("/api/email/analyze", data={"rawEmail": "hi"}).status_code == 401
+
+
+# (4 Nov) Genuine brand marketing mail: the brand named in the text is the sender's own authenticated domain, but the
+# display name is a generic one ("Weekend Deals"), so no organisation is claimed in the header. It was rated
+# "Brand impersonation phishing" (66) before; the look-alike copy must stay critical.
+def _promo(frm: str, dom: str) -> bytes:
+    body = ("Swiggy Super Saver - last chance! Your cart items are on hold and the deal expires tonight. "
+            "Pay now with your card or update your payment method to keep the offer: "
+            "https://www.swiggy.com/checkout Swiggy")
+    return (f"Authentication-Results: mx.google.com; spf=pass smtp.mailfrom={dom};\r\n"
+            f" dkim=pass header.d={dom}; dmarc=pass header.from={dom}\r\n"
+            f"From: \"Weekend Deals\" <{frm}>\r\nTo: ashis@example.com\r\n"
+            f"Subject: Last chance: your cart is on hold\r\nMessage-ID: <p1@{dom}>\r\n"
+            f"Content-Type: text/plain; charset=utf-8\r\n\r\n{body}").encode()
+
+
+def test_genuine_brand_marketing_from_its_own_authenticated_domain_is_not_brand_impersonation():
+    r = analyze_email(_promo("store-news@swiggy.com", "swiggy.com"), network=False)
+    assert r["riskScore"] <= 50 and not r["category"].startswith("Brand impersonation"), (r["riskScore"], r["category"])
+
+
+def test_look_alike_brand_marketing_is_still_critical():
+    r = analyze_email(_promo("offers@swlggy-deals.com", "swlggy-deals.com"), network=False)
+    assert r["riskScore"] > 85 and r["category"].startswith("Brand impersonation")
+
+
+def test_brand_detector_reports_when_the_sender_is_the_brand():
+    from app.detectors.brand_impersonation import analyze_brand_impersonation
+    text = "Swiggy: your order is on its way"
+    assert analyze_brand_impersonation(text, {"senderEmail": "no-reply@swiggy.com"}, "x")["senderVerifiedBrand"]
+    assert not analyze_brand_impersonation(text, {"senderEmail": "no-reply@swlggy.com"}, "x")["senderVerifiedBrand"]

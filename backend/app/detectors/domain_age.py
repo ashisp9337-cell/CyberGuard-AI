@@ -98,8 +98,11 @@ def assess(domain: str, facts: dict | None = None) -> dict | None:
     created, expires = domain_facts._parse_date(facts.get("created")), domain_facts._parse_date(facts.get("expires"))
     if created and expires:
         sentences.append(f"Registered until {facts['expires'][:10]} ({_years(expires, created):.1f}-year term)")
-    if b is None:
-        return {"facts": facts, "ageDays": age, "probability": None, "level": None, "sentences": sentences}
+    if b is None:                                   # (4 Nov) say so instead of skipping it silently
+        sentences.append("The domain-registration model is not installed on this computer, so only these registry "
+                         "facts are shown (no model verdict)")
+        return {"facts": facts, "ageDays": age, "probability": None, "level": None, "sentences": sentences,
+                "modelMissing": True}
     row = features(facts, b["registrar_rates"], b["tld_rates"], b["prior"])
     if row is None:
         return {"facts": facts, "ageDays": age, "probability": None, "level": None, "sentences": sentences}

@@ -434,6 +434,12 @@ def analyze_url(url: str, subtopic_title: str = "Malicious URL Analysis", subtop
     login_model = _login_page_model(page_box, subtopic_id)
     if login_model:
         subs.append(login_model)
+    elif _login_model_missing(page_box, subtopic_id):    # (4 Nov) never skip a missing model silently
+        indicators.append({"label": "Fake login page model not installed (info only)",
+                           "description": "The page was read, but the fake-login-page model (fake_login.joblib) is not "
+                                          "in backend/app/ml/models on this computer, so it did not judge the page. "
+                                          "The other checks above still ran.",
+                           "severity": "low", "weight": 0, "triggered": False})
     sub = max(subs, key=_model_points) if subs else None        # the strongest model decides the floor
     for s_ in subs:
         if len(subs) == 1 or s_["indicator"]["triggered"]:
@@ -696,6 +702,17 @@ def _registry_model(reg: dict | None, subtopic_id: str | None):
                                          f"sites) rates this registration {p * 100:.0f}% phishing-like.",
                           "weight": 0, "triggered": level != "low",
                           "severity": {"high": "high", "medium": "medium"}.get(level, "low")}}
+
+
+def _login_model_missing(page_box: dict, subtopic_id: str | None) -> bool:
+    """True when the fake-login-page model would have judged this page but its file is not installed."""
+    from app.detectors import fake_login
+    if not page_box.get("html") or subtopic_id not in ({"fake-login-page"} | ALL_URL_MODELS):
+        return False
+    try:
+        return fake_login.load() is None
+    except Exception:
+        return False
 
 
 def _login_page_model(page_box: dict, subtopic_id: str | None):

@@ -7,3 +7,19 @@ reports/*
 .env
 .pytest_cache/
 tests/
+# (6 Nov audit) private files of this computer: never copy them into an image
+.env.*
+!.env.example
+*.db
+*.db.*
+*.old-backup
+automation_state.json*
+quarantine/
+demo_samples/
+*_check.txt
+itw_results.json
+itw_scores.csv.gz
+.pytest_tmp/
+*.pem
+*.key
+kaggle.json

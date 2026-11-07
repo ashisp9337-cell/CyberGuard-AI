@@ -15,12 +15,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIASGIMiddleware
+from app.core.body_limit import BodySizeLimit
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.config import get_settings, security_problems
 from app.db.database import engine
 from app.db import models  # noqa: F401 — ensures models are registered before create_all
-from app.api.routes import auth, analysis, scans, dashboard, events, reports, settings as settings_route, threat_intelligence, monitoring, chat, contacts, email as email_route, alerts as alerts_route, incidents as incidents_route, automation as automation_route, iocs as iocs_route, audit as audit_route, mitre as mitre_route, quarantine as quarantine_route
+from app.api.routes import auth, analysis, scans, dashboard, events, reports, settings as settings_route, threat_intelligence, monitoring, chat, contacts, email as email_route, alerts as alerts_route, incidents as incidents_route, automation as automation_route, iocs as iocs_route, audit as audit_route, mitre as mitre_route, quarantine as quarantine_route, pc_network as pc_network_route, extension as extension_route
 
 settings = get_settings()
 
@@ -56,6 +58,7 @@ def _schema_status() -> str:
     return ""
 
 from app.core.rate_limit import limiter  # shared with routes (per-route limits)
+from app.services import request_log  # (6 Nov) requests seen, for the website watcher
 
 @asynccontextmanager
 async def lifespan(_app):
@@ -100,6 +103,8 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIASGIMiddleware)    # (6 Nov audit) makes the default per-address limit real
+app.add_middleware(BodySizeLimit, max_bytes=(2 * settings.MAX_UPLOAD_MB + 2) * 1024 * 1024)   # (6 Nov audit)
 
 app.add_middleware(
     CORSMiddleware,
@@ -119,6 +124,12 @@ async def request_logging(request: Request, call_next):
     duration_ms = round((time.time() - start) * 1000, 1)
     logger.info(f"[{request_id}] {request.method} {request.url.path} -> {response.status_code} ({duration_ms}ms)")
     response.headers["X-Request-ID"] = request_id
+    try:                      # (6 Nov) for the automatic website watcher: no bodies, cookies or auth headers
+        request_log.record(request.client.host if request.client else "-", request.method, request.url.path,
+                           request.url.query, response.status_code, request.headers.get("user-agent", ""),
+                           request.headers.get("referer", ""))
+    except Exception:         # noqa: BLE001 - recording must never break a request
+        pass
     return response
 
 
@@ -171,6 +182,8 @@ app.include_router(iocs_route.router)
 app.include_router(audit_route.router)
 app.include_router(mitre_route.router)
 app.include_router(quarantine_route.router)
+app.include_router(pc_network_route.router)
+app.include_router(extension_route.router)
 
 
 

@@ -11,9 +11,75 @@ used and the result clearly says why -- never a made-up verdict.
 VIDEOS: provenance check (app/detectors/video_provenance.py) + face-swap video model on 16 sampled frames
 (app/detectors/deepfake_video.py, trained on Celeb-DF v2 on Kaggle). No face / no model -> "unverified", never
 "real". Fully AI-generated video (no face swap) has no model yet.
+
+(30 Oct) GIF, iPhone HEIC / HEIF, AVIF and animated WebP pictures are turned into a PNG of their first picture for
+the image models (a temporary copy, deleted right after); the original file is used for the provenance and metadata
+checks. HEIC needs the pillow-heif package (in requirements.txt) - without it the result says so, never "real".
 """
+import os
+import tempfile
 import uuid
-from app.detectors.base import build_result
+
+from app.detectors.base import build_result, build_unverified_result
+
+HEIF_BRANDS = {b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"hevm", b"hevs", b"mif1", b"msf1", b"avif", b"avis"}
+_HEIF = {"tried": False, "ok": False}
+
+
+def _register_heif() -> bool:
+    """Teach Pillow to open HEIC / HEIF (iPhone photos) when pillow-heif is installed."""
+    if not _HEIF["tried"]:
+        _HEIF["tried"] = True
+        try:
+            import pillow_heif
+            pillow_heif.register_heif_opener()
+            _HEIF["ok"] = True
+        except Exception:                                    # not installed / no wheel: HEIC is reported as unreadable
+            _HEIF["ok"] = False
+    return _HEIF["ok"]
+
+
+def _is_heif(file_path: str) -> bool:
+    try:
+        with open(file_path, "rb") as f:
+            head = f.read(16)
+    except OSError:
+        return False
+    return head[4:8] == b"ftyp" and head[8:12] in HEIF_BRANDS
+
+
+def _model_copy(file_path: str):
+    """(path the image models read, note for the user, is it a temporary copy?). JPEG / PNG / BMP / still WebP are
+    read as they are; GIF, HEIC / HEIF, AVIF and animated pictures become a PNG of their first picture.
+    (None, reason, False) when the picture cannot be opened at all."""
+    _register_heif()
+    try:
+        from PIL import Image
+        with Image.open(file_path) as im:
+            fmt = (im.format or "").upper()
+            animated = bool(getattr(im, "is_animated", False)) and getattr(im, "n_frames", 1) > 1
+            if fmt in ("JPEG", "PNG", "BMP", "WEBP", "MPO") and not animated:
+                return file_path, "", False
+            im.seek(0)
+            rgb = im.convert("RGB")
+    except Exception:
+        if _is_heif(file_path):
+            return None, ("This is an iPhone HEIC / HEIF photo and the HEIC reader (pillow-heif) is not installed on "
+                          "this computer, so the picture could not be opened. Run pip install -r requirements.txt, or "
+                          "send the photo as JPG (iPhone: Settings > Camera > Formats > Most Compatible)."), False
+        return file_path, "", False                          # let each check report its own problem, as before
+    fd, tmp = tempfile.mkstemp(suffix=".png", dir=os.path.dirname(os.path.abspath(file_path)))
+    os.close(fd)
+    rgb.save(tmp, "PNG")
+    note = {"GIF": "The picture is a GIF, which has at most 256 colours" + (" and is animated - the first frame was "
+                                                                            "checked" if animated else "")
+                   + "; the image models were trained on photos, so treat this result with extra care.",
+            "HEIF": "The HEIC / HEIF photo (iPhone format) was converted for the image models; its own metadata was "
+                    "checked as well.",
+            "AVIF": "The AVIF picture was converted for the image models."}.get(
+        fmt, "The picture is animated - its first frame was checked." if animated else
+        f"The {fmt or 'picture'} was converted for the image models.")
+    return tmp, note, True
 
 def _ind(label, description, severity, triggered):
     return {"label": label, "description": description, "severity": severity, "weight": 0,
@@ -55,7 +121,7 @@ def _ai_check(file_path):
         return None, f"AI-image model could not read the image ({e.__class__.__name__})"
 
 
-def _image_model_result(file_path: str, subtopic_title: str):
+def _image_model_result(file_path: str, subtopic_title: str, provenance_path: str | None = None):
     """Every image check -> one result where the strongest check decides, or (None, reason) if none can run.
 
     1. provenance  - the file itself declares AI generation (C2PA / IPTC / generator settings)   -> proof
@@ -66,7 +132,7 @@ def _image_model_result(file_path: str, subtopic_title: str):
     from app.detectors import deepfake_image as DI
     face, why_face = _face_check(file_path)
     ai, why_ai = _ai_check(file_path)
-    prov = AI.provenance(file_path)
+    prov = AI.provenance(provenance_path or file_path)      # the ORIGINAL file: its own metadata
     if face is None and ai is None and not prov["proof"]:
         return None, f"{why_face}; {why_ai}"
 
@@ -320,42 +386,66 @@ def _image_metadata_signals(file_path: str) -> list[dict]:
 
 def analyze_media(file_path: str | None, file_name: str, subtopic_title: str = "Deepfake Detection",
                   reference_path: str | None = None) -> dict:
-    is_video = file_name.lower().endswith((".mp4", ".mov", ".avi", ".mkv", ".webm"))
+    is_video = file_name.lower().endswith((".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".3gp", ".3g2"))
     if file_path:
         from app.services.subtopic_router import file_kind
-        if file_kind(file_path, file_name) == "audio":       # voice notes / recordings (added 24 Oct)
+        kind = file_kind(file_path, file_name)
+        if kind == "audio":                                  # voice notes / recordings (added 24 Oct; .amr / .3gp 30 Oct)
             from app.detectors import voice
             return voice.analyze_voice(file_path, file_name, subtopic_title, reference_path=reference_path)
+        if kind == "image":                                  # (30 Oct) a picture is never sent to the video path
+            is_video = False
 
     why_no_model = "no file was uploaded"
+    note = ""
     if file_path and not is_video:
-        model_result, why_no_model = _image_model_result(file_path, subtopic_title)
+        model_path, note, temporary = _model_copy(file_path)
+        if model_path is None:                               # e.g. HEIC without its reader: say so, never "real"
+            result = build_unverified_result(engine_name="CYBERGUARD Deepfake Engine", threat_type=subtopic_title,
+                                             explanation=note)
+            result["recommendations"] = ["Install the HEIC reader once: pip install -r requirements.txt in the backend "
+                                         "folder, restart CyberGuard and scan again.",
+                                         "Or share the photo as JPG and upload that instead."]
+            return result
+        try:
+            model_result, why_no_model = _image_model_result(model_path, subtopic_title, provenance_path=file_path)
+        finally:
+            if temporary:
+                try:
+                    os.remove(model_path)
+                except OSError:
+                    pass
         if model_result:
+            if note:
+                model_result["explanation"] = f"{model_result['explanation']} {note}".strip()
             return model_result
 
     if is_video:
         return _video_result(file_path, subtopic_title)
 
+    # (4 Nov) Without a trained image model there is NO verdict: a metadata check alone cannot tell a real photo
+    # from a fake, so the result is "unable to verify" (score 0), never "safe". The metadata is shown as info only.
     indicators = _image_metadata_signals(file_path) if file_path else []
     triggered = [i for i in indicators if i["triggered"]]
-    score = sum(i["weight"] for i in indicators if i["triggered"])
-    confidence = 25 + min(len(triggered) * 5, 20)  # deliberately capped — this is a weak signal
-
-    if triggered:
-        names = ", ".join(i["label"].lower() for i in triggered)
-        explanation = (
-            f"The trained image models could not be used ({why_no_model}), so this result is based only on "
-            f"static metadata analysis: {names}. This is a weak signal, not a manipulation verdict — "
-            f"treat this result as inconclusive."
-        )
-    else:
-        explanation = (
-            f"The trained image models could not be used ({why_no_model}). Static metadata analysis found "
-            "nothing notable, but this does NOT confirm the media is authentic."
-        )
-
-    return build_result(
-        indicators=indicators, base_score=score, confidence=confidence,
-        engine_name="CYBERGUARD Deepfake Engine — Metadata-Only (Model Unavailable)",
-        threat_type=subtopic_title, explanation=explanation,
+    for m in indicators:
+        if m["triggered"]:
+            m.update(weight=0, triggered=False, severity="low", label=m["label"] + " (info only)")
+    explanation = (
+        f"No verdict: the trained image models could not be used ({why_no_model}). Without them CyberGuard does "
+        "not judge the picture - a metadata check alone cannot tell a real photo from a fake."
     )
+    if triggered:
+        explanation += " Metadata seen (info only): " + ", ".join(i["label"].lower() for i in triggered) + "."
+    if note:
+        explanation = f"{explanation} {note}"
+    result = build_unverified_result(
+        engine_name="CYBERGUARD Deepfake Engine — Metadata-Only (Model Unavailable) — No Verdict",
+        threat_type=subtopic_title, explanation=explanation)
+    result["indicators"] = indicators
+    result["recommendations"] = [
+        "Install the image models (ai_image.onnx / .json and deepfake_image.onnx / .json in backend/app/ml/models, "
+        "see the README), restart CyberGuard and scan again.",
+        "Until then, check where the picture came from: ask the sender, or look for the original with a reverse "
+        "image search.",
+    ]
+    return result

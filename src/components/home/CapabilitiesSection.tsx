@@ -7,7 +7,7 @@ const CAPABILITIES = [
   {
     icon: ICONS.credential, tag: "Trained model", title: "Account-takeover detection",
     desc: "Each sign-in is compared with the account's own history of countries, networks, devices and browsers.",
-    fact: "Trained on ≈31 million real logins (RBA dataset)",
+    fact: "Trained on ≈31 million logins (RBA dataset, synthesized from a real sign-in service)",
   },
   {
     icon: ICONS.url, tag: "Trained model", title: "Malicious URL & website model",
@@ -17,7 +17,7 @@ const CAPABILITIES = [
   {
     icon: ICONS.target, tag: "New", title: "MITRE ATT&CK mapping",
     desc: "Every risky scan is mapped to the attacker techniques it matches, each explained in plain language with a link to MITRE.",
-    fact: "32 techniques, from phishing to credential dumping",
+    fact: "67 techniques, from phishing to credential dumping",
   },
   {
     icon: ICONS.radar, tag: "New", title: "Automatic protection",

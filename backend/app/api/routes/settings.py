@@ -14,12 +14,14 @@ class UpdateSettingsRequest(BaseModel):
     notificationsEnabled: bool | None = None
     emailNotifications: bool | None = None
     integrationSettings: dict | None = None
+    automaticAlerts: str | None = None      # (4 Nov) "critical" (default) | "same": alerts for the watchers' findings
 
 
 def _to_out(s: UserSettings) -> dict:
     return {
         "sensitivity": s.sensitivity, "notificationsEnabled": s.notifications_enabled,
         "emailNotifications": s.email_notifications, "integrationSettings": s.integration_settings,
+        "automaticAlerts": "same" if (s.integration_settings or {}).get("automaticAlerts") == "same" else "critical",
         "updatedAt": s.updated_at.isoformat() if s.updated_at else "",
     }
 
@@ -57,6 +59,11 @@ def update_settings(body: UpdateSettingsRequest, request: Request, user: User = 
         # only store non-secret integration toggles/labels.
         safe = {k: v for k, v in body.integrationSettings.items() if "key" not in k.lower() and "secret" not in k.lower()}
         s.integration_settings = safe
+    if body.automaticAlerts is not None:
+        if body.automaticAlerts not in ("critical", "same"):
+            raise HTTPException(status_code=422, detail={"error": {"code": "INVALID_AUTOMATIC_ALERTS",
+                                "message": "automaticAlerts must be critical or same"}})
+        s.integration_settings = {**(s.integration_settings or {}), "automaticAlerts": body.automaticAlerts}
     from app.services import audit
     audit.log(db, action="settings.update", user=user, request=request,
               detail={k: v for k, v in body.model_dump(exclude_none=True).items() if k != "integrationSettings"})

@@ -13,11 +13,13 @@ const STATE_COLOR: Record<string, string> = {
   active: "var(--color-safe)", off: "rgb(100 116 139)", "needs setup": "var(--color-warning)", error: "var(--color-critical)",
 };
 
+// (7 Nov) checked against the metrics files of the installed models (backend/app/ml/models/*.metrics.json)
 const MODELS = [
-  { name: "Account takeover", data: "RBA dataset · ≈31M real logins" },
+  { name: "Account takeover", data: "RBA dataset · ≈31M logins (synthesized)" },
   { name: "URL domain model", data: "PhiUSIIL 235,795 URLs + Tranco 1M" },
+  { name: "2026 link model", data: "29,052 real links from 2026" },
   { name: "Email & SMS phishing", data: "18,634 emails · 77,891 SMS" },
-  { name: "Impersonation", data: "6 subtopic models" },
+  { name: "Impersonation", data: "5 trained models + known contacts" },
 ];
 
 function ago(iso: string | null) {
@@ -36,16 +38,38 @@ export function ProtectionStatusCard() {
   const [autoAdminOnly, setAutoAdminOnly] = useState(false);
 
   useEffect(() => {
-    getAutomationStatus().then(setAuto).catch((e) => {
-      if (e instanceof ApiError && e.status === 403) setAutoAdminOnly(true);
-    });
-    getIocSummary().then(setIocs).catch(() => {});
-    getMitreSummary(30).then(setMitre).catch(() => {});
+    // (7 Nov) "live": the watcher list refreshes every 15 s (as the Settings card does), the totals every minute
+    let adminOnly = false;
+    const loadAuto = () => {
+      if (adminOnly) return;
+      getAutomationStatus().then(setAuto).catch((e) => {
+        if (e instanceof ApiError && e.status === 403) { adminOnly = true; setAutoAdminOnly(true); }
+      });
+    };
+    const loadTotals = () => {
+      getIocSummary().then(setIocs).catch(() => {});
+      getMitreSummary(30).then(setMitre).catch(() => {});
+    };
+    loadAuto();
+    loadTotals();
+    const a = window.setInterval(loadAuto, 15000);
+    const t = window.setInterval(loadTotals, 60000);
+    return () => { window.clearInterval(a); window.clearInterval(t); };
   }, []);
 
   const watchers = auto?.watchers ?? [];
-  const activeCount = watchers.filter((w) => w.state === "active").length;
+  // (7 Nov) "on" = switched on in Settings (what the owner sees there); one that is on but cannot work is named below
+  const masterOn = auto?.enabled !== false;
+  const on = masterOn ? watchers.filter((w) => w.enabled) : [];
+  const needSetup = on.filter((w) => w.state === "needs setup").length;
+  const failing = on.filter((w) => w.state === "error").length;
   const checked = watchers.reduce((n, w) => n + (w.checked || 0), 0);
+  const watcherNote = !auto ? "" : !masterOn ? "all paused (AUTOMATION_ENABLED)"
+    : on.length === 0 ? "none switched on"
+    : failing ? `${failing} with a problem`
+    : needSetup ? `${needSetup} need${needSetup === 1 ? "s" : ""} setup`
+    : "all working";
+  const noteColor = failing ? "text-red-400" : needSetup || !masterOn ? "text-amber-400" : "text-slate-500";
 
   return (
     <Card>
@@ -55,21 +79,24 @@ export function ProtectionStatusCard() {
       <CardBody className="space-y-4">
         <div className="grid grid-cols-3 gap-2 text-center">
           <div className="rounded-lg bg-elevated p-2.5">
-            <p className="text-lg font-bold text-white font-mono">{auto ? `${activeCount}/${watchers.length}` : "—"}</p>
+            <p className="text-lg font-bold text-white font-mono">{auto ? `${on.length}/${watchers.length}` : "—"}</p>
             <p className="text-[10px] uppercase tracking-wide text-slate-500">Watchers on</p>
+            <p className={`text-[10px] mt-0.5 ${noteColor}`}>{watcherNote || " "}</p>
           </div>
           <Link to="/threat-intelligence" className="rounded-lg bg-elevated p-2.5 hover:ring-1 hover:ring-cyan-500/40">
             <p className="text-lg font-bold text-white font-mono">{iocs ? iocs.total : "—"}</p>
             <p className="text-[10px] uppercase tracking-wide text-slate-500">IOCs remembered</p>
+            <p className="text-[10px] mt-0.5 text-slate-500">{iocs ? `${iocs.repeat} seen again` : " "}</p>
           </Link>
           <Link to="/threat-intelligence" className="rounded-lg bg-elevated p-2.5 hover:ring-1 hover:ring-cyan-500/40">
             <p className="text-lg font-bold text-white font-mono">{mitre ? mitre.techniques.length : "—"}</p>
             <p className="text-[10px] uppercase tracking-wide text-slate-500">ATT&CK techniques</p>
+            <p className="text-[10px] mt-0.5 text-slate-500">last 30 days</p>
           </Link>
         </div>
 
         <div className="space-y-1.5">
-          <p className="text-[10px] uppercase tracking-wide text-slate-500">Automatic protection · {checked} item(s) checked</p>
+          <p className="text-[10px] uppercase tracking-wide text-slate-500" title="Counted since the backend was started">Automatic protection · {checked} item(s) checked since start</p>
           {watchers.length === 0 && (
             <p className="text-xs text-slate-500">{autoAdminOnly ? "Managed by the CyberGuard administrator." : "Status unavailable."}</p>
           )}
@@ -95,7 +122,7 @@ export function ProtectionStatusCard() {
         <ul className="space-y-1 text-[11px] text-slate-400">
           <li className="flex gap-1.5"><ICONS.success size={12} className="text-emerald-400 shrink-0 mt-0.5" />Every risky scan is mapped to MITRE ATT&CK with an explanation</li>
           <li className="flex gap-1.5"><ICONS.success size={12} className="text-emerald-400 shrink-0 mt-0.5" />Repeat threats are flagged “Seen before” from IOC memory</li>
-          <li className="flex gap-1.5"><ICONS.success size={12} className="text-emerald-400 shrink-0 mt-0.5" />High and critical threats become incidents and send alerts</li>
+          <li className="flex gap-1.5"><ICONS.success size={12} className="text-emerald-400 shrink-0 mt-0.5" />High and critical threats become incidents and send alerts (automatic findings: critical only by default)</li>
           <li className="flex gap-1.5"><ICONS.success size={12} className="text-emerald-400 shrink-0 mt-0.5" />Every sign-in and change is recorded in the Activity Log</li>
         </ul>
       </CardBody>

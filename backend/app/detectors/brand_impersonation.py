@@ -169,8 +169,12 @@ def analyze_brand_impersonation(text: str, extra_field_values: dict, subtopic_ti
         model_note = f"the trained classifier assessed a {proba*100:.0f}% probability of impersonation" if model_used else "no trained model was available"
         explanation = f"No rule-based indicators were triggered ({basis}); {model_note}."
 
-    return build_result(
+    result = build_result(
         indicators=indicators, base_score=blended, confidence=confidence,
         engine_name=f"CYBERGUARD Impersonation Engine — {'TF-IDF+LogReg (brand-masked) + Domain Lookup' if model_used else 'Rule-Based (model unavailable)'}",
         threat_type=subtopic_title, explanation=explanation,
-    )
+    )
+    # (4 Nov) The sender's own domain IS the brand the message names (e.g. offers@mailer.amazon.in naming Amazon).
+    # The email pipeline uses this together with SPF/DKIM/DMARC to stop flagging genuine brand newsletters.
+    result["senderVerifiedBrand"] = sender_verified
+    return result

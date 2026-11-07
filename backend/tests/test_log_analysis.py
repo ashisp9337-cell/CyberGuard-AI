@@ -175,3 +175,22 @@ def test_dovecot_disconnect_before_auth_is_a_probe_line():
     line = ("Mar  4 13:51:48 mail dovecot: imap-login: Disconnected (disconnected before auth was ready, waited 0 secs): "
             "user=<>, rip=192.168.10.18, lip=192.168.10.21, session=<+KO9uAeg4sPAqAoS>")
     assert [(e[0], e[3]) for e in LI.events([line])] == [("probe", "192.168.10.18")]
+
+
+# ---- (6 Nov) found on real WRCCDC 2018 traffic ------------------------------------------------------------------
+def test_shellshock_in_the_user_agent_of_an_access_log_is_a_web_attack():
+    """Apache writes a quote inside the user agent as \\" - the line must still be read to the end."""
+    ua = r'() { ignored; }; echo Content-Type: text/plain ; echo ; echo \"bash_cve_2014_6271_rce Output : $((3+47))\"'
+    lines = [f'10.164.94.120 - - [24/Mar/2018:17:2{i % 10}:00 +0000] "GET /cgi-bin/test{i}.cgi HTTP/1.1" 404 0 "-" "{ua}"'
+             for i in range(6)]
+    s = LI.analyze("\n".join(lines))
+    assert "web_attack" in {i["category"] for i in s["incidents"]}
+    m = LI.ACCESS.match(lines[0])
+    assert m and m["ua"].startswith("() { ignored; }")
+
+
+def test_bing_search_clicks_are_not_a_web_attack():
+    lines = [f'10.47.1.155 - - [24/Mar/2018:17:2{i}:00 +0000] "GET /fd/ls/GLinkPing.aspx?IG=2E04644C8C9045A5&&ID=SERP,51{i}7.1'
+             f'&url=http://www.pdfonline.com/ HTTP/1.1" 200 0 "https://www.bing.com/" "Mozilla/5.0 (Windows NT 6.1)"'
+             for i in range(8)]
+    assert LI.analyze("\n".join(lines))["incidents"] == []

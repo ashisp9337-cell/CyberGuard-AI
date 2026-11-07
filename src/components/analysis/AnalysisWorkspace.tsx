@@ -206,7 +206,7 @@ export function AnalysisWorkspace({ module: mod, subtopic }: { module: Detection
                   maxSizeMb={subtopic.maxFileSizeMb ?? 50}
                   file={file}
                   onSelect={handleFileSelect}
-                  onRemove={() => setFile(null)}
+                  onRemove={() => { setFile(null); setFileBlob(null); /* (4 Nov) a removed file is never uploaded */ }}
                   error={error ?? undefined}
                 />
               )}

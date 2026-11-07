@@ -24,7 +24,7 @@ import re
 import uuid
 import zipfile
 
-from app.detectors import script_checks
+from app.detectors import container_files, script_checks
 from app.detectors.base import build_result
 from app.email_pipeline.schemas import Attachment
 
@@ -36,6 +36,7 @@ ARCHIVE_EXT = {".zip", ".rar", ".7z", ".gz", ".tar", ".cab", ".ace", ".arj"}
 MACRO_EXT = {".docm", ".xlsm", ".pptm", ".dotm", ".xltm", ".xlam", ".ppsm"}
 WEB_EXT = {".html", ".htm", ".shtml", ".xhtml", ".svg", ".mht", ".mhtml"}
 OFFICE_EXT = {".doc", ".xls", ".ppt", ".docx", ".xlsx", ".pptx", ".rtf"} | MACRO_EXT
+COMPRESSED_EXT = {".gz", ".bz2", ".xz", ".zst"}
 DECOY_EXT = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".jpg", ".jpeg", ".png", ".txt", ".csv", ".ppt", ".pptx"}
 
 MAGIC = [
@@ -92,6 +93,28 @@ def _disguised(filename: str) -> bool:
     exts = _exts(filename.rsplit("/", 1)[-1])
     risky = EXECUTABLE_EXT | CONTAINER_EXT | MACRO_EXT | WEB_EXT
     return RTLO in filename or (len(exts) >= 2 and exts[-2] in DECOY_EXT and exts[-1] in risky)
+
+
+_SCRIPTISH = re.compile(rb"<hta:application|<script|wscript\.|createobject\(|powershell|@echo off|cmd(\.exe)? /c|"
+                        rb"mshta|rundll32|#@~\^", re.I)
+
+
+def container_members(data: bytes, name: str = "") -> tuple[str, list[tuple[str, bytes]]]:
+    """(what it is, [(inner name, bytes)]) for disk images, OneNote notebooks, tar / tar.gz and .gz files - read in
+    memory only (zip files are handled separately). ("", []) for anything else."""
+    if container_files.is_iso(data):
+        return "disk image", container_files.iso_files(data)
+    if container_files.is_onenote(data):
+        return "OneNote notebook", [(f"embedded file {i + 1}", b)
+                                    for i, b in enumerate(container_files.onenote_files(data))]
+    if data[257:262] == b"ustar" or data[:2] == b"\x1f\x8b":
+        tar = container_files.tar_files(data)
+        if tar:
+            return "archive", tar
+        g = container_files.gzip_inner(data)
+        if g:                                  # no stored name: the packed file is the .gz name without ".gz"
+            return "archive", [(g[0] or (name[:-3] if name.lower().endswith(".gz") else "packed file"), g[1])]
+    return "", []
 
 
 def _has_macros(name: str, data: bytes) -> bool:
@@ -151,7 +174,8 @@ def scan_attachment(att: Attachment, *, network: bool = True) -> dict:
     ind.append(_ind(last in CONTAINER_EXT, "Disk-image attachment",
                     f"'{name}' is a disk image (.iso/.img/.vhd), used to smuggle malware past email filters.",
                     "high", 30, "T1553.005"))
-    ind.append(_ind(len(exts) >= 2 and exts[-2] in DECOY_EXT and last not in DECOY_EXT,
+    # ("report.csv.gz" is the normal name of a compressed file, not a disguise - the file inside is checked below)
+    ind.append(_ind(len(exts) >= 2 and exts[-2] in DECOY_EXT and last not in DECOY_EXT | COMPRESSED_EXT,
                     "Double file extension",
                     f"'{name}' pretends to be a {exts[-2] if len(exts) >= 2 else ''} file but is really {last}.",
                     "critical", 35, "T1036.007"))
@@ -215,10 +239,47 @@ def scan_attachment(att: Attachment, *, network: bool = True) -> dict:
                 ind += script_found
         except zipfile.BadZipFile:
             ind.append(_ind(True, "Corrupted archive", "The archive could not be opened.", "medium", 10))
-    elif last in ARCHIVE_EXT and magic != "zip":
-        ind.append(_ind(True, "Archive attachment (not inspected)",
-                        f"'{name}' is a {last} archive that this scanner cannot open — treat with caution.",
-                        "medium", 12))
+    elif magic != "zip":
+        # -- (30 Oct) disk images, OneNote notebooks, tar / gz: the files inside, read in memory --------------
+        ckind, members = container_members(data, name)
+        if ckind:
+            names = [n for n, _ in members]
+            details["archive_files"] = names[:30]
+            details["container"] = ckind
+            risky_ext = EXECUTABLE_EXT | CONTAINER_EXT | MACRO_EXT | WEB_EXT
+            # a OneNote page normally holds pictures; a program or a script hidden in it is the attack
+            dangerous = [n for n, b in members if os.path.splitext(n.lower())[1] in risky_ext
+                         or b[:2] == b"MZ" or b[:4] == b"\x7fELF"
+                         or (ckind == "OneNote notebook" and _SCRIPTISH.search(b[:200000] or b""))]
+            ind.append(_ind(bool(dangerous), "Dangerous file inside archive",
+                            f"The {ckind} contains {', '.join(dangerous[:3])} - a program or script. Opening it "
+                            "runs code.", "critical", 40, "T1204.002"))
+            disguised = [n for n in names if _disguised(n)]
+            ind.append(_ind(bool(disguised), "Disguised file inside archive",
+                            f"The {ckind} contains {', '.join(disguised[:3])}: a program dressed up with a "
+                            "harmless-looking name. Real photos and documents never do this.", "critical", 40,
+                            "T1036.007"))
+            eicar_inner, script_found = [], []
+            for n, b in members:
+                ext = os.path.splitext(n.lower())[1]
+                if is_eicar(b):
+                    eicar_inner.append(n)
+                elif len(script_found) < 10 and (ext in script_checks.SCRIPT_EXT or (
+                        ckind == "OneNote notebook" and _SCRIPTISH.search(b[:200000]))):
+                    found, fl = script_checks.check(n, b[:MAX_INNER_SCRIPT])
+                    for s in found:
+                        s["label"] = f"Inside archive: {s['label']}"
+                        s["description"] = f"{n}: {s['description']}"
+                    script_found += found
+                    floor = max(floor, fl)
+            ind.append(_ind(bool(eicar_inner), "EICAR antivirus test file",
+                            f"The {ckind} contains the harmless EICAR antivirus test file - treated like malware so "
+                            "you can test the alerts and quarantine.", "high", 71, "T1204.002"))
+            ind += script_found
+        elif last in ARCHIVE_EXT:
+            ind.append(_ind(True, "Archive attachment (not inspected)",
+                            f"'{name}' is a {last} archive that this scanner cannot open (RAR / 7-Zip need extra "
+                            "tools) - treat with caution and scan the files inside after unpacking.", "medium", 12))
 
     # -- Office macros -----------------------------------------------------------
     if last in OFFICE_EXT or magic == "ole":
@@ -263,6 +324,12 @@ def scan_attachment(att: Attachment, *, network: bool = True) -> dict:
         has_script = "<script" in text
         obfuscated = any(k in text for k in ("atob(", "unescape(", "eval(", "fromcharcode", "document.write("))
         redirect = any(k in text for k in ("window.location", "location.href", "location.replace", "http-equiv=\"refresh\""))
+        # (30 Oct) HTML smuggling: the page builds a file inside the browser from hidden data and "downloads" it,
+        # so the file never crosses the e-mail / web filter (MITRE T1027.006)
+        smuggling = (any(k in text for k in ("new blob", "mssaveoropenblob", "mssaveblob", "url.createobjecturl"))
+                     and any(k in text for k in ("atob(", "base64", "uint8array", "charcodeat"))
+                     and any(k in text for k in (".download=", ".download =", " download=", "setattribute(\"download",
+                                                 "setattribute('download", "mssaveoropenblob", "mssaveblob")))
         ind.append(_ind(True, "HTML/SVG attachment",
                         f"'{name}' is a web page sent as a file — opens locally in the browser, bypassing URL "
                         "filters. Banks and services do not send these.", "high", 22, "T1566.001"))
@@ -270,6 +337,9 @@ def scan_attachment(att: Attachment, *, network: bool = True) -> dict:
                         "The attached page asks for a password — a credential-harvesting page.", "critical", 35, "T1056.003"))
         ind.append(_ind(has_script and obfuscated, "Obfuscated script in attachment",
                         "Encoded JavaScript is used to hide what the page does (HTML smuggling).", "critical", 30, "T1027.006"))
+        ind.append(_ind(smuggling, "Page builds and downloads a hidden file (HTML smuggling)",
+                        "The page assembles a file from hidden (Base64) data inside your browser and saves it - a way "
+                        "to deliver malware past e-mail and web filters.", "critical", 35, "T1027.006"))
         ind.append(_ind(redirect, "Attachment redirects to a website",
                         "The page forwards the browser to another site as soon as it opens.", "high", 18, "T1566.001"))
         for u in URL_RE.findall(data)[:20]:

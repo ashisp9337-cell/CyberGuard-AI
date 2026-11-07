@@ -74,6 +74,10 @@ class Watcher:
     modules: list[str] = []
     technology = ""
     interval_seconds = 60
+    # (6 Nov) Watchers that read MORE of the computer (network, websites visited, every request) start OFF and run
+    # only after the owner switches them on in Settings (the permission screen). The first four keep their old default.
+    default_enabled = True
+    permission = ""          # what the owner allows when switching it on (shown in the permission screen)
 
     def __init__(self):
         self.status = {"running": False, "lastCheck": None, "lastError": None, "checked": 0, "threats": 0,
@@ -101,7 +105,7 @@ class Watcher:
     # -- engine ---------------------------------------------------------------------------------
     @property
     def enabled(self) -> bool:
-        return bool(get_state(self.name).get("enabled", True))
+        return bool(get_state(self.name).get("enabled", self.default_enabled))
 
     def set_enabled(self, value: bool) -> None:
         update_state(self.name, enabled=bool(value))
@@ -157,7 +161,8 @@ class Watcher:
                  "error" if self.status["lastError"] else "active")
         return {"name": self.name, "title": self.title, "what": self.what, "modules": self.modules,
                 "technology": self.technology, "intervalSeconds": self.interval_seconds,
-                "enabled": self.enabled, "configured": ok, "setupHint": why, "state": state, **self.status}
+                "enabled": self.enabled, "configured": ok, "setupHint": why, "state": state,
+                "permission": self.permission, "askFirst": not self.default_enabled, **self.status}
 
 
 def owner_user_id(db) -> str | None:

@@ -45,6 +45,9 @@ def toggle(name: str, body: ToggleIn, request: Request, user: User = Depends(req
 @limiter.limit("6/minute")
 def run_now(name: str, request: Request, user: User = Depends(require_admin), db: Session = Depends(get_db)):
     w = _get(name)
+    if not w.default_enabled and not w.enabled:        # (6 Nov) never run a permission-based watcher before it is allowed
+        raise HTTPException(status_code=409, detail={"error": {"code": "NOT_ALLOWED_YET", "message":
+                            "Switch this watcher on first: that is how you give it permission."}})
     w.run_once()
     audit.log(db, action="automation.run", user=user, request=request, target=w.title,
               detail={"error": w.status.get("lastError")}, success=not w.status.get("lastError"), commit=True)

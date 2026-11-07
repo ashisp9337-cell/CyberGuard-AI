@@ -82,7 +82,8 @@ def generate_pdf_report(scans: list, title: str) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=letter)
     styles = getSampleStyleSheet()
-    elements = [Paragraph(title, styles["Title"]), Spacer(1, 12),
+    # (6 Nov audit) the title is typed by the user: ReportLab reads <tags> in a Paragraph, so it must be escaped
+    elements = [Paragraph(escape(title), styles["Title"]), Spacer(1, 12),
                 Paragraph(f"Generated: {datetime.now(timezone.utc).isoformat()} — {len(scans)} scan(s)", styles["Normal"]),
                 Spacer(1, 12)]
 

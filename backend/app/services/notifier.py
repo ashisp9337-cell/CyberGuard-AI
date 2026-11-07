@@ -20,6 +20,7 @@ import hashlib
 import hmac
 import html
 import logging
+import re
 import secrets
 import smtplib
 from datetime import datetime, timedelta, timezone
@@ -154,8 +155,30 @@ def build_alert(scan: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Senders
 # ---------------------------------------------------------------------------
+# (4 Nov) A failed request's error text often contains the full URL it called -- for Telegram that URL holds the
+# bot token, for CallMeBot the API key. Every error is cleaned before it is stored, logged or shown.
+_SECRET_PATTERNS = (
+    re.compile(r"(/bot)\d{5,}:[A-Za-z0-9_-]{20,}"),                       # Telegram bot token in a URL path
+    re.compile(r"(\bapikey=)[^&\s'\"]+", re.I),                          # CallMeBot apikey query parameter
+)
+
+
+def redact(text) -> str:
+    """The text with every configured secret (bot token, API keys, passwords) replaced by ***."""
+    out = str(text or "")
+    s = get_settings()
+    for secret in (s.TELEGRAM_BOT_TOKEN, s.CALLMEBOT_APIKEY, s.TWILIO_AUTH_TOKEN, s.SMTP_PASSWORD,
+                   s.SMTP_PASSWORD.replace(" ", ""), s.IMAP_PASSWORD, s.IMAP_PASSWORD.replace(" ", "")):
+        secret = (secret or "").strip()
+        if len(secret) >= 6:                       # never blank out short, common strings
+            out = out.replace(secret, "***")
+    for pattern in _SECRET_PATTERNS:
+        out = pattern.sub(r"\1***", out)
+    return out
+
+
 def _result(channel: str, status: str, error: str = "") -> dict:
-    return {"channel": channel, "status": status, "error": error[:300],
+    return {"channel": channel, "status": status, "error": redact(error)[:300],
             "at": datetime.now(timezone.utc).isoformat()}
 
 
@@ -199,9 +222,11 @@ def is_own_mail(raw: bytes) -> bool:
     except Exception:
         return False
     mid, sig = str(h.get(OWN_MAIL_ID_HEADER, "") or "").strip(), str(h.get(OWN_MAIL_HEADER, "") or "").strip()
-    if sig:                                  # signed: valid only with the right signature
-        return bool(mid) and hmac.compare_digest(sig, own_mail_signature(mid))
-    # Alerts sent before signatures existed: our own address + our alert subject, with no sign of spoofing.
+    if sig and mid and hmac.compare_digest(sig, own_mail_signature(mid)):
+        return True                          # signed by this server
+    # (4 Nov) Unsigned alerts from before signatures existed, AND signed alerts whose signature no longer matches
+    # (e.g. after JWT_SECRET was changed): our own sending address + our alert subject + no sign of spoofing.
+    # Without this, old alerts would be scanned as strangers' mail and raise new alerts about themselves.
     s = get_settings()
     ours = parseaddr(s.SMTP_FROM or s.SMTP_USER)[1].strip().lower()
     sender = parseaddr(str(h.get("From", "") or ""))[1].strip().lower()
@@ -317,6 +342,29 @@ def alert_threshold(sensitivity: str | None) -> int:
     return get_settings().ALERT_MIN_SCORE
 
 
+def automatic_alert_choice(prefs) -> str:
+    """Settings -> "Alerts for automatic findings": "critical" (default: only risk AUTO_ALERT_MIN_SCORE+) or "same"
+    (the same level as the user's own scans)."""
+    choice = str(((prefs.integration_settings or {}) if prefs is not None else {}).get("automaticAlerts") or "")
+    return "same" if choice == "same" else "critical"
+
+
+def _aware(ts):
+    return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+
+
+def build_limit_notice(limit: int) -> dict:
+    """The one short message sent when the automatic-alert limit is reached for the hour."""
+    text = (f"CYBERGUARD: the background watchers found more threats than the alert limit ({limit} per hour). "
+            "Further automatic findings this hour are saved on the dashboard (Incidents / Scan History) "
+            "without a separate message.")
+    link = f"{get_settings().APP_BASE_URL.rstrip('/')}/dashboard"
+    return {"subject": f"{OWN_SUBJECT_PREFIX} NOTICE] Alert limit reached - more findings on the dashboard",
+            "text": f"{text}\n\nOpen: {link}", "whatsapp": text,
+            "html": f"<b>CYBERGUARD</b>\n{html.escape(text)}",
+            "email_html": f"<p>{html.escape(text)}</p><p><a href=\"{html.escape(link)}\">Open the dashboard</a></p>"}
+
+
 def alert_for_scan(scan_id: str) -> list[dict]:
     """Decide whether to alert for this scan, send it, and record the outcome. Never raises."""
     from app.db.database import SessionLocal
@@ -329,24 +377,45 @@ def alert_for_scan(scan_id: str) -> list[dict]:
         if scan is None:
             return []
         prefs = db.query(UserSettings).filter(UserSettings.user_id == scan.user_id).first()
-        if (scan.risk_score or 0) < alert_threshold(prefs.sensitivity if prefs is not None else None):
+        events = (db.query(ThreatEvent).filter(ThreatEvent.user_id == scan.user_id)
+                  .order_by(ThreatEvent.timestamp.desc()).limit(200).all())
+        event = next((e for e in events if (e.event_metadata or {}).get("scanId") == scan_id), None)
+        # (4 Nov) a background watcher's finding (not a scan the user ran)
+        automatic = event is not None and str(event.source or "").startswith("automation:")
+
+        threshold = alert_threshold(prefs.sensitivity if prefs is not None else None)
+        if automatic and automatic_alert_choice(prefs) == "critical":
+            threshold = max(threshold, s.AUTO_ALERT_MIN_SCORE)
+        if (scan.risk_score or 0) < threshold:
             return []
         if prefs is not None and not prefs.notifications_enabled:
             return []
 
-        events = (db.query(ThreatEvent).filter(ThreatEvent.user_id == scan.user_id)
-                  .order_by(ThreatEvent.timestamp.desc()).limit(200).all())
-        event = next((e for e in events if (e.event_metadata or {}).get("scanId") == scan_id), None)
-
         key = _dedup_key(scan.module_id, scan.threat_type, scan.target)
         since = datetime.now(timezone.utc) - timedelta(minutes=s.ALERT_DEDUP_MINUTES)
-        for e in events:
-            meta = e.event_metadata or {}
-            ts = e.timestamp if e.timestamp.tzinfo else e.timestamp.replace(tzinfo=timezone.utc)
-            if e is not event and ts >= since and meta.get("alertKey") == key and \
-                    any(a.get("status") == "sent" for a in meta.get("alerts", [])):
-                outcome = [_result("all", "suppressed_duplicate")]
-                break
+        hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+        auto_sent = notice_sent = 0
+        if automatic:                      # how many automatic alerts went out in the last hour
+            for e in events:
+                if e is event or not str(e.source or "").startswith("automation:") or _aware(e.timestamp) < hour_ago:
+                    continue
+                alerts = (e.event_metadata or {}).get("alerts", [])
+                auto_sent += any(a.get("status") == "sent" and a.get("kind") != "limit-notice" for a in alerts)
+                notice_sent += any(a.get("kind") == "limit-notice" for a in alerts)
+        duplicate = any(
+            e is not event and _aware(e.timestamp) >= since and (e.event_metadata or {}).get("alertKey") == key
+            and any(a.get("status") == "sent" and a.get("kind") != "limit-notice"
+                    for a in (e.event_metadata or {}).get("alerts", []))
+            for e in events)
+        if duplicate:
+            outcome = [_result("all", "suppressed_duplicate")]
+        elif automatic and auto_sent >= max(0, s.AUTO_ALERT_MAX_PER_HOUR):
+            if notice_sent:                # the hour's limit notice already went out: dashboard only
+                outcome = [_result("all", "suppressed_rate_limit")]
+            else:                          # tell the user once, then stay quiet for the rest of the hour
+                outcome = [dict(o, kind="limit-notice") for o in
+                           send_all(build_limit_notice(s.AUTO_ALERT_MAX_PER_HOUR),
+                                    email=prefs.email_notifications if prefs is not None else True)]
         else:
             result = scan.result or {}
             message = build_alert({
@@ -371,4 +440,4 @@ def alert_for_scan(scan_id: str) -> list[dict]:
         logger.exception("alerting failed for scan %s", scan_id)
         return []
     finally:
-        db.close()
+        db.close()

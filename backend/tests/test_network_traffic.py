@@ -257,3 +257,72 @@ def test_response_actions_block_outside_scanners_and_isolate_inside_ones():
     assert "Block IP 203.0.113.9" in titles and "Check / isolate 192.168.1.66" in titles
     for t in ("T1046", "T1018", "T1571", "T1190", "T1595.002"):
         assert t in mitre.CATALOGUE
+
+
+# ---- (6 Nov) found on real WRCCDC 2018 traffic ------------------------------------------------------------------
+ZEEK_FIELDS = "ts uid id.orig_h id.orig_p id.resp_h id.resp_p proto service duration orig_bytes resp_bytes conn_state " \
+              "local_orig local_resp missed_bytes history orig_pkts orig_ip_bytes resp_pkts resp_ip_bytes".split()
+
+
+def _zeek(rows):
+    return "\n".join(["#separator \\x09", "#fields\t" + "\t".join(ZEEK_FIELDS)] + ["\t".join(map(str, r)) for r in rows])
+
+
+def test_inside_machine_calling_a_backdoor_port_is_reported():
+    """WRCCDC: a team machine was refused 342 times on 10.128.0.210:4444 (Metasploit's default) - malware calling home."""
+    rows = [[1521911700 + i * 4, f"C{i}", "10.47.27.25", 40000 + i, "10.128.0.210", 4444, "tcp", "-", "0.001", 0, 0,
+             "REJ", "T", "T", 0, "Sr", 1, 60, 1, 40] for i in range(40)]
+    found, s = cats(_zeek(rows))
+    assert "backdoor_callback" in found
+    inc = next(i for i in s["incidents"] if i["category"] == "backdoor_callback")
+    assert inc["sources"] == ["10.47.27.25"] and inc["severity"] == "high" and "10.128.0.210" in inc["targets"]
+
+
+def test_backdoor_port_callback_needs_repeats_from_inside_and_is_not_a_scan():
+    few = [[1521911700 + i, f"C{i}", "10.47.27.25", 40000 + i, "10.128.0.210", 4444, "tcp", "-", "0.001", 0, 0,
+            "REJ", "T", "T", 0, "Sr", 1, 60, 1, 40] for i in range(CFG.get("backdoor_callback", NT.CALLBACK_ATTEMPTS) - 1)]
+    assert "backdoor_callback" not in cats(_zeek(few))[0]
+    outside = [[1521911700 + i, f"C{i}", "203.0.113.9", 40000 + i, "10.47.1.5", 4444, "tcp", "-", "0.001", 0, 0,
+                "REJ", "F", "T", 0, "Sr", 1, 60, 1, 40] for i in range(40)]
+    assert "backdoor_callback" not in cats(_zeek(outside))[0]          # an outside address knocking: not a callback
+    scan = [[1521911700 + i // 10, f"C{i}", "10.0.5.5", 40000 + i, "10.0.5.9", (4444 if i % 10 == 0 else 1 + i), "tcp",
+             "-", "0.001", 0, 0, "REJ", "T", "T", 0, "Sr", 1, 60, 1, 40] for i in range(400)]
+    found = cats(_zeek(scan))[0]
+    assert "port_scan" in found and "backdoor_callback" not in found    # retries inside a port scan are the scan
+
+
+def test_icmp_error_replies_are_not_a_host_sweep():
+    """WRCCDC: a team machine was reported as sweeping the network only because it sent 'port unreachable' answers."""
+    errors = [[1521911700 + i, f"C{i}", "10.47.5.155", 3, f"10.47.9.{i}", 3, "icmp", "-", "0", 0, 0, "OTH", "T", "T",
+               0, "-", 1, 56, 0, 0] for i in range(1, 40)]
+    assert "host_sweep" not in cats(_zeek(errors))[0]
+    pings = [[1521911700 + i, f"C{i}", "10.47.2.154", 8, f"10.47.9.{i}", 0, "icmp", "-", "0", 0, 0, "OTH", "T", "T",
+              0, "-", 1, 28, 0, 0] for i in range(1, 40)]
+    assert "host_sweep" in cats(_zeek(pings))[0]                         # unanswered echo requests are a sweep
+
+
+def test_firewall_icmp_type_is_read():
+    unreach = [f"Oct 24 01:00:{i:02d} gw kernel: [UFW BLOCK] IN=eth0 OUT= SRC=192.168.1.5 DST=192.168.1.{i + 10} LEN=56 "
+               f"PROTO=ICMP TYPE=3 CODE=3" for i in range(30)]
+    assert "host_sweep" not in cats("\n".join(unreach))[0]
+    pings = [ln.replace("TYPE=3 CODE=3", "TYPE=8 CODE=0") for ln in unreach]
+    assert "host_sweep" in cats("\n".join(pings))[0]
+
+
+def _icmp(src, dst, itype):
+    icmp = dpkt.icmp.ICMP(type=itype, code=3 if itype == 3 else 0, data=dpkt.icmp.ICMP.Unreach() if itype == 3
+                          else dpkt.icmp.ICMP.Echo(id=1, seq=1))
+    ip = dpkt.ip.IP(src=socket.inet_aton(src), dst=socket.inet_aton(dst), p=1, data=icmp)
+    ip.len = len(ip)
+    return bytes(dpkt.ethernet.Ethernet(src=b"\x00" * 6, dst=b"\x00" * 6, type=0x0800, data=ip))
+
+
+def test_capture_icmp_unreachable_answers_are_not_a_sweep(tmp_path):
+    _write(tmp_path / "unreach.pcap", [(1_700_000_000 + i, _icmp("192.168.1.5", f"192.168.1.{i + 10}", 3))
+                                       for i in range(30)])
+    s = NT.analyze_capture(str(tmp_path / "unreach.pcap"), CFG)
+    assert "host_sweep" not in {i["category"] for i in s["incidents"]}
+    _write(tmp_path / "ping.pcap", [(1_700_000_000 + i, _icmp("192.168.1.5", f"192.168.1.{i + 10}", 8))
+                                    for i in range(30)])
+    s = NT.analyze_capture(str(tmp_path / "ping.pcap"), CFG)
+    assert "host_sweep" in {i["category"] for i in s["incidents"]}

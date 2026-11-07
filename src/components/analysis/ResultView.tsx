@@ -46,6 +46,10 @@ export function ResultView({ result, onNewScan, onSave, newScanLabel = "Run Anot
   }
   const meta = CLASSIFICATION_META[result.classification];
   const triggered = result.indicators.filter((i) => i.triggered).sort((a, b) => b.weight - a.weight);
+  // (4 Nov) A check whose trained model is not installed on this computer is listed openly, never skipped silently.
+  const missingModels = result.indicators
+    .filter((i) => /not installed/i.test(i.label) || /not installed on this computer/i.test(i.description))
+    .map((i) => (/not installed/i.test(i.label) ? i.label.replace(/\s*\(info only\)\s*$/i, "") : `${i.label}: model not installed`));
   const mitre = result.mitreAttack ?? [];
   const mitreById = new Map(mitre.map((t) => [t.id, t]));
 
@@ -83,6 +87,19 @@ export function ResultView({ result, onNewScan, onSave, newScanLabel = "Run Anot
           </div>
         </div>
       </Card>
+
+      {missingModels.length > 0 && (
+        <div className="flex items-start gap-3 rounded-xl border p-4" role="status"
+             style={{ borderColor: "var(--color-warning)", backgroundColor: "var(--color-warning-bg)" }}>
+          <ICONS.warning size={18} className="mt-0.5 shrink-0" style={{ color: "var(--color-warning)" }} />
+          <div>
+            <p className="text-sm font-semibold text-white">Some checks could not run on this computer</p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {missingModels.join(" · ")}. The result above comes only from the checks that did run.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Explainable AI */}
       <Card>

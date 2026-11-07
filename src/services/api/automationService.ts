@@ -1,8 +1,9 @@
-// Automatic protection: background watchers (Gmail inbox, CyberGuard sign-ins, Windows sign-ins, Downloads folder).
+// Automatic protection: background watchers (Gmail inbox, CyberGuard sign-ins, Windows sign-ins, Downloads folder,
+// and - asking permission first - this PC's network connections, looked-up website names and the website's requests).
 import { apiClient } from "./client";
 
 export interface WatcherStatus {
-  name: "email" | "logins" | "windows" | "downloads" | string;
+  name: "email" | "logins" | "windows" | "downloads" | "network" | "dns" | "website" | string;
   title: string;
   what: string;
   modules: string[];
@@ -20,6 +21,9 @@ export interface WatcherStatus {
   lastFinding: string | null;
   note: string;
   recent: { at: string; item: string; score: number; classification: string }[];
+  /** (6 Nov) true: starts OFF and is switched on only after the owner allows `permission` */
+  askFirst?: boolean;
+  permission?: string;
 }
 
 export interface AutomationStatus {

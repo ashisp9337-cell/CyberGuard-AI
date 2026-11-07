@@ -50,6 +50,13 @@ _PASSWORD_FIELD = re.compile(r"(^|[&?;])[\w.\[\]-]*(pass(word|wd)?|pwd|passcode|
 
 # interactive login services only: mail clients poll IMAP/POP often and Windows opens many SMB connections to file
 # servers, so those ports gave false "brute force" alarms on normal CIC-IDS2017 traffic (tested 24 Oct)
+# (6 Nov) An INSIDE machine retrying a refused / unanswered connection to the same address on a backdoor port: malware
+# calling its controller (seen on WRCCDC 2018: 342 refused tries to port 4444 in 21 min). Normal traffic of the whole
+# CIC-IDS2017 week made 0 connections to these ports, so the level is the minimum 5 (project rule: busiest normal + 1).
+CALLBACK_ATTEMPTS = 5
+# ICMP messages that are ANSWERS or ERRORS (port / host unreachable, time exceeded, echo reply ...), not probes: a server
+# answering a UDP scan sends many of them, and that must not make the server look like the scanner. Type = sport.
+ICMP_NOT_PROBE = {1: {3, 4, 5, 11, 12, 14, 16, 18}, 58: {1, 2, 3, 4, 129, 134, 136}}
 LOGIN_PORTS = {21, 22, 23, 3389, 5900}
 WEB_PORTS = {80, 443, 8000, 8080, 8443, 8888}
 BACKDOOR_PORTS = {1337, 4444, 4445, 6667, 6697, 12345, 31337, 54321}
@@ -79,6 +86,11 @@ CATEGORY = {   # label, severity, weight, MITRE, plain explanation
     "failed_flood": ("Flood of failed / half-open connections", "high", 35, "T1499",
                      "One source left a flood of connections unanswered or reset - a SYN flood, a slow DoS "
                      "(slowloris / slowhttptest) or a noisy scan."),
+    "backdoor_callback": ("Repeated attempts to reach a backdoor port", "high", 35, "T1571",
+                          "A machine of this network kept trying to reach the same address on a port used by "
+                          "backdoors / attack tools (e.g. 4444 = Metasploit's default) and was refused or not "
+                          "answered. Either malware on the first machine is trying to call its controller, or someone "
+                          "is trying to use a backdoor planted on the second one - check both machines."),
     "backdoor_port": ("Traffic on a known backdoor port", "medium", 20, "T1571",
                       "Answered connections on a port used by backdoors / reverse shells (e.g. 4444 = Metasploit's "
                       "default, 6667 = IRC botnets, 31337)."),
@@ -300,7 +312,11 @@ def read_firewall(text: str) -> list[Flow] | None:
         blocked = bool(re.search(r"BLOCK|DROP|DENY|REJECT", ln, re.I))
         has_flags = re.search(r"\b(SYN|ACK|FIN|RST|PSH)\b", ln)
         syn = 1.0 if re.search(r"\bSYN\b", ln) or (proto == 6 and not has_flags) else 0.0
-        out.append(Flow(timestamp(ln), m["src"], _int(m["spt"]), m["dst"], _int(m["dpt"]), proto, 0.0, 1.0,
+        sport = _int(m["spt"])
+        if proto in (1, 58):                       # ICMP lines carry TYPE= instead of ports
+            itype = re.search(r"\bTYPE=(\d{1,3})\b", ln)
+            sport = int(itype[1]) if itype else 0
+        out.append(Flow(timestamp(ln), m["src"], sport, m["dst"], _int(m["dpt"]), proto, 0.0, 1.0,
                         0.0 if blocked else 1.0, 0.0, 0.0, syn, 0.0, 0.0, proto == 6 and blocked, False))
         if len(out) >= MAX_FLOWS:
             break
@@ -353,7 +369,7 @@ def read_capture(path: str) -> dict:
         def close(key):
             c = live.pop(key)
             proto = c["proto"]
-            done.append(Flow(c["t0"], c["src"], c["sport"], c["dst"], c["dport"], proto,
+            done.append(Flow(c["t0"], c["src"], c.get("itype", c["sport"]), c["dst"], c["dport"], proto,
                              (c["t1"] - c["t0"]) * 1e6, c["fpk"], c["bpk"], c["fby"], c["bby"], c["syn"], c["rst"],
                              c["fin"], failed_tcp(proto, c["bpk"], c["rst"], c["fby"], c["bby"]), True))
 
@@ -392,6 +408,8 @@ def read_capture(path: str) -> dict:
                     live[key] = {"t0": ts, "t1": ts, "src": src, "sport": sport, "dst": dst, "dport": dport,
                                  "proto": proto, "fpk": 0, "bpk": 0, "fby": 0, "bby": 0, "syn": 0, "rst": 0, "fin": 0,
                                  "fin_f": False, "fin_b": False, "ended": False}
+                    if proto in (1, 58):     # ICMP: keep the message type of the first packet (like Zeek's orig_p)
+                        live[key]["itype"] = int(getattr(l4, "type", 0) or 0)
                 c = live[key]
                 forward = (src, sport) == (c["src"], c["sport"])
                 c["t1"] = ts
@@ -416,8 +434,8 @@ def read_capture(path: str) -> dict:
         for key in list(live):
             close(key)
     done.sort(key=lambda f: f.ts or 0)
-    http = [(ts, src, dst, dport, method, target, bytes(body).decode("latin-1"))
-            for ts, src, dst, dport, method, target, body in http]
+    http = [(ts, src, dst, dport, method, target, bytes(body).decode("latin-1"), head)
+            for ts, src, dst, dport, method, target, body, head in http]
     return {"flows": done, "http": http, "stats": dict(stats)}
 
 
@@ -435,7 +453,8 @@ def _http_payload(c: dict, payload: bytes, ts, src, dst, dport, http: list, stat
         if len(http) >= MAX_HTTP:
             return
         head, sep, body = payload.partition(b"\r\n\r\n")
-        entry = [ts, src, dst, dport, m.group(1).decode(), m.group(2).decode("latin-1"), bytearray()]
+        entry = [ts, src, dst, dport, m.group(1).decode(), m.group(2).decode("latin-1"), bytearray(),
+                 head[:8000].decode("latin-1")]             # (6 Nov) headers: attacks hidden there (Shellshock)
         http.append(entry)
         if m.group(1) in (b"POST", b"PUT", b"PATCH") and not _MULTIPART.search(head) \
                 and stats["http_body_bytes"] < MAX_BODIES:
@@ -538,7 +557,8 @@ def measure(flows) -> dict[str, dict[tuple, tuple[int, float | None, float | Non
             continue                     # leftover packets of a connection, not a new one (no SYN seen)
         if f.proto == 6 or f.proto == 17:
             groups["port_scan"][(f.src, f.dst)].append((f.ts, f.dport))
-        if (f.failed or (f.proto in (1, 58) and f.bpk == 0)) and _private(f.dst):   # unanswered, internal target
+        icmp_probe = f.proto in (1, 58) and f.bpk == 0 and f.sport not in ICMP_NOT_PROBE[f.proto]
+        if (f.failed or icmp_probe) and _private(f.dst):                     # unanswered, internal target
             groups["host_sweep"][(f.src,)].append((f.ts, f.dst))
         if f.failed:
             groups["failed_flood"][(f.src,)].append(f.ts)
@@ -598,6 +618,19 @@ def incidents(flows, cfg: dict | None = None, http=None, measured=None) -> list[
         found.append({"category": "backdoor_port", "key": key, "source": key[0], "burst": len(times),
                       "count": len(times), "first": min(ts) if ts else None, "last": max(ts) if ts else None,
                       "text": f"{key[0]} -> {key[1]}:{key[2]}, {len(times)} answered connection(s)."})
+    calls = defaultdict(list)          # (6 Nov) refused / unanswered tries from an inside machine to a backdoor port
+    for f in flows:
+        if f.proto == 6 and f.syn > 0 and f.failed and f.dport in BACKDOOR_PORTS and _private(f.src) \
+                and (f.src, f.dst) not in scanned:   # tries that are part of a port scan of that machine are the scan
+            calls[(f.src, f.dst, f.dport)].append(f.ts)
+    for key, times in calls.items():
+        burst, t0, t1 = _max_count(times)
+        if burst >= cfg.get("backdoor_callback", CALLBACK_ATTEMPTS):
+            span = f" between {_when(t0)} and {_when(t1)} UTC" if t0 is not None else ""
+            found.append({"category": "backdoor_callback", "key": key, "source": key[0], "burst": burst,
+                          "count": len(times), "first": t0, "last": t1,
+                          "text": f"{key[0]} tried {burst:,} times within 10 minutes{span} to reach {key[1]}:{key[2]} "
+                                  f"and was refused or not answered ({len(times):,} tries in total)."})
     if http:
         from app.detectors import api_abuse
         hits = defaultdict(list)
@@ -606,7 +639,8 @@ def incidents(flows, cfg: dict | None = None, http=None, measured=None) -> list[
             ts, src, dst, dport, method, target = req[:6]
             body = req[6] if len(req) > 6 else ""
             path, _, query = target.partition("?")
-            types = api_abuse.attack_types(api_abuse.decode(api_abuse.request_text(path, query, body)).lower())
+            types = api_abuse.attack_types(api_abuse.decode(api_abuse.request_text(path, query, body)).lower()) \
+                + api_abuse.header_attack_types(req[7] if len(req) > 7 else "")
             if types:
                 shown = target + (f"  [form: {body[:120]}]" if body else "")
                 hits[(src, dst, dport)].append((ts, method, shown, [t[0] for t in types]))

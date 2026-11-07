@@ -183,3 +183,43 @@ def test_training_refuses_files_that_are_not_the_pinned_versions(tmp_path):
     r = subprocess.run([sys.executable, "-m", "app.ml.training.train_api_abuse", "--data-dir", str(data),
                         "--out", str(tmp_path / "m"), "--quick"], cwd=BACKEND, capture_output=True, text=True, timeout=300)
     assert r.returncode != 0 and "SHA-256" in (r.stdout + r.stderr)
+
+
+# ---- (6 Nov) found on real WRCCDC 2018 traffic ------------------------------------------------------------------
+@pytest.mark.parametrize("request_text", [
+    "/fd/ls/GLinkPing.aspx?IG=2E04644C8C9045A5835F3A688D0AC77F&&ID=SERP,5177.1&url=http://www.pdfonline.com/",
+    "/fd/ls/l?IG=D4EE0C0BB36E47628A19E3BB5FFAE3B5&&ID=SERP,5122.1&CID=0E3F9AA0480267D00359911C4965667B",
+    "/report?a=1;ls=2&b=3", "/x?mode=a|cat=books"])
+def test_a_command_word_used_as_a_parameter_name_is_not_command_injection(request_text):
+    assert AA.attack_types(AA.decode(request_text).lower()) == []
+
+
+@pytest.mark.parametrize("request_text", [
+    "/ping?host=8.8.8.8&&id", "/ping?host=8.8.8.8&& id;", "/ping?host=1.1.1.1|id", "/cgi?x=;id",
+    "/ping?host=8.8.8.8%26%26whoami", "/ping?host=x;cat /etc/hosts"])
+def test_real_command_injection_is_still_caught(request_text):
+    assert "Command injection" in [n for n, *_ in AA.attack_types(AA.decode(request_text).lower())]
+
+
+SHELLSHOCK_UA = '() { ignored; }; echo Content-Type: text/plain ; echo ; echo "bash_cve_2014_6271_rce Output : $((3+47))"'
+
+
+def test_shellshock_in_a_header_of_a_pasted_request():
+    raw = f"GET /cgi-bin/status HTTP/1.1\nHost: 10.47.3.5\nUser-Agent: {SHELLSHOCK_UA}\nAccept: */*\n"
+    a = AA.assess(raw)
+    assert "Shellshock (bash CVE-2014-6271)" in a["attackTypes"]
+    assert "headers" not in a["top"]                         # raw headers (cookies, tokens) are never kept in a result
+    normal = "GET /cgi-bin/status HTTP/1.1\nHost: 10.47.3.5\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\n"
+    assert AA.assess(normal)["attackTypes"] == {}
+
+
+def test_header_check_ignores_ordinary_header_values():
+    for v in ("Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.0 Safari/537.36",
+              "Cookie: session=abc; theme={dark}; lang=en", "Referer: https://example.com/search?q=f()+{x;}"):
+        assert AA.header_attack_types(v) == []
+
+
+def test_both_shellshock_variants_seen_on_real_traffic():
+    for ua in ('() { ignored; }; echo Content-Type: text/plain ; echo ; echo "bash_cve_2014_6271_rce Output : $((3+47))"',
+               '() { _; } >_[$($())] { echo Content-Type: text/plain ; echo ; echo "bash_cve_2014_6278 Output : $((9+2))"; }'):
+        assert AA.header_attack_types(ua)

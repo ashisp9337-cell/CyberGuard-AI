@@ -8,6 +8,7 @@ import { listContacts, createContact, deleteContact, type KnownContact } from "@
 import { ICONS } from "@/lib/icons";
 import { AlertChannelsCard } from "@/components/settings/AlertChannelsCard";
 import { AutomationCard } from "@/components/settings/AutomationCard";
+import { BrowserExtensionCard } from "@/components/settings/BrowserExtensionCard";
 import { FileQuarantineCard } from "@/components/settings/FileQuarantineCard";
 import { ActivityLogCard } from "@/components/settings/ActivityLogCard";
 
@@ -39,6 +40,7 @@ export default function Settings() {
   const [sensitivity, setSensitivity] = useState("balanced");
   const [criticalAlerts, setCriticalAlerts] = useState(true);
   const [dashboardNotifs, setDashboardNotifs] = useState(false);
+  const [automaticAlerts, setAutomaticAlerts] = useState<"critical" | "same">("critical");
 
   const [contacts, setContacts] = useState<KnownContact[]>([]);
   const [contactsLoading, setContactsLoading] = useState(true);
@@ -95,6 +97,7 @@ export default function Settings() {
         setSensitivity(({ low: "conservative", high: "aggressive" } as Record<string, string>)[s.sensitivity] ?? s.sensitivity);
         setCriticalAlerts(s.notificationsEnabled);
         setDashboardNotifs(s.emailNotifications);
+        setAutomaticAlerts(s.automaticAlerts === "same" ? "same" : "critical");
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -107,6 +110,7 @@ export default function Settings() {
         sensitivity,
         notificationsEnabled: criticalAlerts,
         emailNotifications: dashboardNotifs,
+        automaticAlerts,
       });
       notify({ variant: "success", title: "Settings saved" });
     } catch (err) {
@@ -139,12 +143,30 @@ export default function Settings() {
               </select>
               <p className="text-xs text-slate-500 mt-1.5">Every scan is still analysed and saved the same way; this only decides which ones send an alert.</p>
             </div>
+            <div className="pb-4">
+              <label htmlFor="automatic-alerts" className="block text-sm font-medium text-white mb-1.5">Alerts for automatic protection</label>
+              <select
+                id="automatic-alerts"
+                value={automaticAlerts}
+                onChange={(e) => setAutomaticAlerts(e.target.value === "same" ? "same" : "critical")}
+                className="w-full rounded-lg bg-elevated border border-strong px-3 py-2.5 text-sm text-white focus-ring"
+              >
+                <option value="critical">Critical only (risk 86+), recommended</option>
+                <option value="same">Same level as my own scans</option>
+              </select>
+              <p className="text-xs text-slate-500 mt-1.5">
+                For what the background watchers find by themselves (Gmail, Downloads, sign-ins). At most 5 such alerts
+                are sent per hour; after that one short notice, and the rest are shown on the dashboard.
+              </p>
+            </div>
             <Toggle checked={criticalAlerts} onChange={setCriticalAlerts} label="Send alerts" hint="Telegram / email / WhatsApp alerts for threats at the level above" />
             <Toggle checked={dashboardNotifs} onChange={setDashboardNotifs} label="Email alerts" hint="Also send alerts by email (when email is set up below)" />
           </CardBody>
         </Card>
 
         <AutomationCard />
+
+        <BrowserExtensionCard />
 
         <FileQuarantineCard />
 
@@ -162,7 +184,7 @@ export default function Settings() {
             <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr_auto] gap-3 items-end mb-4">
               <TextInput label="Name" placeholder="e.g. Dr. S. K. Nayak (HOD)" value={newContactName} onChange={(e) => setNewContactName(e.target.value)} />
               <TextInput label="Their real domain" placeholder="e.g. bput.ac.in" value={newContactDomain} onChange={(e) => setNewContactDomain(e.target.value)} />
-              <TextInput label="Their email (optional)" placeholder="e.g. sknayak@bput.ac.in" value={newContactEmail} onChange={(e) => setNewContactEmail(e.target.value)} />
+              <TextInput label="Their email (optional)" placeholder="e.g. teacher@college.example" value={newContactEmail} onChange={(e) => setNewContactEmail(e.target.value)} />
               <button
                 onClick={handleAddContact}
                 disabled={addingContact || !newContactName.trim()}

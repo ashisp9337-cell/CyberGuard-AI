@@ -34,7 +34,7 @@ def test_status_lists_four_watchers_and_toggle_persists(admin_client, fresh_stat
     r = auth_client.get("/api/automation/status")
     assert r.status_code == 200
     names = {w["name"] for w in r.json()["watchers"]}
-    assert names == {"email", "logins", "windows", "downloads"}
+    assert names == {"email", "logins", "windows", "downloads", "network", "dns", "website"}   # 3 added 6 Nov
     w = auth_client.post("/api/automation/downloads/toggle", json={"enabled": False}).json()
     assert w["enabled"] is False and w["state"] == "off"
     assert auth_client.post("/api/automation/downloads/toggle", json={"enabled": True}).json()["enabled"] is True
@@ -323,3 +323,51 @@ def test_windows_events_brute_force_then_success_is_saved_once(fresh_state, auth
     out = w.analyse(events, account_takeover)
     assert out["threats"] == 1 and "score" in out["finding"]
     assert w.analyse(events, account_takeover)["checked"] == 0                   # same events: nothing new
+
+
+# (4 Nov) A watcher that was off must not work through all the mail it missed (that sent a burst of alerts).
+def _plain_mail(i: int) -> bytes:
+    return (f"From: friend{i}@example.org\r\nTo: me@gmail.com\r\nSubject: hello {i}\r\n"
+            f"Message-ID: <m{i}@example.org>\r\n\r\nSee you at {i} pm.\r\n").encode()
+
+
+def _gmail_watcher(monkeypatch):
+    import imaplib
+
+    from app.automation import email_watcher
+    from app.core.config import get_settings
+    from app.services import email_ingest
+    real = email_ingest.analyze_email
+    monkeypatch.setattr(email_ingest, "analyze_email", lambda raw, **kw: real(raw, **{**kw, "network": False}))
+    monkeypatch.setattr(imaplib, "IMAP4_SSL", FakeIMAP)
+    s = get_settings()
+    monkeypatch.setattr(s, "IMAP_USER", "me@gmail.com")
+    monkeypatch.setattr(s, "IMAP_PASSWORD", "abcdefghijklmnop")
+    monkeypatch.setattr(s, "EMAIL_BACKFILL", 5)
+    monkeypatch.setattr(s, "IMAP_SPAM_FOLDER", "off")
+    return email_watcher.EmailWatcher()
+
+
+def test_gmail_backlog_is_skipped_not_worked_through(monkeypatch, fresh_state, auth_client):
+    from app.automation import engine
+    FakeIMAP.mails, FakeIMAP.spam, FakeIMAP.log = {1: _plain_mail(1)}, {}, []
+    w = _gmail_watcher(monkeypatch)
+    w.run_once()                                                       # bookmark at email 1
+    FakeIMAP.mails = {i: _plain_mail(i) for i in range(1, 102)}        # 100 emails arrive while it was off
+    st = w.run_once()
+    assert st["checked"] == 1 + 5                                      # only the 5 newest of the 100
+    assert "older email(s)" in st["note"] and "skipped" in st["note"]
+    assert engine.get_state("email")["lastUid"] == 101
+
+
+def test_switching_the_gmail_watcher_on_starts_from_the_newest_mail(monkeypatch, fresh_state, auth_client):
+    from app.automation import engine
+    FakeIMAP.mails, FakeIMAP.spam, FakeIMAP.log = {1: _plain_mail(1)}, {}, []
+    w = _gmail_watcher(monkeypatch)
+    w.run_once()
+    w.set_enabled(False)
+    FakeIMAP.mails = {i: _plain_mail(i) for i in range(1, 13)}         # 11 new emails while off (below the limit)
+    w.set_enabled(True)
+    st = w.run_once()
+    assert st["checked"] == 1 + 5                                      # fresh start: the 5 newest, not all 11
+    assert engine.get_state("email")["lastUid"] == 12 and engine.get_state("email")["enabled"] is True

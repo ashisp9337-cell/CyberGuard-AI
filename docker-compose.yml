@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: cyberguard_dev_password
       POSTGRES_DB: cyberguard
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"   # this computer only - never the Wi-Fi / LAN (6 Nov security check)
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -19,17 +19,17 @@ services:
 
   backend:
     build: ./backend
+    env_file: ./backend/.env    # JWT_SECRET and the other secrets come from here, never from this file
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       ENVIRONMENT: development
       DATABASE_URL: postgresql+psycopg2://cyberguard:cyberguard_dev_password@postgres:5432/cyberguard
-      JWT_SECRET: dev-secret-change-me
       CORS_ORIGINS: http://localhost:5173
       COOKIE_SECURE: "false"
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./backend:/app
       - backend_uploads:/app/uploads
@@ -40,7 +40,7 @@ services:
     environment:
       VITE_API_BASE_URL: http://localhost:8000
     ports:
-      - "5173:5173"
+      - "127.0.0.1:5173:5173"
     depends_on:
       - backend
 

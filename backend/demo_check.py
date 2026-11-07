@@ -50,6 +50,9 @@ MODEL_FILES = [
     "network_traffic.json", "network_flow.joblib", "voice_ai.onnx", "voice_ai.json", "voiceprint.onnx",
     "voiceprint.json", os.path.join("whisper-small", "model.bin"), "insider_risk.joblib", "insider_risk.json", "EMBER2024_all.model", "malware_model.json",
     "face_detection_yunet_2023mar.onnx", "deepfake_video.onnx", "deepfake_video.json",
+    # (4 Nov) also the image deepfake models and the 2026 link model: without them those scans still answer,
+    # but in a reduced mode, so the check must not say READY when they are missing
+    "ai_image.onnx", "ai_image.json", "deepfake_image.onnx", "deepfake_image.json", "link_2026.joblib",
 ]
 
 

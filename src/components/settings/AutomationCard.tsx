@@ -17,6 +17,9 @@ const ICON_FOR: Record<string, keyof typeof ICONS> = {
   logins: "login",
   windows: "fingerprint",
   downloads: "malware",
+  network: "wifi",
+  dns: "threatIntel",
+  website: "server",
 };
 
 const STATE_STYLE: Record<string, string> = {
@@ -47,7 +50,14 @@ function WatcherRow({ w, onChange }: { w: WatcherStatus; onChange: (w: WatcherSt
   const [busy, setBusy] = useState(false);
   const Icon = ICONS[ICON_FOR[w.name] ?? "shieldCheck"];
 
+  const [asking, setAsking] = useState(false);
+
   async function toggle() {
+    if (!w.enabled && w.askFirst && !asking) {      // (6 Nov) these read more of the computer: ask first
+      setAsking(true);
+      return;
+    }
+    setAsking(false);
     setBusy(true);
     try {
       onChange(await setWatcherEnabled(w.name, !w.enabled));
@@ -97,6 +107,28 @@ function WatcherRow({ w, onChange }: { w: WatcherStatus; onChange: (w: WatcherSt
         </button>
       </div>
 
+      {w.askFirst && !w.enabled && !asking && (
+        <p className="text-xs text-cyan-300/80 mt-2">Asks your permission before it starts.</p>
+      )}
+      {asking && (
+        <div className="mt-2 rounded-md border border-cyan-500/40 bg-cyan-500/5 p-3" role="dialog" aria-label={`Allow ${w.title}`}>
+          <p className="text-xs font-semibold text-white">Allow CyberGuard to:</p>
+          <p className="text-xs text-slate-300 mt-1">{w.permission}</p>
+          <p className="text-[11px] text-slate-500 mt-1">
+            Everything stays on this computer. You can switch it off here at any time; the change is recorded in the activity log.
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button onClick={toggle} disabled={busy}
+              className="rounded-lg bg-cyan-500 text-slate-950 font-semibold px-3 py-1.5 text-xs hover:bg-cyan-400 focus-ring disabled:opacity-50">
+              Allow and switch on
+            </button>
+            <button onClick={() => setAsking(false)}
+              className="rounded-lg border border-default text-slate-300 px-3 py-1.5 text-xs hover:bg-elevated focus-ring">
+              Not now
+            </button>
+          </div>
+        </div>
+      )}
       {w.state === "needs setup" && <p className="text-xs text-amber-400 mt-2">Setup: {w.setupHint}</p>}
       {w.lastError && <p className="text-xs text-red-400 mt-2 break-words">Problem: {w.lastError}</p>}
       {w.lastFinding && <p className="text-xs text-red-300 mt-2 break-words">Last threat: {w.lastFinding}</p>}
@@ -121,7 +153,7 @@ function WatcherRow({ w, onChange }: { w: WatcherStatus; onChange: (w: WatcherSt
         <p className="text-xs text-slate-500">
           Checked {w.checked} · threats {w.threats} · last check {timeAgo(w.lastCheck)} · every{" "}
           {w.intervalSeconds >= 60 ? `${Math.round(w.intervalSeconds / 60)} min` : `${w.intervalSeconds}s`}
-          {w.note ? ` · ${w.note}` : ""}
+          {w.note && w.note !== w.setupHint ? ` · ${w.note}` : ""}
         </p>
         <button
           onClick={runNow}
@@ -164,7 +196,7 @@ export function AutomationCard() {
   }
 
   if (adminOnly) {
-    return <AdminOnlyCard title="Automatic Protection" what="Background checks of the Gmail inbox, Downloads folder and sign-ins" />;
+    return <AdminOnlyCard title="Automatic Protection" what="Background checks of the Gmail inbox, Downloads folder, sign-ins, network and website" />;
   }
 
   return (
@@ -190,7 +222,9 @@ export function AutomationCard() {
         <p className="text-xs text-slate-500 mt-3">
           Nothing is ever deleted or opened. Emails are read without being marked as read; a dangerous inbox email is moved
           to the Gmail label “CyberGuard-Quarantine” and a dangerous download to CyberGuard’s quarantine folder — both
-          can be undone (Release / Restore). Windows logs are only read.
+          can be undone (Release / Restore). Windows logs are only read. The network, website-name and website-request
+          watchers ask your permission first and only read: nothing is blocked or closed, and nothing leaves this PC
+          except your own alerts (Telegram / e-mail / WhatsApp) about dangerous findings.
         </p>
       </CardBody>
     </Card>

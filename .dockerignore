@@ -1,0 +1,12 @@
+# (6 Nov audit) The frontend image copies the project folder: never let secrets, Git history or the backend into it.
+.env
+.env.*
+!.env.example
+backend/
+.git/
+node_modules/
+dist/
+venv/
+*.pem
+*.key
+kaggle.json

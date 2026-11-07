@@ -10,6 +10,7 @@ const MAIN_NAV = [
   { to: "/threat-overview", label: "Threat Overview", icon: ICONS.threatOverview },
   { to: "/modules", label: "Detection Modules", icon: ICONS.shieldCheck },
   { to: "/live-monitoring", label: "Live Monitoring", icon: ICONS.liveMonitoring },
+  { to: "/pc-network", label: "PC Network", icon: ICONS.wifi },
   { to: "/threat-intelligence", label: "Threat Intelligence", icon: ICONS.threatIntel },
   { to: "/scan-history", label: "Scan History", icon: ICONS.scanHistory },
   { to: "/reports", label: "Reports", icon: ICONS.reports },

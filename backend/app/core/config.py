@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     TWILIO_WHATSAPP_FROM: str = ""         # e.g. whatsapp:+14155238886 (Twilio sandbox number)
     ALERT_MIN_SCORE: int = 71         # 71+ = high risk and critical
     ALERT_DEDUP_MINUTES: int = 1440   # same threat on the same target is alerted once per window (24 h)
+    # (4 Nov) Findings of the background watchers (Gmail, Downloads, sign-ins, Windows): by default only critical
+    # ones are sent to Telegram / email / WhatsApp (Settings can switch this to "same level as my scans"), and at
+    # most AUTO_ALERT_MAX_PER_HOUR per hour; after that one short notice, the rest are on the dashboard only.
+    AUTO_ALERT_MIN_SCORE: int = 86
+    AUTO_ALERT_MAX_PER_HOUR: int = 5
     APP_BASE_URL: str = "http://localhost:5173"   # used for the "open in CYBERGUARD" link
     # Auto-quarantine: emails scoring this or more are held in quarantine automatically.
     AUTO_QUARANTINE: bool = True
@@ -84,6 +89,12 @@ class Settings(BaseSettings):
     OTP_RESEND_SECONDS: int = 60     # wait before "Resend code" works again
     OTP_MAX_RESENDS: int = 5
     RATE_LIMIT_ENABLED: bool = True  # per-IP limits on login/signup/OTP endpoints
+    # (6 Nov) Per-ACCOUNT limit on wrong passwords, whatever address they come from (per-IP limits can be dodged with
+    # many addresses or a faked X-Forwarded-For behind a proxy). 0 = off.
+    LOGIN_MAX_FAILED_PER_ACCOUNT: int = 10
+    LOGIN_LOCK_MINUTES: int = 15
+    # (6 Nov) Access logs of OTHER websites you run on this computer, checked by the website watcher (';' between).
+    WEBSITE_ACCESS_LOGS: str = ""
     # URL scans: follow redirects and read the final page (read-only, no JavaScript, never local
     # addresses -- see app/services/safe_fetch.py). Set false to never contact scanned sites.
     LIVE_PAGE_CHECKS: bool = True

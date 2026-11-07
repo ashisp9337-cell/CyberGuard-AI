@@ -20,7 +20,15 @@ settings = get_settings()
 # upload they are stored under a random name, never run, and deleted as soon as they have been read.
 CYBER_EXTRA_EXTENSIONS = {"", ".exe", ".dll", ".scr", ".sys", ".cpl", ".msi", ".apk", ".elf", ".so", ".bin", ".zip",
                           ".jar", ".doc", ".docx", ".docm", ".xls", ".xlsx", ".xlsm", ".ppt", ".pptx", ".pptm", ".rtf",
-                          ".js", ".vbs", ".ps1", ".bat", ".cmd", ".hta", ".lnk", ".evtx", ".xml"}
+                          ".js", ".vbs", ".ps1", ".bat", ".cmd", ".hta", ".lnk", ".evtx", ".xml",
+                          # (30 Oct) more files attackers send: disk images, other archives, OneNote, web pages, scripts
+                          ".com", ".pif", ".rar", ".7z", ".gz", ".tgz", ".tar", ".cab", ".iso", ".img", ".vhd", ".vhdx",
+                          ".one", ".html", ".htm", ".svg", ".mht", ".wsf", ".wsh", ".jse", ".vbe", ".psm1", ".sct",
+                          ".sh", ".chm", ".xll", ".xlam", ".dotm", ".ppsm", ".appx", ".msix", ".url", ".reg", ".iqy",
+                          ".slk"}
+# (30 Oct) more photo / recording formats, accepted only by the Deepfake module: WhatsApp / web pictures (.webp, .gif,
+# .bmp), iPhone photos (.heic / .heif), phone call recordings (.amr, .awb, .3gp, .3ga) and more video containers
+MEDIA_EXTRA_EXTENSIONS = {".webp", ".gif", ".bmp", ".heic", ".heif", ".amr", ".awb", ".3gp", ".3g2", ".3ga", ".m4v"}
 ALLOWED_EXTENSIONS = {".eml", ".msg", ".txt", ".log", ".csv", ".json", ".pcap", ".pcapng", ".cap", ".png", ".jpg", ".jpeg", ".mp4", ".mov", ".avi", ".mkv", ".webm", ".mp3", ".wav", ".ogg", ".opus", ".m4a", ".aac", ".flac", ".pdf"}
 
 
@@ -105,11 +113,12 @@ async def scan(
                             "message": "A reference recording is only used by Voice & Audio Analysis."}})
     file_path, file_name = (None, None)
     if file is not None and file.filename:
-        file_path, file_name = _save_upload(file, CYBER_EXTRA_EXTENSIONS if moduleId == "cyber-threat" else frozenset())
+        file_path, file_name = _save_upload(file, CYBER_EXTRA_EXTENSIONS if moduleId == "cyber-threat"
+                                            else MEDIA_EXTRA_EXTENSIONS if moduleId == "deepfake" else frozenset())
     reference_path = None
     if has_reference:                                             # a genuine recording of the person (voice match)
         try:
-            reference_path, _ = _save_upload(referenceFile)
+            reference_path, _ = _save_upload(referenceFile, MEDIA_EXTRA_EXTENSIONS)
         except HTTPException:
             if file_path and os.path.exists(file_path):
                 os.remove(file_path)

@@ -79,8 +79,18 @@ def fuse(ev, components: list[dict], trust: dict) -> dict:
     # An authenticated sender that is the real organisation it claims to be (or a
     # known-good sender): wording alone cannot make it malicious. Content evidence
     # (links/attachments/QR) still can - compromised accounts send real malware.
+    # (4 Nov) ...and a genuine brand mailing: the brand named in the email is the sender's OWN authenticated domain
+    # (offers@mailer.amazon.in talking about Amazon). Brand wording alone then cannot make it "brand impersonation";
+    # links to other sites, attachments and QR codes are still judged on their own.
+    # Never for a free-mail address: anyone can own an @gmail.com account, and "Google Play gift cards" in the text
+    # does not make a Gmail sender genuine (CEO gift-card fraud comes exactly from such accounts).
+    from app.email_pipeline.org_directory import FREEMAIL_DOMAINS
+    sender_domain = (getattr(ev, "from_domain", "") or "").lower()
+    brand_is_sender = (bool(sender_domain) and sender_domain not in FREEMAIL_DOMAINS and
+                       any(c["component"] == "impersonation" and c["name"] == "brand-impersonation"
+                           and c["result"].get("senderVerifiedBrand") for c in components))
     vouched = (trust.get("dmarc_pass") and trust.get("dkim_aligned")
-               and (trust.get("official_domain_for_claim") or trust.get("known_sender"))
+               and (trust.get("official_domain_for_claim") or trust.get("known_sender") or brand_is_sender)
                and not (enrich_labels & hard_sender_flags))
     if vouched:
         text_adj = min(text_adj, 25 if text_ev < 85 else 45)

@@ -21,10 +21,12 @@ pytest==9.1.1
 email-validator==2.2.0
 python-dotenv==1.2.3
 sse-starlette==3.4.11
+psutil==7.2.2           # (6 Nov) live PC network monitor: lists open ports and connections (read-only)
 slowapi==0.1.9
 requests==2.34.2
 opencv-python-headless>=4.10.0.84
-Pillow>=10.4.0
+Pillow>=13.0.0          # (4 Nov) 13.0.0 fixes the known image-parsing advisories (pip-audit); uploads are untrusted
+pillow-heif==1.8.1      # (30 Oct) reads iPhone HEIC / HEIF photos for the Deepfake module (optional: without it HEIC is reported as unreadable)
 zxing-cpp
 google-genai>=2.24.0
 dnspython
@@ -47,3 +49,7 @@ oscrypto @ git+https://github.com/wbond/oscrypto.git@1547f535001ba568b239b879746
 # training only (not needed to run the app): pip install dnstwist wordfreq
 #   -> app/ml/training/train_lookalike_domain.py, train_domain_spoofing.py
 onnxruntime>=1.18      # runs the Colab-trained deepfake model on CPU
+# (4 Nov) security fixes for packages pulled in by others (pip-audit): keep at or above these versions
+filelock>=4.2.1
+certifi>=2026.10.18
+pyasn1>=0.6.5

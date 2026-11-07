@@ -22,7 +22,7 @@ An AI assistant, **Threatora**, explains results in **English, Hindi and Odia**.
 | **Phishing** | Email, SMS, social-media messages, QR codes, fraudulent websites, malicious URLs | Text models (SMS, email, social media), scam-pattern rules (parcel fee, KYC, task scam, OTP request …; also in **Hindi, Hinglish and Odia**), every embedded link scored by the URL engine, QR decoder (UPI / Wi-Fi / links) |
 | **URL security** | Domain spoofing, look-alike domains, URL manipulation, redirect analysis, SSL & domain age, fake login pages | Six trained URL models, live registry (RDAP/WHOIS) and SSL checks, safe read-only page fetch that follows redirects, **Fake Login Page model** on the page's HTML |
 | **Impersonation** | Government / police, senior management (CEO fraud), teacher / university, bank, brand, friend or relative ("new number") | A router model picks the category; each category has its own model and rules (e.g. "digital arrest", gift-card requests, scholarship / KYC scams) |
-| **Credential theft & account takeover** | Failed logins, password spraying, unusual location, unknown device, session activity, behaviour change | Parses pasted auth logs (SSH, Windows 4625/4624, web logins); trained on 31 million real logins (RBA dataset); rules for brute force, impossible travel, MFA disabled, mail forwarding |
+| **Credential theft & account takeover** | Failed logins, password spraying, unusual location, unknown device, session activity, behaviour change | Parses pasted auth logs (SSH, Windows 4625/4624, web logins); trained on the RBA dataset (about 31 million logins synthesized from a real sign-in service); rules for brute force, impossible travel, MFA disabled, mail forwarding |
 | **Deepfake** | Images (.jpg, .png, .webp, .gif, .bmp, iPhone .heic), videos (.mp4, .mov, .avi, .mkv, .webm, .3gp), voice notes / calls (.opus, .ogg, .m4a, .mp3, .wav, phone call recordings .amr / .3gp), AI-generated media | Provenance check (C2PA / AI-tool tags), **AI-image model**, **face-swap image model**, **face-swap video model** (16 frames, every face); **voice**: AI / cloned-voice model, speech-to-text scam-script check (Hindi too), optional voice match against a genuine recording of the person |
 | **Cyber threat** | **Malware** (upload a program, app, PDF, Office or OneNote file, script, web page, disk image (.iso) or archive (.zip / .rar / .7z / .tar) - never run; the **Downloads watcher** checks every new download the same way), network traffic, API abuse, **Insider Risk** (data exfiltration + abnormal activity + insider threat as one engine), log analysis | Recognises the log format, then rules for encoded PowerShell, LOLBins (certutil …), large transfers, request floods, off-hours activity; **API Abuse model** + attack-type checks (SQL injection, XSS, path traversal, command injection, SSRF, Log4Shell) on every web / API request in a pasted log; **whole log files** (upload .log / .txt up to 15 MB) are read line by line and summarised as incidents; **network traffic**: upload a Wireshark capture (.pcap / .pcapng) or paste flow records / Zeek conn.log / firewall lines - every connection is read and judged for scans, sweeps, floods and login brute force; **Windows event logs** (.evtx from Event Viewer, or JSON / XML exports of Security, Sysmon, PowerShell, Defender): credential theft, security tools switched off, suspicious PowerShell / Windows tools, new accounts and admin-group changes, persistence, remote commands, discovery bursts and password guessing - each attributed to a user and computer; **Insider Risk (mini-SOC / UEBA)**: upload a user-activity log (logons, USB, file copies, e-mail, web; CSV) - every person-day is compared with the person's own past and with colleagues, scored, and shown as a triage queue with three lenses (exfiltration, abnormal activity, insider pattern), MITRE techniques and response steps |
 
@@ -45,6 +45,19 @@ log vs a new-device login), and shows the reason it chose that subtopic.
 - **Telegram forwarding:** forward a suspicious message or screenshot to your CyberGuard bot and it replies with
   the verdict. Only your own chat is answered.
 - **Gmail inbox protection** (read-only IMAP): scans new mail, quarantines dangerous mail in the app and alerts you.
+- **Automatic protection, asking permission first** (Settings -> Automatic Protection; each starts OFF and shows in
+  plain words what it will read before you allow it):
+  - **Network connections of this PC** (every 30 s): open ports and live connections - backdoor ports, databases or
+    remote desktop open to the Wi-Fi, programs from Temp / Downloads, addresses your scans flagged. Read-only.
+    The same view is the **PC Network** page.
+  - **Websites this PC looks up** (every minute, Windows): the website names *any* program looked up (all browsers
+    and apps), each judged by the URL models without opening the site.
+  - **Your website's requests** (every minute): every GET / POST that reaches CyberGuard (and, optionally, another
+    site's access log on this PC, `WEBSITE_ACCESS_LOGS`) goes through the log check - attack payloads incl.
+    Shellshock, vulnerability scans, attack tools, web shells, password guessing.
+- **Browser extension** for Chrome, Edge, Brave, Opera and Firefox (`browser-extension/`, see its README): warns before
+  a dangerous page opens - look-alike / spoofed addresses, redirects into bad sites and fake login pages - by asking
+  your own CyberGuard on this computer. Connect it in Settings -> Browser extension.
 - **Alerts** by e-mail and Telegram; incidents, indicators of compromise (IOCs), an audit log and PDF reports.
 - **Dashboard, scan history, threat overview, live monitoring** (Server-Sent Events).
 
@@ -79,7 +92,7 @@ time periods. "Caught at alert" is measured at a threshold where only about 1% o
 | Impersonation: bank / brand / government | real scam and genuine SMS | **91% / 89% / 87%** of scams caught; 1–4% false alarms on real messages on the same topic |
 | Impersonation: CEO fraud | real SMS and e-mail | 85% caught, 0% false alarms |
 | Impersonation: teacher / university | real SMS and e-mail (very little real data exists) | 51% caught by the model, under 0.5% false alarms; plus rules for gift-card, OTP, offer-letter-fee and scholarship scams |
-| Account takeover (RBA) | 31.3 million real logins, Wiefling et al. | AUC 0.94 for an attacker with the right password logging in from attacker networks |
+| Account takeover (RBA) | 31.3 million logins synthesized from a real Norwegian sign-in service (RBA dataset, Wiefling et al.) | AUC 0.94 for an attacker with the right password logging in from attacker networks |
 | Login subtopic models (6) | RBA dataset subsets | AUC 0.77–0.998, depending on the subtopic. Since 31 Oct the four account models also learn from real attacker logins; on an attacker's **first** real login to a test account: location 0.906 → **0.952** (caught at alert 19% → 37%), device 0.490 → **0.745**, session 0.957 → **0.968**, behaviour 0.841 → **0.871**, with false alarms still about 1% |
 | AI-generated image | real photos vs modern AI generators, StyleGAN faces | AUC **0.98**; 80% caught at alert, 1.3% false alarms |
 | Face-swap image | OpenForensics faces | AUC 0.95 |
@@ -144,19 +157,23 @@ pip install -r requirements.txt
 pip install --no-deps -r requirements-ocr.txt     # screenshot text reading (keep --no-deps)
 copy .env.example .env
 ```
-- Edit `backend\.env`. At least set `DATABASE_URL` and `JWT_SECRET`.
+- Edit `backend\.env`. At least set `DATABASE_URL` and `JWT_SECRET` (64 random characters:
+  `python -c "import secrets; print(secrets.token_hex(32))"`). If the backend prints `SECURITY: JWT_SECRET ...` when it
+  starts, the secret is still weak: anyone who guesses it can sign in as any user.
 - Optional:
   - `GEMINI_API_KEY` for the chat assistant
   - `SMTP_*` / `IMAP_*` (Gmail App Password) for e-mail alerts and inbox scanning
   - `TELEGRAM_*` for Telegram alerts
   - `URLSCAN_API_KEY`, only to collect training data
 
-Then:
+Then (`alembic upgrade head` again after every update: it adds new tables, e.g. the browser-extension keys):
 ```
 alembic upgrade head
-uvicorn app.main:app --port 8000
+uvicorn app.main:app --port 8000 --no-server-header
 ```
-API documentation: http://localhost:8000/docs
+`--port 8000` without `--host` keeps the backend on this computer only (127.0.0.1): nobody on the same Wi-Fi can reach
+it. `--no-server-header` stops it from telling callers which server software it runs.
+API documentation: http://localhost:8000/docs (only when `ENABLE_API_DOCS=true` is in `backend\.env`; off by default).
 
 ### 3. Frontend (second terminal, project folder)
 ```
@@ -191,7 +208,7 @@ results are (`*.metrics.json`, `deepfake_video.json`).
 ### 5. Checks
 ```
 cd backend
-python -m pytest -q          # 933 tests (uses cyberguard_test, never your real database)
+python -m pytest -q          # 973 tests (uses cyberguard_test, never your real database)
 python demo_check.py         # demo-day pre-flight: models, database, internet, chat backup, every demo input
 python phase2_live_check.py  # live services + 30 real / phishing URLs (phishing sites are never contacted)
 ```
@@ -208,6 +225,13 @@ python phase2_live_check.py  # live services + 30 real / phishing URLs (phishing
 - **CORS:** restricted to the configured frontend address.
 - **Secrets:** stay in `backend/.env` (never in git). Only public `VITE_*` values reach the browser.
 - **Uploads:** allow-listed file types, size-limited, stored under random names and never executed.
+- **Limits:** sign-in, sign-up, codes, scans, chat and lookups have their own rate limits; every other route is limited
+  to 600 requests a minute per address; one request body can be at most 2 x `MAX_UPLOAD_MB` + 2 MB; 10 wrong passwords
+  lock that account for 15 minutes.
+- **Self-check:** `python security_check.py` (in `backend`) checks both `.env` files, Git and the database and prints
+  PASS / WARN / FAIL with setting names only - never a value. Run it before the demo and before every deployment.
+- **Hosting:** `vercel.json` sends security headers for the website (no framing, no sniffing, HTTPS only); the Docker
+  ignore files keep `.env`, Git history and private files out of images.
 - **Chat privacy:** private details are masked before reaching the AI; the AI's tools only see the user's own data.
 - **No model telemetry:** ONNX Runtime (it runs the voice, image, video and OCR models) has a built-in Microsoft usage-telemetry client; tested on 30 Oct it tried to reach `mobile.events.data.microsoft.com` after a scan. CyberGuard switches it off (`ORT_DISABLE_TELEMETRY=1`) before any model loads, and checked that no such connection is attempted any more.
 - **Scam examples in tests and the demo** are invented or quoted from public warnings (sources in `test_indic_scams.py`); the scam web addresses used are unregistered names.

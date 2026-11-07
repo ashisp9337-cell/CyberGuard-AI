@@ -24,6 +24,13 @@ import requests
 
 from app.core.config import get_settings
 
+
+def _clean(exc) -> str:
+    """Error text without the bot token (a failed request's message contains the URL, and the URL holds the token)."""
+    from app.services.notifier import redact
+    return redact(exc)
+
+
 logger = logging.getLogger("cyberguard.telegram")
 API = "https://api.telegram.org/bot{token}/{method}"
 FILE_API = "https://api.telegram.org/file/bot{token}/{path}"
@@ -83,7 +90,7 @@ class TelegramInbox:
                 params["reply_to_message_id"] = reply_to
             self._call("sendMessage", **params)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Telegram reply failed: %s", exc)
+            logger.warning("Telegram reply failed: %s", _clean(exc))
 
     # -- main loop ---------------------------------------------------------------------------------------------
     def _loop(self) -> None:
@@ -102,8 +109,8 @@ class TelegramInbox:
                     if msg:
                         self.handle(msg)
             except Exception as exc:  # noqa: BLE001 - network down, Telegram busy ...
-                self.status["lastError"] = str(exc)[:200]
-                logger.warning("Telegram forwarding: %s (retrying in %s s)", exc, wait)
+                self.status["lastError"] = _clean(exc)[:200]
+                logger.warning("Telegram forwarding: %s (retrying in %s s)", _clean(exc), wait)
                 self._stop.wait(wait)
                 wait = min(wait * 2, 120)
         self.status["state"] = "stopped"
@@ -191,7 +198,7 @@ class TelegramInbox:
                 f.write(data)
             return path
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Telegram photo download failed: %s", exc)
+            logger.warning("Telegram photo download failed: %s", _clean(exc))
             return None
 
 

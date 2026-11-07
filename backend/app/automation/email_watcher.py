@@ -22,6 +22,10 @@ from app.automation.engine import Watcher, get_state, owner_user_id, update_stat
 from app.core.config import get_settings
 
 MAX_PER_ROUND = 20
+# (4 Nov) A watcher that was off (or a backend that was not running) can find hundreds of emails it never checked.
+# Working through all of them sent a burst of alerts about old mail. When more than BACKLOG_LIMIT new emails are
+# waiting, only the newest EMAIL_BACKFILL of them are checked and the rest are skipped (and the skip is reported).
+BACKLOG_LIMIT = 25
 
 
 def _message_id(raw: bytes) -> str:
@@ -50,6 +54,16 @@ class EmailWatcher(Watcher):
         user = (s.IMAP_USER or s.SMTP_USER).strip()
         pw = (s.IMAP_PASSWORD or s.SMTP_PASSWORD).replace(" ", "").strip()   # App Passwords are shown with spaces
         return s.IMAP_HOST, user, pw, s.IMAP_FOLDER
+
+    def set_enabled(self, value: bool) -> None:
+        """(4 Nov) Switching the watcher ON starts from the newest emails, like a first start: the emails that
+        arrived while it was off are not worked through one by one (that sent a burst of alerts about old mail)."""
+        if value and not self.enabled:
+            st = get_state(self.name)
+            folders = {k: {kk: vv for kk, vv in (v or {}).items() if kk != "uidValidity"}
+                       for k, v in (st.get("folders", {}) or {}).items()}
+            update_state(self.name, uidValidity=None, folders=folders)
+        super().set_enabled(value)
 
     def configured(self):
         _, user, pw, _ = self._creds()
@@ -122,7 +136,15 @@ class EmailWatcher(Watcher):
             last = (newest[0] - 1) if newest else (uids[-1] if uids else 0)
             save(uidValidity=validity, lastUid=last)
         typ, data = imap.uid("search", None, f"UID {last + 1}:*")
-        uids = sorted(u for u in (int(x) for x in (data[0] or b"").split()) if u > last)[:MAX_PER_ROUND]
+        waiting = sorted(u for u in (int(x) for x in (data[0] or b"").split()) if u > last)
+        if len(waiting) > BACKLOG_LIMIT:       # a backlog of old mail: check only the newest few
+            keep = waiting[-max(0, s.EMAIL_BACKFILL):] if s.EMAIL_BACKFILL else []
+            skipped = len(waiting) - len(keep)
+            new_last = (keep[0] - 1) if keep else waiting[-1]
+            save(uidValidity=validity, lastUid=new_last)
+            self.skipped_backlog = getattr(self, "skipped_backlog", 0) + skipped
+            last, waiting = new_last, keep
+        uids = waiting[:MAX_PER_ROUND]
         checked = threats = 0
         finding = None
         where = "" if folder_key is None else f" [{label}]"
@@ -193,6 +215,10 @@ class EmailWatcher(Watcher):
                 else:
                     notes.append(f"Spam folder '{spam}' not found, inbox only")
             note = f"{checked} new email(s) checked" if seen else "No new emails"
+            skipped, self.skipped_backlog = getattr(self, "skipped_backlog", 0), 0
+            if skipped:
+                notes.append(f"{skipped} older email(s) that arrived while the watcher was off were skipped "
+                             "(only the newest are checked)")
             return {"checked": checked, "threats": threats, "finding": finding,
                     "note": "; ".join([note] + notes)}
         finally:

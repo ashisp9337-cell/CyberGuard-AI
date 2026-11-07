@@ -305,3 +305,16 @@ class ChatMessage(Base):
     language: Mapped[str | None] = mapped_column(String, nullable=True)
     meta: Mapped[dict] = mapped_column(JSON, default=dict)          # e.g. {"actions": [...], "attachment": "..."}
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+
+
+class ExtensionToken(Base):
+    """(6 Nov) A connection key for the CyberGuard browser extension. Only a SHA-256 hash of the key is stored; the key
+    itself is shown once when it is made. Deleting the row disconnects that browser."""
+    __tablename__ = "extension_tokens"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: gen_id("EXT"))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String, unique=True, index=True)
+    label: Mapped[str] = mapped_column(String, default="Browser")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

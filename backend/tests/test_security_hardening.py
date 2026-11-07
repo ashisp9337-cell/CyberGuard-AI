@@ -256,3 +256,97 @@ def test_database_must_be_postgresql():
     assert "PostgreSQL" in database_problem("sqlite:///./cyberguard.db")
     assert "not set" in database_problem("")
     assert "PostgreSQL" in database_problem("mysql+pymysql://u:p@localhost/db")
+
+
+# ---- (6 Nov) pentest: the per-IP login limit could be dodged with a faked X-Forwarded-For --------------------------
+def test_wrong_passwords_lock_the_account_whatever_address_they_come_from(client):
+    email = f"lock_{uuid.uuid4().hex[:6]}@example.com"
+    assert register_user(client, {"name": "L", "email": email, "password": "RightPass123!"}).status_code == 201
+    client.post("/api/auth/logout")
+    limit = get_settings().LOGIN_MAX_FAILED_PER_ACCOUNT
+    for i in range(limit):
+        r = client.post("/api/auth/login", json={"email": email, "password": f"wrong{i}"},
+                        headers={"X-Forwarded-For": f"203.0.113.{i}"})
+        assert r.status_code == 401
+    r = client.post("/api/auth/login", json={"email": email, "password": "RightPass123!"},
+                    headers={"X-Forwarded-For": "198.51.100.77"})
+    assert r.status_code == 429 and r.json()["error"]["code"] == "ACCOUNT_LOCKED"   # even the right password waits
+    other = f"other_{uuid.uuid4().hex[:6]}@example.com"
+    register_user(client, {"name": "O", "email": other, "password": "RightPass123!"})
+    client.post("/api/auth/logout")
+    assert login_user(client, other, "RightPass123!").status_code == 200              # other accounts unaffected
+
+
+def test_unknown_accounts_lock_the_same_way(client):
+    """Same answer for an address with no account: the lock never tells which emails exist."""
+    ghost = f"ghost_{uuid.uuid4().hex[:6]}@example.com"
+    codes = [client.post("/api/auth/login", json={"email": ghost, "password": f"x{i}"}).status_code
+             for i in range(get_settings().LOGIN_MAX_FAILED_PER_ACCOUNT + 1)]
+    assert codes[-1] == 429 and set(codes[:-1]) == {401}
+
+
+def test_account_lock_can_be_switched_off(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "LOGIN_MAX_FAILED_PER_ACCOUNT", 0)
+    ghost = f"off_{uuid.uuid4().hex[:6]}@example.com"
+    assert {client.post("/api/auth/login", json={"email": ghost, "password": "x"}).status_code for _ in range(12)} == {401}
+
+
+# ---- (6 Nov) full security audit ---------------------------------------------------------------------------------
+@pytest.fixture()
+def limits_on():
+    from app.core.rate_limit import limiter
+    old = limiter.enabled
+    limiter.enabled = True
+    limiter.reset()
+    yield limiter
+    limiter.enabled = old
+    limiter.reset()
+
+
+def test_default_limit_covers_routes_without_their_own(client, limits_on):
+    codes = [client.get("/api/health").status_code for _ in range(605)]
+    assert codes[:600] == [200] * 600 and 429 in codes[600:]
+
+
+def test_own_route_limits_are_not_counted_twice(client, limits_on):
+    codes = [client.post("/api/auth/login", json={"email": f"x{i}@example.com", "password": "Wrong1234"}).status_code
+             for i in range(12)]
+    assert codes[:10] == [401] * 10 and codes[10] == 429          # exactly 10 a minute, as the route says
+
+
+@pytest.mark.parametrize("title", ["<b>unclosed tag", '<a href="javascript:alert(1)">Click to verify</a>',
+                                   "Q3 report & <findings>"])
+def test_report_titles_are_text_not_markup(auth_client, title):
+    from app.services.report_service import generate_pdf_report
+    pdf = generate_pdf_report([], title)                          # used to crash / plant a clickable link
+    assert pdf.startswith(b"%PDF") and b"/URI" not in pdf and b"/Link" not in pdf   # no clickable link planted
+    assert auth_client.post("/api/reports", json={"title": title, "format": "PDF"}).status_code == 201
+
+
+def _cap():
+    from app.core.config import get_settings
+    return (2 * get_settings().MAX_UPLOAD_MB + 2) * 1024 * 1024
+
+
+def test_one_huge_request_is_refused_before_it_is_read(auth_client):
+    big = b'{"displayName": "' + b"A" * (_cap() + 10) + b'"}'
+    r = auth_client.post("/api/contacts", content=big, headers={"Content-Type": "application/json"})
+    assert r.status_code == 413 and r.json()["error"]["code"] == "REQUEST_TOO_LARGE"
+
+
+def test_a_huge_request_without_a_declared_size_is_stopped_too(auth_client):
+    def chunks():
+        for _ in range(_cap() // (1024 * 1024) + 3):
+            yield b"A" * (1024 * 1024)
+    r = auth_client.post("/api/contacts", content=chunks(), headers={"Content-Type": "application/json"})
+    assert r.status_code == 413
+
+
+def test_normal_uploads_still_reach_their_own_checks(auth_client):
+    from app.core.config import get_settings
+    over_file_limit = b"x" * ((get_settings().MAX_UPLOAD_MB + 5) * 1024 * 1024)      # below the request cap
+    r = auth_client.post("/api/analysis/scan", files={"file": ("big.txt", over_file_limit, "text/plain")},
+                         data={"moduleId": "cyber-threat", "subtopicId": "log-analysis", "subtopicTitle": "Logs"})
+    assert r.status_code == 413 and r.json()["error"]["code"] == "FILE_TOO_LARGE"   # the route's own answer
+    ok = auth_client.post("/api/contacts", json={"displayName": "Mom", "authorizedEmail": "mom@example.com"})
+    assert ok.status_code in (200, 201)

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dangerous website blocked - CyberGuard AI</title><link rel="stylesheet" href="style.css">
+<style>main{max-width:640px;margin:8vh auto;padding:0 16px}.big{font-size:44px;line-height:1;margin-bottom:10px;color:var(--danger)}</style></head>
+<body><main>
+  <div class="card" style="border-color:#7f1d1d">
+    <div class="big" aria-hidden="true">&#9888;&#xFE0E;</div>
+    <h1>CyberGuard stopped this website</h1>
+    <p>Your CyberGuard AI judged this page as <strong style="color:#fecaca">dangerous</strong>
+       (score <span id="score"></span>/100). It may try to steal your password, card or OTP.</p>
+    <p class="mono" id="site"></p>
+    <h2>Why</h2>
+    <ul id="reasons"></ul>
+  </div>
+  <div class="row">
+    <button id="back">Go back to safety</button>
+    <button id="go" class="ghost">I understand the risk - open it anyway</button>
+  </div>
+  <p class="small" style="margin-top:14px">"Open it anyway" lets this website through until you close the browser.
+     The finding is also saved in your CyberGuard dashboard.</p>
+</main><script src="warning.js"></script></body></html>

@@ -144,6 +144,9 @@ def register_removed(body: SignUpRequest):
 async def login(body: SignInRequest, request: Request, db: Session = Depends(get_db)):
     await _captcha_ok(body.turnstileToken, request)
     email = body.email.strip().lower()
+    if _account_locked(db, email):        # checked first, the same way for existing and unknown accounts
+        raise _err("ACCOUNT_LOCKED", f"Too many wrong passwords for this account. Wait {settings.LOGIN_LOCK_MINUTES} "
+                                     "minutes and try again, or reset your password.", 429)
     user = db.query(User).filter(User.email == email).first()
     if not user or not user.password_hash or not verify_password(body.password, user.password_hash):
         audit.log(db, action="auth.login_failed", user=user, actor=email, request=request, success=False,
@@ -186,6 +189,23 @@ def login_verify(body: OTPVerifyRequest, request: Request, response: Response, d
     audit.log(db, action="auth.login", user=user, request=request, commit=True)
     login_monitor.record_attempt(db, email=user.email, user_id=user.id, request=request, success=True, stage="otp")
     return AuthResultOut(user=_to_public(user))
+
+
+def _account_locked(db, email: str) -> bool:
+    """(6 Nov) True when this account had LOGIN_MAX_FAILED_PER_ACCOUNT wrong passwords in the last LOGIN_LOCK_MINUTES
+    (since its last successful sign-in). Uses the sign-in log the login watcher already keeps."""
+    limit = int(settings.LOGIN_MAX_FAILED_PER_ACCOUNT or 0)
+    if limit <= 0 or not email:
+        return False
+    from sqlalchemy import func
+    from app.db.models import LoginEvent
+    since = datetime.now(timezone.utc) - timedelta(minutes=max(1, int(settings.LOGIN_LOCK_MINUTES)))
+    last_ok = db.query(func.max(LoginEvent.timestamp)).filter(LoginEvent.email == email, LoginEvent.success.is_(True),
+                                                               LoginEvent.timestamp >= since).scalar()
+    q = db.query(func.count(LoginEvent.id)).filter(LoginEvent.email == email, LoginEvent.success.is_(False),
+                                                   LoginEvent.stage == "password",
+                                                   LoginEvent.timestamp >= (last_ok or since))
+    return (q.scalar() or 0) >= limit
 
 
 def _challenge_owner(db, challenge_id: str):

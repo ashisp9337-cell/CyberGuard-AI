@@ -175,7 +175,14 @@ def test_cyberguard_emails_are_signed_and_recognised_so_alerts_never_loop(smtp):
     assert msg[notifier.OWN_MAIL_HEADER] and notifier.is_own_mail(raw)
 
     forged = raw.replace(msg[notifier.OWN_MAIL_HEADER].encode(), b"0" * 40)          # attacker guesses a signature
-    assert not notifier.is_own_mail(forged)
+    # (4 Nov) A wrong signature alone no longer decides: it also happens to our OWN old alerts after JWT_SECRET is
+    # changed. Such mail is skipped only when it is from our address with our subject and NOT spoofed (as before for
+    # unsigned mail); a spoofed copy (Gmail marks it dmarc=fail) is still scanned.
+    assert notifier.is_own_mail(forged)
+    spoofed = b"Authentication-Results: mx.google.com; dmarc=fail header.from=gmail.com\r\n" + forged
+    assert not notifier.is_own_mail(spoofed)
+    stranger = forged.replace(b"From: ", b"From: x", 1)
+    assert not notifier.is_own_mail(stranger)
     other = (b"From: SBI <alerts@sbi-kyc-verify-login.xyz>\r\nSubject: URGENT: verify KYC\r\n"
              b"Message-ID: <1@x>\r\n" + notifier.OWN_MAIL_HEADER.encode() + b": abc\r\n\r\nhi")
     assert not notifier.is_own_mail(other)                                           # normal mail is scanned
@@ -308,3 +315,121 @@ def test_alert_sensitivity_decides_which_scans_alert(auth_client, telegram, leve
 def test_unknown_sensitivity_is_refused_and_old_names_are_mapped(auth_client):
     assert auth_client.put("/api/settings", json={"sensitivity": "extreme"}).status_code == 422
     assert auth_client.put("/api/settings", json={"sensitivity": "high"}).json()["sensitivity"] == "aggressive"
+
+
+# (4 Nov) A network error's text contains the URL it called: for Telegram that holds the bot token, for CallMeBot
+# the API key. Neither may end up in the stored alert result, the log or the Settings screen.
+def test_network_error_never_reveals_the_telegram_token(monkeypatch):
+    s = get_settings()
+    token = "123456789:AAEexampleFAKEtokenForTheTest_0123"
+    monkeypatch.setattr(s, "TELEGRAM_BOT_TOKEN", token)
+    monkeypatch.setattr(s, "TELEGRAM_CHAT_ID", "999")
+
+    def boom(url, **kw):
+        raise ConnectionError(f"Max retries exceeded with url: {url.replace('https://api.telegram.org', '')}")
+    monkeypatch.setattr(notifier.requests, "post", boom)
+    out = notifier.send_telegram({"html": "x", "text": "x"})
+    assert out["status"] == "failed"
+    assert token not in out["error"] and "AAEexampleFAKE" not in out["error"]
+    assert "/bot***" in out["error"]
+
+
+def test_network_error_never_reveals_the_callmebot_key(monkeypatch):
+    s = get_settings()
+    monkeypatch.setattr(s, "WHATSAPP_PROVIDER", "callmebot")
+    monkeypatch.setattr(s, "WHATSAPP_TO", "+919876543210")
+    monkeypatch.setattr(s, "CALLMEBOT_APIKEY", "7654321")
+
+    def boom(url, params=None, **kw):
+        raise ConnectionError(f"Max retries exceeded with url: /whatsapp.php?phone=919876543210&text=x&apikey={params['apikey']}")
+    monkeypatch.setattr(notifier.requests, "get", boom)
+    out = notifier.send_whatsapp({"text": "x", "whatsapp": "x"})
+    assert out["status"] == "failed" and "7654321" not in out["error"] and "apikey=***" in out["error"]
+
+
+def test_redact_hides_every_configured_secret_but_keeps_short_values(monkeypatch):
+    s = get_settings()
+    monkeypatch.setattr(s, "SMTP_PASSWORD", "abcd efgh ijkl mnop")
+    monkeypatch.setattr(s, "TWILIO_AUTH_TOKEN", "twilio-secret-value")
+    text = notifier.redact("login abcdefghijklmnop failed; auth twilio-secret-value; code 42")
+    assert "abcdefghijklmnop" not in text and "twilio-secret-value" not in text and "code 42" in text
+
+
+def test_telegram_inbox_last_error_has_no_token(monkeypatch):
+    from app.services import telegram_inbox
+    s = get_settings()
+    token = "987654321:AAHanotherFAKEtokenValue_abcdefg"
+    monkeypatch.setattr(s, "TELEGRAM_BOT_TOKEN", token)
+    msg = telegram_inbox._clean(ConnectionError(f"HTTPSConnectionPool: url: /bot{token}/getUpdates"))
+    assert token not in msg and "/bot***/getUpdates" in msg
+
+
+def test_old_alerts_are_still_recognised_after_the_server_secret_changes(smtp, monkeypatch):
+    """(4 Nov) Changing JWT_SECRET changes the signature key; the alerts already in the inbox must not be scanned
+    as strangers' mail (each one would raise a new alert about itself)."""
+    notifier.send_email(notifier.build_alert({"id": "S2", "threatType": "Brand impersonation phishing",
+                                              "classification": "high_risk", "severity": "high", "riskScore": 80,
+                                              "target": "Your parcel is on hold"}))
+    raw = smtp.instances[0].sent[0][0].as_bytes()
+    monkeypatch.setattr(get_settings(), "JWT_SECRET", "a-completely-different-secret-0123456789abcdef")
+    assert notifier.is_own_mail(raw)
+
+
+# ---- (4 Nov) findings of the background watchers: critical only by default, at most N per hour ----------------
+def _automatic_finding(client, score: int, n: int) -> str:
+    """Saved exactly like a watcher's finding (source automation:gmail), for this test's own user."""
+    from app.db.database import SessionLocal
+    from app.detectors.base import build_result
+    from app.services import scan_store
+    user_id = client.get("/api/auth/me").json()["id"]
+    result = build_result(indicators=[], base_score=score, confidence=80, engine_name="test",
+                          threat_type=f"Automatic finding {n}", explanation="found by a watcher")
+    db = SessionLocal()
+    try:
+        scan = scan_store.save_result(db, user_id=user_id, module_id="phishing", subtopic_id="email-analysis",
+                                      subtopic_title="Email", result=result,
+                                      target=f"newsletter {n} <promo{n}@example.org>", target_type="email",
+                                      metadata={"automatic": True}, source="automation:gmail")
+        db.commit()
+        scan_id = scan.id
+    finally:
+        db.close()
+    notifier.alert_for_scan(scan_id)
+    return scan_id
+
+
+def test_automatic_high_risk_finding_is_not_alerted_by_default_but_critical_is(auth_client, telegram):
+    _automatic_finding(auth_client, 78, 1)                                   # high risk, found by a watcher
+    assert telegram.sent == []
+    _automatic_finding(auth_client, 92, 2)                                   # critical
+    assert len(telegram.sent) == 1
+
+
+def test_automatic_findings_can_follow_the_normal_alert_level(auth_client, telegram):
+    r = auth_client.put("/api/settings", json={"automaticAlerts": "same"})
+    assert r.status_code == 200 and r.json()["automaticAlerts"] == "same"
+    _automatic_finding(auth_client, 78, 3)
+    assert len(telegram.sent) == 1
+    assert auth_client.put("/api/settings", json={"automaticAlerts": "loud"}).status_code == 422
+    assert auth_client.get("/api/settings").json()["automaticAlerts"] == "same"
+
+
+def test_manual_scans_still_alert_at_the_normal_level(auth_client, telegram):
+    body = _scan(auth_client)                                    # a scan the user ran: 71+ alerts as before
+    assert body["riskScore"] >= 71 and len(telegram.sent) == 1
+
+
+def test_at_most_five_automatic_alerts_per_hour_then_one_notice(auth_client, telegram, monkeypatch):
+    monkeypatch.setattr(get_settings(), "AUTO_ALERT_MAX_PER_HOUR", 5)
+    ids = [_automatic_finding(auth_client, 95, 10 + i) for i in range(9)]    # 9 different critical findings in a row
+    assert len(telegram.sent) == 5 + 1                           # 5 alerts + one "limit reached" notice
+    assert "Alert limit reached" in telegram.sent[-1]["text"] or "alert limit" in telegram.sent[-1]["text"]
+    last = _alerts_on_event(auth_client, ids[-1])
+    assert last and last[0]["status"] == "suppressed_rate_limit"   # saved on the dashboard, no message
+    assert _alerts_on_event(auth_client, ids[5])[0].get("kind") == "limit-notice"
+
+
+def test_limit_notice_is_recognised_as_cyberguards_own_mail(smtp):
+    notifier.send_email(notifier.build_limit_notice(5))
+    raw = smtp.instances[0].sent[0][0].as_bytes()
+    assert notifier.is_own_mail(raw)

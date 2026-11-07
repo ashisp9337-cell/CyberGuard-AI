@@ -69,7 +69,7 @@ PROBE = re.compile(rf"(?:(?:no auth attempts in \d+ secs|disconnected before aut
                    rf"(?:Connection closed|Connection reset|Disconnected) by (?:invalid user \S+ )?{_IP} port \d+ \[preauth\])", re.I)
 ENUM = re.compile(rf"(?:VRFY|EXPN) failed for (?P<user>\S+)[^\n]*?\[{_IP}\]|rejected RCPT[^\n]*?\[{_IP}\][^\n]*?unknown user", re.I)
 ACCESS = re.compile(r'^(?P<ip>\S+) \S+ \S+ \[[^\]]+\] "(?P<method>[A-Z]+) (?P<target>\S+)[^"]*" (?P<status>\d{3}) \S+'
-                    r'(?: "(?P<ref>[^"]*)" "(?P<ua>[^"]*)")?')
+                    r'(?: "(?P<ref>(?:[^"\\]|\\.)*)" "(?P<ua>(?:[^"\\]|\\.)*)")?')   # Apache writes " as \"
 SCANNER_UA = re.compile(r"nikto|sqlmap|nmap|masscan|zgrab|nuclei|wpscan|dirbuster|\bdirb\b|gobuster|ffuf|wfuzz|"
                         r"acunetix|nessus|openvas|w3af|arachni|hydra|medusa|havij|commix|jaeles|feroxbuster", re.I)
 WEBSHELL = re.compile(r"system\(\): Cannot execute|(?:shell_exec|passthru|proc_open)\(\)|"
@@ -149,7 +149,8 @@ def events(lines):
             if SCANNER_UA.search(ua):
                 out.append(("scanner_tool", i, t, ip, line))
             path, _, query = target.partition("?")
-            if api_abuse.attack_types(api_abuse.decode(api_abuse.request_text(path, query)).lower()):
+            if api_abuse.attack_types(api_abuse.decode(api_abuse.request_text(path, query)).lower()) \
+                    or api_abuse.header_attack_types(ua + "\n" + (m["ref"] or "")):   # (6 Nov) Shellshock in headers
                 out.append(("web_attack", i, t, ip, line))
         low = line.lower()
         if _has(low, _PRE_AUTH):

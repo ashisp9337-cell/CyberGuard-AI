@@ -2,7 +2,7 @@ import { ICONS } from "@/lib/icons";
 import { Reveal, SectionHeading } from "@/components/home/Reveal";
 
 const FEATURES = [
-  { icon: ICONS.brain, title: "Trained on Real Data", desc: "Models learn from public research datasets: 31 million real logins and 235,795 labelled URLs, not invented examples." },
+  { icon: ICONS.brain, title: "Trained on Real Data", desc: "Models learn from public research datasets, not invented examples: 235,795 labelled URLs, real scam and deepfake collections, and about 31 million logins synthesized from a real sign-in service." },
   { icon: ICONS.eye, title: "Explainable Detection", desc: "Understand why an item was flagged with clear indicators and risk explanations." },
   { icon: ICONS.layers, title: "Multi-Layer Security", desc: "Combine file, URL, communication, multimedia, behavioral, and network analysis." },
   { icon: ICONS.dashboard, title: "Remembers Every Attack", desc: "Bad links, domains, IPs, senders and files are remembered, so a repeat attack is caught faster and scored higher." },

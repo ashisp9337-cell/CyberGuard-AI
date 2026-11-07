@@ -1,7 +1,7 @@
 {
  "model": "SMS",
  "model_file": "phishing_sms.joblib",
- "model_sha256": "a9a9a7268b4ac14734917a8eb695d948dee10a9bbad08d14e13c0b9ec40590d6",
+ "model_sha256": "b2736243588d512de9b4a9fcf7003d76dcbbc1f5302ea483b1880216cad2d002",
  "data_file": "phishing_sms_clean_v2.tsv",
  "data_sha256": "bb56d3b927139e8f4d671821f58176ea17dc5e0e96711e4ff5f46290edf0bcf2",
  "data_rows": 77891,
@@ -15,37 +15,37 @@
    "messages": 15579,
    "scam": 4550,
    "genuine": 11029,
-   "auc": 0.988,
-   "caught_at_50pct": 0.9631,
-   "false_alarms_at_50pct": 0.0615
+   "auc": 0.995,
+   "caught_at_50pct": 0.9716,
+   "false_alarms_at_50pct": 0.0361
   },
   "heldout_unseen_texts": {
    "messages": 14045,
    "scam": 4120,
    "genuine": 9925,
-   "auc": 0.9865,
-   "caught_at_50pct": 0.96,
-   "false_alarms_at_50pct": 0.0665
+   "auc": 0.9943,
+   "caught_at_50pct": 0.9689,
+   "false_alarms_at_50pct": 0.0388
   },
   "heldout_real_only": {
    "messages": 14915,
    "scam": 4550,
    "genuine": 10365,
-   "auc": 0.9873,
-   "caught_at_50pct": 0.9631,
-   "false_alarms_at_50pct": 0.0654
+   "auc": 0.9947,
+   "caught_at_50pct": 0.9716,
+   "false_alarms_at_50pct": 0.0384
   },
   "heldout_real_unseen_texts": {
    "messages": 14017,
    "scam": 4120,
    "genuine": 9897,
-   "auc": 0.9865,
-   "caught_at_50pct": 0.96,
-   "false_alarms_at_50pct": 0.0667
+   "auc": 0.9943,
+   "caught_at_50pct": 0.9689,
+   "false_alarms_at_50pct": 0.0389
   }
  },
  "rates_note": "the model alone at 50%; the app also adds its rules and link checks",
- "measured_at": "2026-10-29T21:18:46Z",
+ "measured_at": "2026-10-31T05:43:36Z",
  "versions": {
   "scikit-learn": "1.5.2",
   "python": "3.13.15"

@@ -8,9 +8,9 @@ export function StatsSection() {
   // Real figures: dataset sizes from the training scripts, technique count from backend app/services/mitre.py.
   const stats = [
     { value: `${moduleCount}`, label: `Detection modules · ${capabilityCount} checks` },
-    { value: "≈31M", label: "Real logins behind account-takeover detection" },
+    { value: "≈31M", label: "Logins (RBA dataset, synthesized from a real service) behind account-takeover detection" },
     { value: "235,795", label: "Labelled URLs behind the URL model" },
-    { value: "32", label: "MITRE ATT&CK techniques explained" },
+    { value: "67", label: "MITRE ATT&CK techniques explained" },
   ];
 
   return (

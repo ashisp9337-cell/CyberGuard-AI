@@ -17,6 +17,7 @@ const ResetPassword = lazy(() => import("@/pages/ResetPassword"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const ThreatOverview = lazy(() => import("@/pages/ThreatOverview"));
 const LiveMonitoring = lazy(() => import("@/pages/LiveMonitoring"));
+const PcNetwork = lazy(() => import("@/pages/PcNetwork"));
 const ThreatIntelligence = lazy(() => import("@/pages/ThreatIntelligence"));
 const ScanHistory = lazy(() => import("@/pages/ScanHistory"));
 const Reports = lazy(() => import("@/pages/Reports"));
@@ -48,6 +49,7 @@ export default function App() {
                   <Route path="dashboard" element={<Dashboard />} />
                   <Route path="threat-overview" element={<ThreatOverview />} />
                   <Route path="live-monitoring" element={<LiveMonitoring />} />
+                  <Route path="pc-network" element={<PcNetwork />} />
                   <Route path="threat-intelligence" element={<ThreatIntelligence />} />
                   <Route path="scan-history" element={<ScanHistory />} />
                   <Route path="reports" element={<Reports />} />

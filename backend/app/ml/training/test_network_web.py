@@ -103,7 +103,7 @@ def judge(requests, tmp, step=2.0):
         cap = NT.read_capture(path)
         os.remove(path)
         read += len(cap["http"])
-        for ts, src, dst, dport, method, target, body in cap["http"]:
+        for ts, src, dst, dport, method, target, body, _headers in cap["http"]:
             p, _, q = target.partition("?")
             line_hits += bool(api_abuse.attack_types(api_abuse.decode(api_abuse.request_text(p, q)).lower()))
             full_hits += bool(api_abuse.attack_types(api_abuse.decode(api_abuse.request_text(p, q, body)).lower()))
