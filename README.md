@@ -208,7 +208,7 @@ results are (`*.metrics.json`, `deepfake_video.json`).
 ### 5. Checks
 ```
 cd backend
-python -m pytest -q          # 973 tests (uses cyberguard_test, never your real database)
+python -m pytest -q          # 1,048 tests (uses cyberguard_test, never your real database)
 python demo_check.py         # demo-day pre-flight: models, database, internet, chat backup, every demo input
 python phase2_live_check.py  # live services + 30 real / phishing URLs (phishing sites are never contacted)
 ```

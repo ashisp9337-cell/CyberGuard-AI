@@ -22,7 +22,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.core.config import get_settings, security_problems
 from app.db.database import engine
 from app.db import models  # noqa: F401 — ensures models are registered before create_all
-from app.api.routes import auth, analysis, scans, dashboard, events, reports, settings as settings_route, threat_intelligence, monitoring, chat, contacts, email as email_route, alerts as alerts_route, incidents as incidents_route, automation as automation_route, iocs as iocs_route, audit as audit_route, mitre as mitre_route, quarantine as quarantine_route, pc_network as pc_network_route, extension as extension_route
+from app.api.routes import auth, analysis, scans, dashboard, events, reports, settings as settings_route, threat_intelligence, monitoring, chat, contacts, email as email_route, alerts as alerts_route, incidents as incidents_route, automation as automation_route, iocs as iocs_route, audit as audit_route, mitre as mitre_route, quarantine as quarantine_route, pc_network as pc_network_route, extension as extension_route, company as company_route, agent as agent_route
 
 settings = get_settings()
 
@@ -184,6 +184,8 @@ app.include_router(mitre_route.router)
 app.include_router(quarantine_route.router)
 app.include_router(pc_network_route.router)
 app.include_router(extension_route.router)
+app.include_router(company_route.router)          # (9 Nov) company mode: Employees page + invites
+app.include_router(agent_route.router)            # (10 Nov) company mode: CyberGuard Agent + Devices page
 
 
 

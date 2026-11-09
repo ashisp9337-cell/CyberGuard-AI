@@ -7,7 +7,7 @@ const CAPABILITIES = [
   {
     icon: ICONS.credential, tag: "Trained model", title: "Account-takeover detection",
     desc: "Each sign-in is compared with the account's own history of countries, networks, devices and browsers.",
-    fact: "Trained on ≈31 million logins (RBA dataset, synthesized from a real sign-in service)",
+    fact: "Built on the RBA dataset: ≈31 million logins, synthesized from a real sign-in service",
   },
   {
     icon: ICONS.url, tag: "Trained model", title: "Malicious URL & website model",
@@ -21,8 +21,8 @@ const CAPABILITIES = [
   },
   {
     icon: ICONS.radar, tag: "New", title: "Automatic protection",
-    desc: "Checks your Gmail inbox (read-only), new downloads and Windows and CyberGuard sign-ins in the background.",
-    fact: "No manual scanning needed",
+    desc: "Watches in the background: Gmail (read without marking anything as read), new downloads, Windows and CyberGuard sign-ins, this PC's open ports, the websites any app looks up and attacks on your own site. A browser extension checks every page you open.",
+    fact: "The watchers that read more ask your permission first",
   },
   {
     icon: ICONS.fingerprint, tag: "New", title: "Threat memory (IOCs)",
@@ -36,8 +36,8 @@ const CAPABILITIES = [
   },
   {
     icon: ICONS.bell, tag: "New", title: "Instant alerts",
-    desc: "Risk 71 and above is sent to Telegram, email and WhatsApp with the reasons and what to do now.",
-    fact: "The same threat is alerted once per 10 minutes",
+    desc: "Risk 71 and above from your scans is sent to Telegram, email and WhatsApp with the reasons and what to do now.",
+    fact: "Same threat alerted once a day · automatic findings: critical only, max 5 an hour",
   },
   {
     icon: ICONS.scanHistory, tag: "New", title: "Activity log",

@@ -4,6 +4,7 @@ import { DETECTION_MODULES } from "@/data/modules";
 import { useAppContext } from "@/context/AppContext";
 import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
+import { useIsAdmin } from "@/services/api/companyService";
 
 const MAIN_NAV = [
   { to: "/dashboard", label: "Dashboard", icon: ICONS.dashboard, end: true },
@@ -14,6 +15,12 @@ const MAIN_NAV = [
   { to: "/threat-intelligence", label: "Threat Intelligence", icon: ICONS.threatIntel },
   { to: "/scan-history", label: "Scan History", icon: ICONS.scanHistory },
   { to: "/reports", label: "Reports", icon: ICONS.reports },
+];
+
+// (9 Nov) company mode: the Employees page is for administrators
+const COMPANY_NAV = [
+  { to: "/employees", label: "Employees", icon: ICONS.contact, adminOnly: true },
+  { to: "/devices", label: "Devices", icon: ICONS.device, adminOnly: false },     // (10 Nov) everyone: their own PCs
 ];
 
 const SYSTEM_NAV = [
@@ -48,7 +55,9 @@ function NavItem({ to, label, Icon, end, collapsed, onClick }: { to: string; lab
 
 export function Sidebar({ variant = "desktop" }: { variant?: "desktop" | "mobile" }) {
   const { sidebarCollapsed, mobileNavOpen, setMobileNavOpen } = useAppContext();
-  const { signOut } = useAuth();
+  const { signOut, user } = useAuth();
+  const isAdmin = useIsAdmin(user?.id);
+  const companyNav = COMPANY_NAV.filter((item) => !item.adminOnly || isAdmin);
   const navigate = useNavigate();
   const collapsed = variant === "desktop" && sidebarCollapsed;
 
@@ -98,6 +107,15 @@ export function Sidebar({ variant = "desktop" }: { variant?: "desktop" | "mobile
             );
           })}
         </div>
+
+        {companyNav.length > 0 && (
+          <div className="space-y-1">
+            {!collapsed && <p className="px-3 text-[10px] font-semibold uppercase tracking-wider text-fg-faint mb-1.5">Company</p>}
+            {companyNav.map((item) => (
+              <NavItem key={item.to} to={item.to} label={item.label} Icon={item.icon} collapsed={collapsed} onClick={() => setMobileNavOpen(false)} />
+            ))}
+          </div>
+        )}
 
         <div className="space-y-1">
           {!collapsed && <p className="px-3 text-[10px] font-semibold uppercase tracking-wider text-fg-faint mb-1.5">System</p>}

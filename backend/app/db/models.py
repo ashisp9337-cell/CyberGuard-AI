@@ -34,6 +34,11 @@ class User(Base):
     last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Bumped on logout and password reset: every session token issued before that stops working.
     session_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    # (9 Nov) company mode: an administrator can disable an account; last activity for the Employees page
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_ip: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_user_agent: Mapped[str | None] = mapped_column(String, nullable=True)
 
     scans = relationship("Scan", back_populates="user", cascade="all, delete-orphan")
     settings = relationship("UserSettings", back_populates="user", uselist=False, cascade="all, delete-orphan")
@@ -305,6 +310,42 @@ class ChatMessage(Base):
     language: Mapped[str | None] = mapped_column(String, nullable=True)
     meta: Mapped[dict] = mapped_column(JSON, default=dict)          # e.g. {"actions": [...], "attachment": "..."}
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+
+
+class Invite(Base):
+    """(9 Nov) Company mode: an administrator invites someone (e.g. a judge with a Gmail address) whose e-mail is not
+    in COMPANY_EMAIL_DOMAINS. Used once, expires after INVITE_DAYS."""
+    __tablename__ = "invites"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: gen_id("INV"))
+    email: Mapped[str] = mapped_column(String, index=True)
+    role: Mapped[str] = mapped_column(String, default="user")        # user | admin
+    invited_by: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+
+
+class Device(Base):
+    """(10 Nov) Company mode: a PC that runs the CyberGuard Agent and reports to this server. It belongs to one
+    employee (user_id); only a SHA-256 hash of its key is stored. `state` holds the agent's per-PC memory (what was
+    already reported) and the newest summaries shown on the Devices page - never a list of visited websites."""
+    __tablename__ = "devices"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: gen_id("DEV"))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String, default="PC")
+    token_hash: Mapped[str] = mapped_column(String, unique=True, index=True)
+    created_by: Mapped[str | None] = mapped_column(String, ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_ip: Mapped[str | None] = mapped_column(String, nullable=True)
+    hostname: Mapped[str | None] = mapped_column(String, nullable=True)
+    os: Mapped[str | None] = mapped_column(String, nullable=True)
+    agent_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    state: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 class ExtensionToken(Base):

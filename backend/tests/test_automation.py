@@ -41,6 +41,21 @@ def test_status_lists_four_watchers_and_toggle_persists(admin_client, fresh_stat
     assert auth_client.post("/api/automation/nope/run").status_code == 404
 
 
+def test_watchers_say_paused_when_automation_is_off_for_the_whole_backend(admin_client, fresh_state, monkeypatch):
+    """(9 Nov) the cloud server runs with AUTOMATION_ENABLED=false: a switched-on watcher must not look "active"."""
+    from app.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "AUTOMATION_ENABLED", False)
+    admin_client.post("/api/automation/logins/toggle", json={"enabled": True})
+    r = admin_client.get("/api/automation/status").json()
+    assert r["enabled"] is False
+    st = {w["name"]: w for w in r["watchers"]}
+    assert st["logins"]["enabled"] is True and st["logins"]["state"] == "paused"
+    assert all(w["state"] in ("off", "paused") for w in r["watchers"])
+    monkeypatch.setattr(get_settings(), "AUTOMATION_ENABLED", True)          # the laptop: switched-on and set up = active
+    on = {w["name"]: w for w in admin_client.get("/api/automation/status").json()["watchers"]}
+    assert on["logins"]["state"] in ("active", "needs setup", "error")
+
+
 def test_status_needs_login(client):
     assert client.get("/api/automation/status").status_code == 401
 

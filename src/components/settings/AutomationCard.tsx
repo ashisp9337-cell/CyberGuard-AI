@@ -209,7 +209,8 @@ export function AutomationCard() {
       <CardBody>
         {status && !status.enabled && (
           <p className="text-xs text-amber-400 mb-3">
-            Automation is switched off for the whole backend (AUTOMATION_ENABLED=false in backend/.env).
+            Automatic protection is paused on this server (AUTOMATION_ENABLED=false): the watchers check the computer
+            CyberGuard runs on, so they run on the protected PC, not here.
           </p>
         )}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

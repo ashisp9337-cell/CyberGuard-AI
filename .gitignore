@@ -74,3 +74,7 @@ backend/app/ml/models/voice_ai.json.tmp
 backend/*_check.txt
 # demo-day files (your own photos / videos for the deepfake part)
 backend/demo_samples/
+# (10 Nov) CyberGuard Agent: its device key and memory stay on the PC it runs on - never in Git
+agent/agent_config.json
+agent/agent_state.json
+agent/*.tmp

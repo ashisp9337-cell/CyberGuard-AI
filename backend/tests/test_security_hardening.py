@@ -350,3 +350,44 @@ def test_normal_uploads_still_reach_their_own_checks(auth_client):
     assert r.status_code == 413 and r.json()["error"]["code"] == "FILE_TOO_LARGE"   # the route's own answer
     ok = auth_client.post("/api/contacts", json={"displayName": "Mom", "authorizedEmail": "mom@example.com"})
     assert ok.status_code in (200, 201)
+
+
+# ---- (9 Nov) no upload is kept once read (public website: strangers upload files too) -------------------------------
+def _uploads():
+    import os
+    from app.core.config import get_settings
+    folder = get_settings().UPLOAD_DIR
+    return [n for n in (os.listdir(folder) if os.path.isdir(folder) else []) if not n.startswith(".")]
+
+
+def _png() -> bytes:
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (32, 32), (40, 90, 160)).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_every_upload_is_deleted_after_its_scan(auth_client):
+    before = set(_uploads())
+    eml = (b"From: SBI Alerts <alerts@sbi-kyc-update.top>\r\nTo: you@example.com\r\nSubject: KYC pending\r\n\r\n"
+           b"Your account will be blocked today. Update KYC at http://sbi-kyc-update.top/login\r\n")
+    for module, sub, name, data in [("deepfake", "image-analysis", "photo.png", _png()),
+                                    ("phishing", "auto", "mail.eml", eml)]:
+        r = auth_client.post("/api/analysis/scan", data={"moduleId": module, "subtopicId": sub, "subtopicTitle": "t"},
+                             files={"file": (name, data, "application/octet-stream")})
+        assert r.status_code == 200, r.text
+    assert set(_uploads()) == before                                  # photo and e-mail are gone too (before: kept)
+
+
+def test_upload_is_deleted_even_when_the_scan_fails(auth_client, monkeypatch):
+    from app.api.routes import analysis
+    before = set(_uploads())
+
+    def boom(**kw):
+        raise RuntimeError("detector crashed")
+    monkeypatch.setattr(analysis, "run_scan", boom)
+    with pytest.raises(RuntimeError):
+        auth_client.post("/api/analysis/scan", data={"moduleId": "deepfake", "subtopicId": "image-analysis",
+                                                     "subtopicTitle": "t"}, files={"file": ("p.png", _png(), "image/png")})
+    assert set(_uploads()) == before

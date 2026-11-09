@@ -125,36 +125,32 @@ async def scan(
             raise
 
     routing = None
-    if subtopicId == "auto":
-        # Auto-detect: classify the input's subtopic, then run the existing detector for it.
-        try:
-            result, c = subtopic_router.route(
-                module_id=moduleId, text_input=textInput, url_input=urlInput, file_path=file_path,
-                file_name=file_name, extra_field_values=extra_fields, db=db, user_id=user.id,
-            )
-        except subtopic_router.RoutingError as exc:
-            for p in (file_path, reference_path):
-                if p and os.path.exists(p):
-                    os.remove(p)
-            raise HTTPException(status_code=422, detail={"error": {
-                "code": f"SUBTOPIC_{exc.code.upper()}", "message": exc.message, "details": exc.details}})
-        subtopicId, subtopicTitle, routing = c.subtopic_id, c.subtopic_title, c.to_dict()
-        result["routing"] = routing          # saved with the scan, so Scan History shows it too
-    else:
-        try:
+    try:
+        if subtopicId == "auto":
+            # Auto-detect: classify the input's subtopic, then run the existing detector for it.
+            try:
+                result, c = subtopic_router.route(
+                    module_id=moduleId, text_input=textInput, url_input=urlInput, file_path=file_path,
+                    file_name=file_name, extra_field_values=extra_fields, db=db, user_id=user.id,
+                )
+            except subtopic_router.RoutingError as exc:
+                raise HTTPException(status_code=422, detail={"error": {
+                    "code": f"SUBTOPIC_{exc.code.upper()}", "message": exc.message, "details": exc.details}})
+            subtopicId, subtopicTitle, routing = c.subtopic_id, c.subtopic_title, c.to_dict()
+            result["routing"] = routing          # saved with the scan, so Scan History shows it too
+        else:
             result = run_scan(
                 module_id=moduleId, subtopic_id=subtopicId, subtopic_title=subtopicTitle,
                 text_input=textInput, url_input=urlInput, file_path=file_path, file_name=file_name,
                 extra_field_values=extra_fields, db=db, user_id=user.id, reference_path=reference_path,
             )
-        finally:
-            if reference_path and os.path.exists(reference_path):
-                os.remove(reference_path)     # a person's genuine voice is private: never kept on the server
-
-    if reference_path and os.path.exists(reference_path):
-        os.remove(reference_path)
-    if file_path and os.path.exists(file_path) and (moduleId == "cyber-threat" or "voiceAnalysis" in result):
-        os.remove(file_path)          # logs and voice recordings can hold private data: the server copy is deleted once read
+    finally:
+        # (9 Nov) no upload is kept once it has been read - whatever the module and even when the scan fails:
+        # uploads can hold private data (photos, voices, e-mails, logs) or malware, and on a public link strangers
+        # upload them too. Nothing reads an upload after its scan.
+        for p in (file_path, reference_path):
+            if p and os.path.exists(p):
+                os.remove(p)
     target = result.pop("_target", file_name or urlInput or textInput or "submission")
     target_type = result.pop("_target_type", "text")
     # Threat-specific response actions (quarantine, block IP, revoke session, report ...).

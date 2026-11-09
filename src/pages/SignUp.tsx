@@ -1,9 +1,9 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AuthLayout } from "@/components/auth/AuthLayout";
 import { AuthCard } from "@/components/auth/AuthCard";
 import { AuthDivider } from "@/components/auth/AuthDivider";
-import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
+import { GoogleSignInButton, googleSignInEnabled } from "@/components/auth/GoogleSignInButton";
 import { PasswordInput } from "@/components/auth/PasswordInput";
 import { PasswordStrength, passwordMeetsRequirements } from "@/components/auth/PasswordStrength";
 import { Captcha } from "@/components/auth/Captcha";
@@ -14,6 +14,7 @@ import { useAuth } from "@/context/AuthContext";
 import { AUTH_CONFIG } from "@/services/auth/config";
 import { otpAuthService, type OtpChallenge } from "@/services/auth/otpAuthService";
 import { ICONS } from "@/lib/icons";
+import { companyService, type CompanyPublic } from "@/services/api/companyService";
 
 type Step = "details" | "otp" | "password";
 
@@ -49,11 +50,20 @@ export default function SignUp() {
 
   const [step, setStep] = useState<Step>("details");
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  // (9 Nov) an invite link opens /signup?email=... with the invited address filled in
+  const [params] = useSearchParams();
+  const [email, setEmail] = useState(() => (params.get("email") ?? "").slice(0, 254));
+  const [company, setCompany] = useState<CompanyPublic | null>(null);
+  useEffect(() => {
+    if (!AUTH_CONFIG.isBackend) return;
+    companyService.publicInfo().then(setCompany).catch(() => setCompany(null));
+  }, []);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [captchaVerified, setCaptchaVerified] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  // (9 Nov) a Turnstile token works once: a failed try gets a fresh widget
+  const [captchaRound, setCaptchaRound] = useState(0);
   const [challenge, setChallenge] = useState<OtpChallenge | null>(null);
   const [signupToken, setSignupToken] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -83,6 +93,11 @@ export default function SignUp() {
       setStep("otp");
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Could not send the verification code. Please try again.");
+      if (AUTH_CONFIG.turnstile.isConfigured) {   // the used token cannot be sent again
+        setCaptchaVerified(false);
+        setTurnstileToken(null);
+        setCaptchaRound((n) => n + 1);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -143,14 +158,24 @@ export default function SignUp() {
 
         {step === "details" && (
           <>
-            <GoogleSignInButton label="Continue with Google" onError={setFormError} />
-            <AuthDivider />
+            {googleSignInEnabled && (
+              <>
+                <GoogleSignInButton label="Continue with Google" onError={setFormError} />
+                <AuthDivider />
+              </>
+            )}
+            {company?.restricted && (
+              <p className="text-xs text-slate-400 mb-3 rounded-lg border border-cyan-500/25 bg-cyan-500/5 px-3 py-2">
+                {company.name ? `${company.name}'s CyberGuard. ` : ""}Use your company e-mail
+                ({company.domains.map((d) => "@" + d).join(", ")}) - or the address your administrator invited.
+              </p>
+            )}
             <form onSubmit={handleDetails} noValidate className="space-y-4">
               <TextInput label="Full Name" required autoComplete="name" value={name}
                 onChange={(e) => setName(e.target.value)} placeholder="Jane Doe" error={errors.name} />
               <TextInput label="Email Address" type="email" required autoComplete="email" value={email}
                 onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" error={errors.email} />
-              <Captcha onVerify={setCaptchaVerified} onToken={setTurnstileToken} />
+              <Captcha key={captchaRound} onVerify={setCaptchaVerified} onToken={setTurnstileToken} />
               {formError && (
                 <p className="text-xs text-red-400 flex items-center gap-1.5" role="alert">
                   <ICONS.warning size={13} /> {formError}

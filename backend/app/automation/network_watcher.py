@@ -6,11 +6,13 @@ Each round it takes the same read-only look as the "PC Network" page (app/servic
 live connections the operating system lists. Nothing is captured from inside the connections, nothing is closed,
 blocked or changed, and command lines are never read.
 
-Only HIGH findings become an automatic finding + alert (the page shows the medium / low ones):
-  * a database / remote-desktop / old clear-text service open to the network,
-  * any traffic on a backdoor port (4444, 31337, 1337 ...),
-  * a program from Temp / Downloads waiting for connections,
-  * a connection to an address one of your scans already marked as dangerous.
+Only HIGH findings become an automatic finding (the page shows the medium / low ones):
+  * a database / remote-desktop / old clear-text service open to the network (a risky setting: score 78, high),
+  * any traffic on a backdoor port (4444, 31337, 1337 ...)                                  (score 88, critical),
+  * a program from Temp / Downloads waiting for connections                                 (score 88, critical),
+  * a connection to an address one of your scans already marked as dangerous                (score 88, critical).
+Each finding carries the concrete fix for its kind (pc_network.advice). Alerts follow the usual automatic limits
+(by default only critical ones are sent).
 The same finding is reported once, then again only after REPEAT_HOURS (open ports) or a day (connections), so a
 setting you already know about does not alert every 30 seconds.
 """
@@ -39,16 +41,21 @@ def _flagged_ips() -> set[str]:
 
 
 def finding_result(f: dict) -> dict:
-    ind = {"label": f["title"], "description": f["why"], "severity": "critical", "weight": 88, "triggered": True}
-    extra = [f"Program: {f.get('program', 'unknown')} (process id {f.get('pid')}). Check it in Task Manager "
-             "(Details tab) before closing anything."]
-    if f.get("remote"):
-        extra.append(f"Remote address: {f['remote']}. Look it up on the Threat Intelligence page.")
-    result = build_result(indicators=[{**ind, "id": "IND_net_live"}], base_score=88, confidence=85,
+    # (7 Nov) an open service is a risky SETTING (high, 78: on the dashboard; it alerts only if Settings says "same
+    # level as my scans"); a backdoor port, a program from Temp / Downloads or a flagged address can be an attack in
+    # progress (critical, 88: alerts). The advice is the concrete fix for this kind of finding (pc_network.advice),
+    # not the generic incident steps ("block the source", "escalate") that do not fit an open port.
+    setting = pc_network.finding_kind(f) == "exposed"
+    score = 78 if setting else 88
+    ind = {"label": f["title"], "description": f["why"], "severity": "high" if setting else "critical",
+           "weight": score, "triggered": True}
+    result = build_result(indicators=[{**ind, "id": "IND_net_live"}], base_score=score, confidence=85,
                           engine_name="CyberGuard live network monitor (operating-system connection list + "
                                       "CyberGuard network rules)",
-                          threat_type="Suspicious network activity on this PC",
-                          explanation=f["why"], extra_recommendations=extra)
+                          threat_type="Risky network setting on this PC" if setting
+                          else "Suspicious network activity on this PC",
+                          explanation=f["why"])
+    result["recommendations"] = pc_network.advice(f)
     result["liveNetwork"] = {k: f.get(k) for k in ("title", "port", "remote", "program", "pid")}
     return result
 

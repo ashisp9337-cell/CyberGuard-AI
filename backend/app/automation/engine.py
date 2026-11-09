@@ -156,9 +156,12 @@ class Watcher:
         self._wake.set()
 
     def describe(self) -> dict:
+        from app.core.config import get_settings
         ok, why = self.configured()
-        state = ("off" if not self.enabled else "needs setup" if not ok else
-                 "error" if self.status["lastError"] else "active")
+        # (9 Nov) automation switched off for the whole backend (the cloud server): a watcher that is switched on does
+        # not run there, so it is "paused" - never "active"
+        state = ("off" if not self.enabled else "paused" if not get_settings().AUTOMATION_ENABLED else
+                 "needs setup" if not ok else "error" if self.status["lastError"] else "active")
         return {"name": self.name, "title": self.title, "what": self.what, "modules": self.modules,
                 "technology": self.technology, "intervalSeconds": self.interval_seconds,
                 "enabled": self.enabled, "configured": ok, "setupHint": why, "state": state,

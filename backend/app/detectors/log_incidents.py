@@ -24,6 +24,10 @@ CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ml
 MAX_LINES = 300_000
 WINDOW_S = 600                     # bursts are counted in 10-minute windows
 DEFAULTS = {"brute_force": 5, "web_scan": 15, "probe": 5, "enumeration": 5}   # = log_analysis.json values
+# (9 Nov) distributed password guessing: at least this many failed logins inside one 10-minute window, from at least
+# this many different sources, when no single source reached the per-source level above. Normal traffic never came
+# close: the largest failed-login burst seen in the normal reference logs was 0 per source (AIT normal: 4).
+DISTRIBUTED_BRUTE = (20, 5)
 
 _MON = {m: i + 1 for i, m in enumerate("jan feb mar apr may jun jul aug sep oct nov dec".split())}
 _TS = [   # (regex, function(match) -> datetime)
@@ -83,6 +87,9 @@ PRIV = re.compile(r"sudo:[^\n]*(?:authentication failure|incorrect password atte
 CATEGORY = {
     "brute_force": ("Password brute-force attack", "critical", 40, "T1110",
                     "Many failed logins from one source in a short time: someone is guessing passwords."),
+    "brute_force_distributed": ("Password guessing from many addresses", "high", 35, "T1110",
+                                "Many failed logins in a short time, each address trying only a few times - typical of "
+                                "a botnet guessing passwords from many computers so that no single address stands out."),
     "web_scan": ("Web vulnerability scan", "high", 35, "T1595.002",
                  "One address sent a flood of requests the server rejected or could not find - an automated scanner "
                  "probing for weaknesses."),
@@ -189,10 +196,41 @@ def _max_window(items):
     return max(best, sum(1 for x in items if x[2] is None))
 
 
+def _busiest_window(items) -> tuple[int, list]:
+    """(events in the busiest WINDOW_S window, those events). Events without a time are one group of their own."""
+    timed = sorted((x for x in items if x[2] is not None), key=lambda x: x[2])
+    untimed = [x for x in items if x[2] is None]
+    best_n, best = len(untimed), (None, None)
+    j = 0
+    for k in range(len(timed)):
+        while timed[k][2] - timed[j][2] > WINDOW_S:
+            j += 1
+        if k - j + 1 > best_n:
+            best_n, best = k - j + 1, (j, k)
+    return best_n, (timed[best[0]:best[1] + 1] if best[0] is not None else untimed)
+
+
+def _distributed_brute_force(evs) -> dict | None:
+    """(9 Nov) Failed logins spread over many sources (each below the per-source level) inside one window."""
+    bf = [ev for ev in evs if ev[0] == "brute_force"]
+    if len(bf) < DISTRIBUTED_BRUTE[0]:
+        return None
+    burst, window = _busiest_window(bf)
+    sources = list(dict.fromkeys(x[3] for x in window))
+    if burst < DISTRIBUTED_BRUTE[0] or len(sources) < DISTRIBUTED_BRUTE[1]:
+        return None
+    times = [x[2] for x in window if x[2] is not None]
+    return {"category": "brute_force_distributed", "source": f"{len(sources)} different addresses", "count": len(bf),
+            "burst": burst, "first": min(times) if times else None, "last": max(times) if times else None,
+            "lines": [x[1] for x in window[:3]], "examples": [x[4][:220] for x in window[:3]],
+            "addresses": sources[:20]}
+
+
 def incidents(lines, cfg: dict | None = None, evs: list | None = None) -> list[dict]:
     cfg = cfg or load_config()
     by = defaultdict(list)
-    for ev in (evs if evs is not None else events(lines)):
+    evs = list(evs if evs is not None else events(lines))
+    for ev in evs:
         by[(ev[0], ev[3])].append(ev)
     found, below = [], []
     for (cat, key), items in by.items():
@@ -208,6 +246,10 @@ def incidents(lines, cfg: dict | None = None, evs: list | None = None) -> list[d
     # attack in the same log: then they are the earlier steps of that attack.
     attackers = {f["source"] for f in found if CATEGORY[f["category"]][1] in ("high", "critical")}
     found += [dict(f, linked=True) for f in below if f["source"] in attackers]
+    if not any(f["category"] == "brute_force" for f in found):      # one address already over the level: reported above
+        spread = _distributed_brute_force(evs)
+        if spread:
+            found.append(spread)
     order = list(CATEGORY)
     found.sort(key=lambda f: (order.index(f["category"]), -f["count"]))
     return found

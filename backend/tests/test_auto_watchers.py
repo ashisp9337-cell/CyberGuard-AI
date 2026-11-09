@@ -219,3 +219,47 @@ def test_a_missing_log_file_is_an_error_not_a_crash(fresh_state, monkeypatch, tm
     monkeypatch.setattr(request_log, "since", lambda seq: [])
     st = WW.WebsiteWatcher().run_once()
     assert "nope.log" in (st["lastError"] or "")
+
+
+# ---- (7 Nov) the advice fits the kind of network finding ----------------------------------------------------------
+GENERIC = ("block the source", "quarantine the affected", "escalate to the incident")
+
+
+def test_open_database_is_a_setting_with_its_own_fix():
+    from app.automation.network_watcher import finding_result
+    f = {"severity": "high", "title": "PostgreSQL database is open to all networks (port 5432)",
+         "why": "postgres.exe is waiting for connections from all networks.", "port": 5432, "program": "postgres.exe",
+         "pid": 6380}
+    r = finding_result(f)
+    assert r["riskScore"] == 78 and r["classification"] == "high_risk"          # a setting, not an attack
+    assert r["threatType"] == "Risky network setting on this PC"
+    assert "listen_addresses = 'localhost'" in r["recommendations"][0]
+    assert not any(x.lower().startswith(GENERIC) for x in r["recommendations"])
+
+
+def test_backdoor_port_stays_critical_and_says_how_to_find_the_program():
+    from app.automation.network_watcher import finding_result
+    f = {"severity": "high", "title": "A program is listening on backdoor port 4444", "why": "python.exe accepts ...",
+         "port": 4444, "program": "python.exe", "pid": 11964}
+    r = finding_result(f)
+    assert r["riskScore"] == 88 and r["classification"] == "critical"
+    assert r["recommendations"][0].startswith("Find the program: Task Manager > Details > process id 11964")
+    assert any("Ctrl+C" in s for s in r["recommendations"])
+    assert not any(x.lower().startswith(GENERIC) for x in r["recommendations"])
+
+
+def test_every_kind_of_finding_has_advice():
+    from app.services import pc_network as PC
+    titles = {"exposed": ("Remote Desktop (RDP) is open to all networks (port 3389)", None),
+              "backdoor_listen": ("A program is listening on backdoor port 31337", None),
+              "risky_listen": ("A program from a temporary / download folder is open to the network", None),
+              "backdoor_conn": ("Connection on backdoor port 4444", "203.0.113.9"),
+              "flagged_ip": ("Connected to an address your scans flagged (203.0.113.9)", "203.0.113.9"),
+              "risky_conn": ("A program from a temporary / download folder is using the internet", "203.0.113.9")}
+    for kind, (title, remote) in titles.items():
+        f = {"title": title, "port": 3389, "program": "x.exe", "pid": 5, "remote": remote}
+        assert PC.finding_kind(f) == kind
+        steps = PC.advice(f)
+        assert len(steps) >= 2 and all(isinstance(s, str) and s for s in steps)
+        if remote:
+            assert any(remote in s for s in steps)       # the address to look up is named

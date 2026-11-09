@@ -9,6 +9,8 @@ export interface PcFinding {
   remote?: string;
   program?: string;
   pid?: number | null;
+  /** (7 Nov) concrete next steps for this kind of finding, most important first */
+  fix?: string[];
 }
 
 export interface PcListening {

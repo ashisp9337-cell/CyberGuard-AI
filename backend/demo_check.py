@@ -14,6 +14,8 @@ What it checks:
   6. EVERY demo input from demo_cases.py gets the verdict the demo script promises (PASS / FAIL)
   7. your own deepfake demo files, network captures and voice recordings in backend/demo_samples/ (if you put them there)
   8. the Insider Risk demo files made by make_insider_demo.py (real CERT r4.2 activity)
+  9. (9 Nov, section 11) EVERY model loads and runs once on made-up input - also on the cloud server, where there are no demo
+     files: text / link / sign-in / e-mail models, voice, speech-to-text, image, video, malware, network, insider, OCR
 
 It saves NOTHING to the database and sends no alerts. Report: backend/demo_check.txt (git ignores it).
 """
@@ -274,8 +276,136 @@ def main():
     if not any_ins:
         row("no insider demo files yet", False, "python -I app\\ml\\training\\make_insider_demo.py", warn=True)
 
+    check_every_model()
+
     say("\n" + ("READY FOR THE DEMO - no failures." if not PROBLEMS else
                 f"NOT READY - {len(PROBLEMS)} failure(s): " + "; ".join(PROBLEMS)))
+
+
+def check_every_model():
+    """(9 Nov) Section 11: every model is loaded and run ONCE on made-up input (a sentence, a fake link that is never
+    opened, a sign-in line, a tiny e-mail, quiet noise, a grey picture, a harmless program that ships with Python).
+    No internet, nothing saved. Works where there are no demo files (the cloud server). The voice / image / video
+    models need about 3 GB of free memory, like the backend's own warm-up; with less they are skipped (WARN)."""
+    import tempfile
+    import numpy as np
+    from app.services import analysis_service as A
+
+    def timed(name, fn):
+        t = time.time()
+        try:
+            note = fn()                  # None = it ran; a string = why it could not
+            row(name, note is None, note or f"{(time.time() - t) * 1000:.0f} ms")
+        except Exception as e:  # noqa: BLE001
+            row(name, False, f"{type(e).__name__}: {str(e)[:100]}")
+
+    say("\n11. Every model loads and runs (made-up input - no internet, nothing saved)")
+    try:
+        done = A.warm_up()
+    except Exception as e:  # noqa: BLE001
+        done = {"text / link / sign-in models": f"error: {type(e).__name__}: {str(e)[:80]}"}
+    groups = [("SMS + social media models", ("sms-analysis", "social-media-analysis")),
+              ("6 impersonation models", tuple(k for k in done if k.endswith("-impersonation"))),
+              ("6 sign-in (account takeover) models", ("failed-logins", "password-spraying", "unusual-location",
+                                                       "unknown-device", "session-activity", "behavior-changes")),
+              ("4 link models", ("malicious-url", "domain-spoofing", "lookalike-domain", "url-manipulation")),
+              ("e-mail model", ("email-analysis",)), ("auto-detect router", ("auto-detect router",))]
+    seen = set()
+    for label, keys in groups:
+        keys = [k for k in keys if k in done]
+        seen.update(keys)
+        bad = [f"{k}: {done[k]}" for k in keys if not isinstance(done[k], int)]
+        row(label, bool(keys) and not bad, "; ".join(bad) if bad else
+            (f"{len(keys)} ran, slowest {max(done[k] for k in keys)} ms" if keys else "not run"))
+    for k in done:
+        if k not in seen:
+            row(k, isinstance(done[k], int), f"{done[k]} ms" if isinstance(done[k], int) else str(done[k]))
+
+    from app.detectors import malware, network_traffic, insider_risk
+
+    def ember():
+        import pip
+        d = os.path.join(os.path.dirname(pip.__file__), "_vendor", "distlib")
+        sample = next((os.path.join(d, n) for n in ("t64.exe", "w64.exe", "t32.exe") if os.path.exists(os.path.join(d, n))),
+                      None)
+        if sample is None:
+            return "no sample program found to test with"
+        r = malware.analyze_file(sample, os.path.basename(sample), network=False)
+        targets = (r.get("malwareAnalysis") or {}).get("targets") or []
+        if not targets:
+            return "the EMBER2024 model did not judge the file (model missing?)"
+        say(f"        (harmless Windows launcher from Python's pip: model score {targets[0].get('score')}, "
+            f"risk {r['riskScore']})")
+        return None
+
+    def network():
+        b = network_traffic.load_model()
+        if not b:
+            return "network_flow.joblib missing or broken"
+        m = b["model"]
+        m.predict_proba(np.zeros((1, int(getattr(m, "n_features_in_", len(b.get("features") or [])))), dtype=np.float32))
+        return None
+
+    def insider():
+        model, cfg = insider_risk.load_trained()
+        return None if model is not None and cfg else "insider_risk.joblib / insider_risk.json missing or broken"
+
+    timed("malware model (EMBER2024) judges a program", ember)
+    timed("network-capture model", network)
+    timed("insider-risk model", insider)
+
+    from app.services import screenshot_reader
+    if screenshot_reader.ocr_available():
+        def ocr():
+            from PIL import Image, ImageDraw
+            with tempfile.TemporaryDirectory() as td:
+                p = os.path.join(td, "ocr.png")
+                im = Image.new("RGB", (640, 120), "white")
+                ImageDraw.Draw(im).text((20, 40), "PAY THE FEE NOW", fill="black", font_size=40)
+                im.save(p)
+                text = (screenshot_reader.read(p).get("text") or "").upper()
+            return None if "FEE" in text else f"read {text[:40]!r} instead of 'PAY THE FEE NOW'"
+        timed("screenshot text reading (OCR)", ocr)
+    else:
+        row("screenshot text reading (OCR)", False, "not installed: pip install --no-deps -r requirements-ocr.txt",
+            warn=True)
+
+    free = A.free_ram_gb()
+    if free is not None and free < 3.0:
+        row("voice / image / video models", False, f"skipped: only {free:.1f} GB of memory free (needs 3 GB) - close "
+            "other programs and run this check again", warn=True)
+        return
+    from app.detectors import voice, ai_image, deepfake_image, deepfake_video
+    noise = np.random.default_rng(0).normal(0, 0.01, 16_000 * 4).astype(np.float32)
+
+    def ai_voice():
+        if voice.ai_model()[0] is None:
+            return "model not installed (voice_ai.onnx)"
+        voice.ai_voice_score([noise])
+        return None
+
+    def voiceprint():
+        if voice.voiceprint_model()[0] is None:
+            return "model not installed (voiceprint.onnx)"
+        voice.voiceprint(noise)
+        return None
+
+    def speech():
+        if not voice.whisper_available():
+            return "not installed (whisper-small)"
+        voice.transcribe(np.zeros(16_000, np.float32))
+        return None
+
+    with tempfile.TemporaryDirectory() as td:
+        grey = os.path.join(td, "grey.png")
+        from PIL import Image
+        Image.new("RGB", (256, 256), (128, 128, 128)).save(grey)
+        timed("voice: AI-voice model", ai_voice)
+        timed("voice: voiceprint (same person?) model", voiceprint)
+        timed("voice: speech-to-text (whisper-small)", speech)
+        timed("image: AI-generated picture model", lambda: (ai_image.assess(grey), None)[1])
+        timed("image: face-swap model (+ face finder)", lambda: (deepfake_image.assess_image(grey), None)[1])
+        timed("video: deepfake video model", lambda: (deepfake_video.load(), None)[1])
 
 
 if __name__ == "__main__":

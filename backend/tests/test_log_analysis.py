@@ -47,6 +47,30 @@ def test_password_burst_is_brute_force_but_a_few_mistakes_are_not():
     assert "brute_force" not in cats(spread)                                                 # 8 over 8 hours
 
 
+def test_password_guessing_from_many_addresses_is_found_but_scattered_mistakes_are_not():
+    """(9 Nov) a botnet: each address tries once, so no address reaches the per-address level of 5."""
+    botnet = [sshd_fail(i * 15, ip=f"198.51.100.{i}") for i in range(30)]                  # 30 in 7.5 minutes
+    found = LI.incidents(NORMAL_SYSLOG + botnet)
+    spread = [f for f in found if f["category"] == "brute_force_distributed"]
+    assert "brute_force" not in cats(NORMAL_SYSLOG + botnet) and len(spread) == 1
+    assert spread[0]["source"] == "30 different addresses" and spread[0]["burst"] == 30
+    verdict = C.analyze_event_text("\n".join(NORMAL_SYSLOG + botnet), {}, "Log Analysis")
+    assert verdict["riskScore"] >= 71
+    assert "Log incident: Password guessing from many addresses" in [i["label"] for i in verdict["indicators"] if i["triggered"]]
+    # below the level: 19 tries from 19 addresses
+    assert "brute_force_distributed" not in cats(NORMAL_SYSLOG + botnet[:19])
+    # 20 tries from only 4 addresses: each address is over its own level, so it is the ordinary brute-force attack
+    few = [sshd_fail(i * 15, ip=f"198.51.100.{i % 4}") for i in range(20)]
+    assert "brute_force" in cats(few) and "brute_force_distributed" not in cats(few)
+    # the same 30 tries spread over 30 hours are not an attack burst
+    slow = [f"Mar  {4 + (10 + i) // 24} {(10 + i) % 24:02d}:00:00 web sshd[1]: Failed password for root from "
+            f"198.51.100.{i} port 1 ssh2" for i in range(30)]
+    assert "brute_force_distributed" not in cats(slow)
+    # one address already over the level: reported once, as the ordinary brute-force attack
+    mixed = [sshd_fail(i * 10) for i in range(12)] + botnet
+    assert "brute_force" in cats(mixed) and "brute_force_distributed" not in cats(mixed)
+
+
 def test_web_scan_needs_a_flood_of_rejected_requests():
     normal = [access(i, "198.51.100.7", f"/page{i}", 200) for i in range(40)] + \
              [access(50 + i, "198.51.100.7", "/favicon.ico", 404) for i in range(4)]

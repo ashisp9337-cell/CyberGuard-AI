@@ -1,0 +1,30 @@
+# CyberGuard web server (9 Nov 2026): one HTTPS address for the website AND the API, so the login cookie stays
+# first-party (SameSite=Lax, Secure) and no cross-site settings are needed.
+# CG_DOMAIN = the server's name, e.g. cyberguard-ashis.centralindia.cloudapp.azure.com (Caddy gets the certificate).
+{$CG_DOMAIN} {
+	# API and the live event stream -> backend. Caddy replaces any X-Forwarded-For sent by the visitor with the
+	# visitor's real address, so per-address rate limits cannot be dodged with a fake header.
+	handle /api/* {
+		reverse_proxy {$CG_API:api:8000}
+	}
+
+	# The website (single-page app: unknown paths get index.html)
+	handle {
+		root * {$CG_WEB_ROOT:/srv}
+		encode zstd gzip
+		try_files {path} /index.html
+		file_server
+		header Cross-Origin-Opener-Policy same-origin-allow-popups
+	}
+
+	# Same security headers as vercel.json, plus HSTS (the site is HTTPS-only)
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		Content-Security-Policy "frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
+		-Server
+	}
+}

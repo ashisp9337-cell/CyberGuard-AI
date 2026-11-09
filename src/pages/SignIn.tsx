@@ -3,13 +3,14 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { AuthLayout } from "@/components/auth/AuthLayout";
 import { AuthCard } from "@/components/auth/AuthCard";
 import { AuthDivider } from "@/components/auth/AuthDivider";
-import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
+import { GoogleSignInButton, googleSignInEnabled } from "@/components/auth/GoogleSignInButton";
 import { PasswordInput } from "@/components/auth/PasswordInput";
 import { TextInput } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/context/AuthContext";
 import { ICONS } from "@/lib/icons";
 import { OtpStep } from "@/components/auth/OtpStep";
+import { Captcha } from "@/components/auth/Captcha";
 import { AUTH_CONFIG } from "@/services/auth/config";
 import { otpAuthService, type OtpChallenge } from "@/services/auth/otpAuthService";
 
@@ -27,6 +28,12 @@ export default function SignIn() {
   const [submitting, setSubmitting] = useState(false);
   // Step 2 of login: the code emailed after the password was accepted.
   const [challenge, setChallenge] = useState<OtpChallenge | null>(null);
+  // (9 Nov) Cloudflare Turnstile: the backend REQUIRES it for login in production (public website). Shown only when a
+  // site key is configured; a token works once, so a failed try gets a fresh widget (captchaRound).
+  const captchaOn = AUTH_CONFIG.isBackend && AUTH_CONFIG.turnstile.isConfigured;
+  const [captchaVerified, setCaptchaVerified] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [captchaRound, setCaptchaRound] = useState(0);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -35,17 +42,27 @@ export default function SignIn() {
       setError("Please enter your email and password.");
       return;
     }
+    if (captchaOn && !captchaVerified) {
+      setError("Please complete the verification step below.");
+      return;
+    }
     setSubmitting(true);
     try {
       if (AUTH_CONFIG.isBackend) {
         // Password is checked first; the session only starts after the emailed code.
-        setChallenge(await otpAuthService.startLogin(email.trim(), password, rememberMe));
+        setChallenge(await otpAuthService.startLogin(email.trim(), password, rememberMe,
+                                                     captchaOn ? turnstileToken ?? undefined : undefined));
       } else {
         await signIn({ email: email.trim(), password, rememberMe });
         navigate(redirectTo, { replace: true });
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign in failed. Please try again.");
+      if (captchaOn) {                       // the used token cannot be sent again
+        setCaptchaVerified(false);
+        setTurnstileToken(null);
+        setCaptchaRound((n) => n + 1);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -87,8 +104,12 @@ export default function SignIn() {
           </p>
         }
       >
-        <GoogleSignInButton label="Continue with Google" onError={setError} />
-        <AuthDivider />
+        {googleSignInEnabled && (
+          <>
+            <GoogleSignInButton label="Continue with Google" onError={setError} />
+            <AuthDivider />
+          </>
+        )}
 
         {resetSuccess && (
           <p className="text-xs text-emerald-400 flex items-center gap-1.5 mb-4 rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-3 py-2.5">
@@ -130,13 +151,17 @@ export default function SignIn() {
             </Link>
           </div>
 
+          {captchaOn && (
+            <Captcha key={captchaRound} onVerify={setCaptchaVerified} onToken={setTurnstileToken} />
+          )}
+
           {error && (
             <p className="text-xs text-red-400 flex items-center gap-1.5" role="alert">
               <ICONS.warning size={13} /> {error}
             </p>
           )}
 
-          <Button type="submit" size="lg" className="w-full" disabled={submitting}>
+          <Button type="submit" size="lg" className="w-full" disabled={submitting || (captchaOn && !captchaVerified)}>
             {submitting ? <ICONS.loader size={16} className="animate-spin" /> : <ICONS.shieldCheck size={16} />}
             {submitting ? "Checking..." : "Continue"}
           </Button>

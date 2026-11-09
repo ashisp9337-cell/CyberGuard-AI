@@ -10,3 +10,9 @@ venv/
 *.pem
 *.key
 kaggle.json
+# (9 Nov) the same for .env files in sub-folders (deploy/.env.cloud holds the server's secrets)
+**/.env
+**/.env.*
+!**/.env.example
+# (10 Nov) the CyberGuard Agent runs on employee PCs, never inside the server images
+agent/

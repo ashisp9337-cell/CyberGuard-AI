@@ -125,7 +125,13 @@ class Settings(BaseSettings):
 
     # ---- Security switches (all safe by default) ----
     ADMIN_EMAILS: str = ""              # comma-separated admin accounts; empty = the automation owner (see dependencies.py)
-    ENABLE_API_DOCS: bool = False       # /docs, /redoc and /openapi.json; turn on only while developing
+    # ---- (9 Nov) Company mode ----
+    COMPANY_NAME: str = ""              # shown on the sign-up page and in the employee notice, e.g. "THREATORA Pvt Ltd"
+    # comma-separated e-mail domains whose people may join by themselves, e.g. "threatora.in". Anyone else needs an
+    # invite from an administrator. EMPTY = anyone may sign up (the single-PC setup, as before).
+    COMPANY_EMAIL_DOMAINS: str = ""
+    INVITE_DAYS: int = 7                # an invite expires after this many days
+    ENABLE_API_DOCS: bool = False      # /docs, /redoc and /openapi.json; turn on only while developing
     DEBUG: bool = False                 # true = show internal error messages in API responses (never in production)
     EXPOSE_DEV_CODES: bool = False      # automated tests ONLY: echo OTP / reset codes in API responses. Never enable.
     MAX_TEXT_CHARS: int = 200_000       # longest pasted text / email accepted by the scan endpoints
@@ -147,6 +153,10 @@ class Settings(BaseSettings):
     @property
     def admin_email_list(self) -> List[str]:
         return [e.strip().lower() for e in self.ADMIN_EMAILS.split(",") if e.strip()]
+
+    @property
+    def company_domain_list(self) -> List[str]:
+        return [d.strip().lower().lstrip("@") for d in self.COMPANY_EMAIL_DOMAINS.split(",") if d.strip()]
 
     @property
     def dev_codes_allowed(self) -> bool:

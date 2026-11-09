@@ -127,6 +127,7 @@ def test_api_snapshot_for_the_admin(admin_client, fake):
     assert r.status_code == 200
     j = r.json()
     assert j["available"] and j["findings"][0]["title"].startswith("Remote Desktop (RDP) is open to all networks")
+    assert j["findings"][0]["fix"][0].startswith("Remote Desktop: if you do not use it, switch it off")   # (7 Nov)
 
 
 def test_setup_hint_names_the_python_that_runs_cyberguard(monkeypatch):

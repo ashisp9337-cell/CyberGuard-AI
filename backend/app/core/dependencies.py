@@ -29,6 +29,11 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     # Logout / password reset bump the user's session_version; older tokens are dead from then on.
     if session_version != int(user.session_version or 0):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail={"code": "SESSION_ENDED", "message": "Session ended. Please sign in again."})
+    # (9 Nov) company mode: a disabled account cannot use CyberGuard (its sessions were also ended when disabled)
+    if user.is_active is False:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail={"code": "ACCOUNT_DISABLED", "message": "This account has been disabled by your administrator."})
+    from app.services.company import touch_last_seen
+    touch_last_seen(db, user, request)
     return user
 
 

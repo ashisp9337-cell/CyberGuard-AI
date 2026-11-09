@@ -114,28 +114,127 @@ def _flag(sev, title, why, **where) -> dict:
     return {"severity": sev, "title": title, "why": why, **where}
 
 
-def snapshot(flagged_ips: set[str] | None = None) -> dict:
-    """One fresh, read-only look at this computer's open ports and connections."""
-    psutil = _psutil()
-    if psutil is None:
-        return {"available": False, "reason": install_hint()}
-    try:
-        conns = psutil.net_connections(kind="inet")
-    except psutil.AccessDenied:
-        return {"available": False, "reason": "This system only lists network connections to an administrator "
-                                              "(macOS needs the backend started with sudo)."}
-    flagged_ips = flagged_ips or set()
+# (7 Nov) How to fix each kind of finding - shown on the PC Network page and in the saved finding, instead of the
+# generic incident advice ("block the source", "escalate to the incident response team") that does not fit a SETTING
+# such as an open port.
+_SERVICE_FIX = {
+    5432: "PostgreSQL: in postgresql.conf set listen_addresses = 'localhost', then restart the PostgreSQL service "
+          "(Win+R > services.msc).",
+    3306: "MySQL: in my.ini set bind-address = 127.0.0.1, then restart the MySQL service.",
+    1433: "SQL Server: if only this PC uses it, switch TCP/IP off in SQL Server Configuration Manager, then restart "
+          "the SQL Server service.",
+    27017: "MongoDB: in mongod.cfg set net.bindIp: 127.0.0.1, then restart MongoDB.",
+    6379: "Redis: in redis.conf set bind 127.0.0.1 and protected-mode yes, then restart Redis.",
+    9200: "Elasticsearch: in elasticsearch.yml set network.host: 127.0.0.1, then restart it.",
+    11211: "Memcached: start it with -l 127.0.0.1 so it only listens on this computer.",
+    3389: "Remote Desktop: if you do not use it, switch it off (Settings > System > Remote Desktop). If you do, keep "
+          "Network Level Authentication on and use a long password.",
+    5900: "VNC: close the VNC server if you do not use it; otherwise give it a strong password.",
+    23: "Telnet: switch the Telnet server off and use SSH instead (Telnet sends passwords as plain text).",
+    21: "FTP: stop the FTP server if you do not need it; use SFTP instead.",
+    22: "SSH: use key login or a long password, and switch password login off if you can.",
+    8000: "Start the server without --host 0.0.0.0, so it only listens on this computer.",
+    5173: "Start the development server without --host, so it only listens on this computer.",
+    8080: "If you did not mean to share it, make the server listen on 127.0.0.1 only.",
+}
+_FIREWALL = ("Keep Windows Firewall on, and set shared Wi-Fi (college, hackathon venue) to 'Public network' in "
+             "Settings > Network & internet - Windows then blocks these ports from other computers.")
+_SCAN_FILE = ("If you do not recognise it: switch Wi-Fi off, end the process, and scan its file with CyberGuard's "
+              "Malware Detection and a Microsoft Defender full scan (Windows Security > Virus & threat protection > "
+              "Scan options) before deleting anything.")
+
+
+def finding_kind(f: dict) -> str:
+    """exposed | backdoor_listen | risky_listen | backdoor_conn | flagged_ip | risky_conn (from the finding's title)."""
+    t = f.get("title", "")
+    if t.startswith("A program is listening on backdoor port"):
+        return "backdoor_listen"
+    if t.startswith("Connection on backdoor port"):
+        return "backdoor_conn"
+    if t.startswith("Connected to an address your scans flagged"):
+        return "flagged_ip"
+    if t.startswith("A program from a temporary / download folder"):
+        return "risky_conn" if f.get("remote") else "risky_listen"
+    return "exposed"
+
+
+def advice(f: dict) -> list[str]:
+    """Concrete next steps for one finding, most important first."""
+    kind = finding_kind(f)
+    prog = f.get("program") or "unknown program"
+    find = (f"Find the program: Task Manager > Details > process id {f.get('pid')} ({prog}); right-click > "
+            "Open file location shows where it runs from." if f.get("pid") else
+            f"Find the program ({prog}) in Task Manager > Details.")
+    remote = f.get("remote")
+    if kind == "exposed":
+        port = f.get("port")
+        steps = [_SERVICE_FIX.get(port, "If this program does not need other computers, make it listen on this "
+                                        "computer only (127.0.0.1) or close it."),
+                 _FIREWALL,
+                 "Afterwards the PC Network page lists the port as 'this computer only'.",
+                 "This is a risky setting, not an attack in progress - nothing was blocked or closed."]
+        if port in _WINDOWS_BUILTIN:
+            steps = [_FIREWALL, "Share files only on trusted networks; nothing was blocked or closed."]
+        return steps
+    if kind == "backdoor_listen":
+        return [find, "If you started it yourself (a test server), stop it - press Ctrl+C in its window.", _SCAN_FILE]
+    if kind == "risky_listen":
+        return [find, "Programs that run from Temp / Downloads and wait for connections are how much malware works.",
+                _SCAN_FILE]
+    if kind == "backdoor_conn":
+        return ["If you do not know this program, switch Wi-Fi off now to cut the connection.", find,
+                f"Look up {remote} on the Threat Intelligence page.", _SCAN_FILE]
+    if kind == "flagged_ip":
+        return [f"Look up {remote} on the Threat Intelligence page to see why an earlier scan flagged it.", find,
+                _SCAN_FILE]
+    return [find, f"Look up {remote} on the Threat Intelligence page." if remote else "Make sure you know this program.",
+            _SCAN_FILE]
+
+
+def raw_connections(psutil) -> list[dict]:
+    """(10 Nov) The operating system's connection list as plain rows - exactly what the CyberGuard Agent sends from an
+    employee PC, so a PC's own check and the agent's reports are judged by the same code (judge_connections)."""
+    conns = psutil.net_connections(kind="inet")
     cache: dict = {}
-    listening, active, findings = [], [], []
-    status_count = Counter()
-    seen_listen = set()
-    t0 = time.time()
+    rows = []
     for c in conns:
         proto = "TCP" if c.type == 1 else "UDP"
         lip, lport = (c.laddr.ip, c.laddr.port) if c.laddr else ("", 0)
         rip, rport = (c.raddr.ip, c.raddr.port) if c.raddr else ("", 0)
         proc = _proc_info(psutil, c.pid, cache)
         status = c.status if proto == "TCP" else ("LISTEN" if not rip else "UDP")
+        rows.append({"protocol": proto, "localAddress": lip, "localPort": lport, "remoteAddress": rip,
+                     "remotePort": rport, "status": status, "program": proc["name"], "pid": proc["pid"],
+                     "path": proc["path"]})
+    return rows
+
+
+def snapshot(flagged_ips: set[str] | None = None) -> dict:
+    """One fresh, read-only look at this computer's open ports and connections."""
+    psutil = _psutil()
+    if psutil is None:
+        return {"available": False, "reason": install_hint()}
+    try:
+        rows = raw_connections(psutil)
+    except psutil.AccessDenied:
+        return {"available": False, "reason": "This system only lists network connections to an administrator "
+                                              "(macOS needs the backend started with sudo)."}
+    return judge_connections(rows, flagged_ips)
+
+
+def judge_connections(rows: list[dict], flagged_ips: set[str] | None = None) -> dict:
+    """The network rules applied to a connection list (from this computer, or reported by an agent)."""
+    flagged_ips = flagged_ips or set()
+    listening, active, findings = [], [], []
+    status_count = Counter()
+    seen_listen = set()
+    t0 = time.time()
+    for r in rows:
+        proto = r["protocol"]
+        lip, lport = r["localAddress"], r["localPort"]
+        rip, rport = r["remoteAddress"], r["remotePort"]
+        proc = {"name": r["program"], "pid": r["pid"], "path": r["path"]}
+        status = r["status"]
         status_count[status] += 1
         risky_dir = bool(proc["path"] and _RISKY_DIRS.search(proc["path"]))
         if status == "LISTEN" or (proto == "UDP" and not rip):
@@ -187,6 +286,8 @@ def snapshot(flagged_ips: set[str] | None = None) -> dict:
                                   f"{proc['name']} runs from {_short(proc['path'])} and is connected to {rip}:{rport}. "
                                   "Make sure you know this program.", remote=rip, program=proc["name"], pid=proc["pid"]))
     findings = _dedup(findings)
+    for f in findings:
+        f["fix"] = advice(f)                       # (7 Nov) how to fix it, shown on the PC Network page
     findings.sort(key=lambda f: (SEVERITY_ORDER[f["severity"]], f["title"]))
     listening.sort(key=lambda r: (r["scope"] == "this computer only", r["port"]))
     active.sort(key=lambda r: (not r["outside"], r["program"].lower(), r["remote"]))

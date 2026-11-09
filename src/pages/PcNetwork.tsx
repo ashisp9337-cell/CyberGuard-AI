@@ -112,6 +112,14 @@ export default function PcNetwork() {
                   <li key={`${f.title}-${i}`} className={`rounded-md border p-3 ${SEV[f.severity] ?? SEV.low}`}>
                     <p className="text-sm font-semibold">{f.title} <span className="text-[11px] uppercase ml-1 opacity-80">{f.severity}</span></p>
                     <p className="text-xs text-slate-300 mt-1">{f.why}</p>
+                    {f.fix && f.fix.length > 0 && (
+                      <div className="mt-2">
+                        <p className="text-[11px] uppercase tracking-wide text-slate-500">What to do</p>
+                        <ul className="mt-1 space-y-1 list-disc pl-4 text-xs text-slate-400">
+                          {f.fix.map((step, j) => <li key={j}>{step}</li>)}
+                        </ul>
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>

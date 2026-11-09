@@ -1,0 +1,85 @@
+# CyberGuard on ONE cloud server (9 Nov 2026). From the project folder on the server:
+#   sudo docker compose -f deploy/docker-compose.cloud.yml --env-file deploy/.env.cloud up -d --build
+# Only the web server (ports 80 / 443) can be reached from the internet; the backend and PostgreSQL are internal.
+# Full guide: docs/DEPLOY_CLOUD.md
+name: cyberguard
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cyberguard
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env.cloud}
+      POSTGRES_DB: cyberguard
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cyberguard -d cyberguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+  api:
+    build:
+      context: ../backend
+      dockerfile: ../deploy/api.Dockerfile
+    restart: unless-stopped
+    env_file: .env.cloud                    # JWT_SECRET, SMTP, TURNSTILE_SECRET_KEY, ADMIN_EMAILS, ... (never in Git)
+    environment:                            # these always win over .env.cloud
+      ENVIRONMENT: production               # refuses to start with unsafe settings; CAPTCHA required
+      COOKIE_SECURE: "true"
+      DEBUG: "false"
+      EXPOSE_DEV_CODES: "false"
+      ENABLE_API_DOCS: "false"
+      DATABASE_URL: postgresql+psycopg2://cyberguard:${POSTGRES_PASSWORD}@db:5432/cyberguard
+      CORS_ORIGINS: https://${CG_DOMAIN:?set CG_DOMAIN in deploy/.env.cloud}
+      APP_BASE_URL: https://${CG_DOMAIN}
+      # required: without it the FIRST account created would get the admin controls - on a public sign-up page
+      # that could be a stranger. With it, only this address is administrator; everyone else is a normal user.
+      ADMIN_EMAILS: ${ADMIN_EMAILS:?set ADMIN_EMAILS (your own e-mail) in deploy/.env.cloud}
+      # required too (same values as in .env.cloud): without them nobody could sign up or log in
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:?set TURNSTILE_SECRET_KEY in deploy/.env.cloud}
+      SMTP_USER: ${SMTP_USER:?set SMTP_USER in deploy/.env.cloud}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:?set SMTP_PASSWORD (Gmail App Password) in deploy/.env.cloud}
+      AUTOMATION_ENABLED: "false"          # the watchers read the computer they run on: that is the laptop, not here
+      TELEGRAM_INBOX: "false"               # only one place may read the Telegram bot (the laptop)
+      FORWARDED_ALLOW_IPS: "*"              # safe: only the web server can reach this container
+    volumes:
+      - ${CG_MODELS_DIR:?set CG_MODELS_DIR in deploy/.env.cloud}:/app/app/ml/models
+      - reports:/app/reports                # generated PDF / CSV reports survive a rebuild
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [internal]
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+      args:
+        VITE_TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:?set TURNSTILE_SITE_KEY in deploy/.env.cloud}
+        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}      # optional: Google sign-in (the backend reads the same value)
+    restart: unless-stopped
+    environment:
+      CG_DOMAIN: ${CG_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy_data:/data                    # the HTTPS certificate (kept across restarts)
+      - caddy_config:/config
+    depends_on:
+      - api
+    networks: [internal]
+
+volumes:
+  pgdata:
+  reports:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal: {}

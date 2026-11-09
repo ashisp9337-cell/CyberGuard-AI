@@ -21,6 +21,7 @@ from app.schemas.auth import (
     SignupCompleteRequest, OTPResendRequest,
 )
 from app.services import otp as otp_service
+from app.services import company
 from app.automation import login_monitor
 from app.services import audit
 
@@ -80,6 +81,8 @@ async def signup_start(body: SignupStartRequest, request: Request, db: Session =
     email = body.email.strip().lower()
     if db.query(User).filter(User.email == email).first():
         raise _err("EMAIL_EXISTS", "An account with this email already exists. Sign in instead.", 409)
+    if not company.may_join(db, email)[0]:          # (9 Nov) company mode: company domain or an invite
+        raise _err("NOT_INVITED", company.not_invited_message(), 403)
     try:
         return otp_service.start(db, purpose="signup", email=email, name=body.name)
     except otp_service.OTPError as e:
@@ -116,12 +119,16 @@ def signup_complete(body: SignupCompleteRequest, request: Request, response: Res
     email = otp.email
     if db.query(User).filter(User.email == email).first():
         raise _err("EMAIL_EXISTS", "An account with this email already exists. Sign in instead.", 409)
+    allowed, invite = company.may_join(db, email)
+    if not allowed:
+        raise _err("NOT_INVITED", company.not_invited_message(), 403)
 
     user = User(name=otp.name or data.get("name") or email, email=email, password_hash=hash_password(body.password),
                 provider="password", is_verified=True, last_login=datetime.now(timezone.utc))
     db.add(user)
     db.flush()
     db.add(UserSettings(user_id=user.id))
+    company.use_invite(db, invite, user)
     otp.consumed = True
     audit.log(db, action="auth.signup", user=user, request=request)
     db.commit()
@@ -154,6 +161,8 @@ async def login(body: SignInRequest, request: Request, db: Session = Depends(get
         login_monitor.record_attempt(db, email=email, user_id=user.id if user else None, request=request,
                                      success=False, stage="password")
         raise _err("INVALID_CREDENTIALS", "Invalid email or password.", 401)
+    if user.is_active is False:
+        raise _err("ACCOUNT_DISABLED", "This account has been disabled by your administrator.", 403)
     # Password is right -- but no session yet. A code goes to the account's email first.
     try:
         challenge = otp_service.start(db, purpose="login", email=user.email, user_id=user.id,
@@ -180,6 +189,8 @@ def login_verify(body: OTPVerifyRequest, request: Request, response: Response, d
     user = db.get(User, otp.user_id) if otp.user_id else None
     if user is None:
         raise _err("OTP_INVALID", "This verification request is no longer valid. Please sign in again.", 400)
+    if user.is_active is False:
+        raise _err("ACCOUNT_DISABLED", "This account has been disabled by your administrator.", 403)
     otp.consumed = True
     user.is_verified = True          # they just proved they own the email
     user.last_login = datetime.now(timezone.utc)
@@ -237,7 +248,13 @@ async def google_auth(body: GoogleAuthRequest, request: Request, response: Respo
 
     email = idinfo["email"].strip().lower()
     user = db.query(User).filter(User.email == email).first()
+    if user is not None and user.is_active is False:
+        raise _err("ACCOUNT_DISABLED", "This account has been disabled by your administrator.", 403)
+    invite = None
     if not user:
+        allowed, invite = company.may_join(db, email)      # (9 Nov) company mode
+        if not allowed:
+            raise _err("NOT_INVITED", company.not_invited_message(), 403)
         user = User(
             name=idinfo.get("name", email), email=email, google_id=idinfo.get("sub"),
             profile_image=idinfo.get("picture"), provider="google", is_verified=True,
@@ -246,6 +263,7 @@ async def google_auth(body: GoogleAuthRequest, request: Request, response: Respo
         db.add(user)
         db.flush()
         db.add(UserSettings(user_id=user.id))
+        company.use_invite(db, invite, user)
     else:
         user.google_id = idinfo.get("sub")
         user.last_login = datetime.now(timezone.utc)
