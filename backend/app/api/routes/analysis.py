@@ -28,7 +28,10 @@ CYBER_EXTRA_EXTENSIONS = {"", ".exe", ".dll", ".scr", ".sys", ".cpl", ".msi", ".
                           ".slk"}
 # (30 Oct) more photo / recording formats, accepted only by the Deepfake module: WhatsApp / web pictures (.webp, .gif,
 # .bmp), iPhone photos (.heic / .heif), phone call recordings (.amr, .awb, .3gp, .3ga) and more video containers
-MEDIA_EXTRA_EXTENSIONS = {".webp", ".gif", ".bmp", ".heic", ".heif", ".amr", ".awb", ".3gp", ".3g2", ".3ga", ".m4v"}
+MEDIA_EXTRA_EXTENSIONS = {".webp", ".gif", ".bmp", ".heic", ".heif", ".amr", ".awb", ".3gp", ".3g2", ".3ga", ".m4v",
+                          # (10 Nov) AVIF / TIFF / WhatsApp-Web .jfif pictures, and files saved WITHOUT an extension:
+                          # the Deepfake module reads what a file really is from its first bytes, not from its name
+                          ".avif", ".tif", ".tiff", ".jfif", ""}
 ALLOWED_EXTENSIONS = {".eml", ".msg", ".txt", ".log", ".csv", ".json", ".pcap", ".pcapng", ".cap", ".png", ".jpg", ".jpeg", ".mp4", ".mov", ".avi", ".mkv", ".webm", ".mp3", ".wav", ".ogg", ".opus", ".m4a", ".aac", ".flac", ".pdf"}
 
 
@@ -124,6 +127,13 @@ async def scan(
                 os.remove(file_path)
             raise
 
+    media_key, media_look = (None, None)
+    if file_path and not (textInput or urlInput):         # (10 Nov) for "false positive" learning of files
+        try:
+            from app.services import feedback
+            media_key, media_look = feedback.media_keys(moduleId, file_path)
+        except Exception:
+            pass
     routing = None
     try:
         if subtopicId == "auto":
@@ -157,9 +167,11 @@ async def scan(
     # response action, so a message the user called safe is never quarantined again
     try:
         from app.services import feedback
-        key = feedback.fingerprint(moduleId, textInput or urlInput or (
+        if media_key:
+            result["feedbackKind"] = "file"
+        key = media_key or feedback.fingerprint(moduleId, textInput or urlInput or (
             f"sha256:{result['sha256']}" if result.get("sha256") else None))
-        feedback.apply_user_verdict(db, user.id, moduleId, result, key)
+        feedback.apply_user_verdict(db, user.id, moduleId, result, key, look=media_look)
     except Exception:
         pass
     # Threat-specific response actions (quarantine, block IP, revoke session, report ...).

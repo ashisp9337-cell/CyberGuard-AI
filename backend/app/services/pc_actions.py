@@ -292,3 +292,72 @@ def end_process(pid, expected_name: str) -> dict:
     except psutil.TimeoutExpired:
         raise ActionError(f"{name} did not stop.", 409)
     return {"ok": True, "message": f"Ended {name} (process {pid})."}
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# (10 Nov) CUT OFF one program from one server: what "End program" cannot do for browsers. Brave / Chrome / Edge run
+# every tab's internet traffic through one "network service" helper; ending it only makes the browser start a new one
+# and the tab reconnects. Cutting off = (1) a Windows Firewall rule that blocks THIS program (its .exe, so every one of
+# its processes) from THAT address, in and out, and (2) dropping the live connection now, so it has to reconnect - and
+# the reconnect is blocked. Other programs can still reach the address; other servers stay reachable for this program.
+# Big services spread over many addresses (WhatsApp, YouTube): the tab may come back through another one - then cut
+# that one off too (it shows up in the list).
+def _program_path(pid: int, expected_name: str) -> tuple[str, "object"]:
+    import psutil
+    try:
+        p = psutil.Process(int(pid))
+        name, exe = p.name(), p.exe()
+    except psutil.NoSuchProcess:
+        raise ActionError("That program is not running any more - refresh the page.", 404)
+    except psutil.AccessDenied:
+        raise ActionError("Windows does not allow reading that program - start the backend as administrator.", 409)
+    if not expected_name or name.lower() != str(expected_name).lower():
+        raise ActionError(f"Process {pid} is now '{name}', not '{expected_name}' - refresh the page and try again.", 409)
+    if not exe or not os.path.isabs(exe) or any(ch in exe for ch in '"\r\n') or not os.path.isfile(exe):
+        raise ActionError("The program's file could not be found, so a rule for it cannot be made.", 409)
+    if name.lower() in PROTECTED or int(pid) <= 4:
+        raise ActionError(f"{name} is part of Windows or CyberGuard and is not cut off from here - use Block address "
+                          "if this address must be blocked for every program.", 403)
+    return exe, p
+
+
+def _is_browser_network_helper(proc) -> bool:
+    """Chromium's network-service helper (Brave / Chrome / Edge / Opera / Vivaldi / Electron apps): ending it is safe -
+    the browser starts a new one at once and every tab stays open."""
+    try:
+        cmd = " ".join(proc.cmdline())
+    except Exception:
+        return False
+    return "--type=utility" in cmd and "network.mojom.NetworkService" in cmd
+
+
+def cut_off(pid, expected_name: str, remote_ip: str, local_ip: str = "", local_port=0, remote_port=0) -> dict:
+    _require("firewall")
+    ip = _ip(remote_ip)
+    exe, proc = _program_path(pid, expected_name)
+    prog = os.path.basename(exe)
+    name = f"{RULE_PREFIX} {prog} to {ip}"
+    res = _add_rules(name, [["dir=out", "action=block", f"program={exe}", f"remoteip={ip}"],
+                            ["dir=in", "action=block", f"program={exe}", f"remoteip={ip}"]],
+                     {"kind": "program", "program": prog, "path": exe, "address": ip})
+    # drop what is connected right now (a firewall rule only stops NEW connections)
+    dropped = ""
+    try:
+        ipaddress.IPv4Address(ip)
+        if local_ip and local_port and remote_port:
+            close_connection(local_ip, local_port, ip, remote_port)
+            dropped = " The live connection was closed; it cannot come back."
+    except (ValueError, ActionError):
+        pass
+    if not dropped and _is_browser_network_helper(proc):
+        try:
+            proc.terminate()                      # the browser restarts its network helper; the tab stays open
+            proc.wait(timeout=3)
+            dropped = (" The browser's network helper was restarted (the tab stays open), so the connection was "
+                       "dropped and cannot come back.")
+        except Exception:
+            pass
+    if not dropped:
+        dropped = (" New connections are blocked now; the one already open ends when the program reconnects "
+                   "(Windows cannot close an IPv6 connection directly - closing the tab or app ends it at once).")
+    return res | {"message": f"Cut off {prog} from {ip}.{dropped} Press Unblock to undo."}

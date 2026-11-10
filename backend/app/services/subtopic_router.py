@@ -155,7 +155,7 @@ class Classification:
 # ---------------------------------------------------------------------------
 # File-type detection (magic bytes first, extension second)
 # ---------------------------------------------------------------------------
-IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic", ".heif"}
+IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic", ".heif", ".avif", ".tif", ".tiff", ".jfif"}
 VIDEO_EXT = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".3gp", ".3g2"}
 AUDIO_EXT = {".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".opus", ".amr", ".awb", ".3ga"}
 # (30 Oct) ISO-media "brands" of HEIC / HEIF / AVIF pictures - these files start like an MP4 video ("ftyp")
@@ -193,7 +193,8 @@ def file_kind(file_path: str | None, file_name: str | None) -> str | None:
     if head.startswith(b"ElfFile\x00"):                        # Windows event log saved from Event Viewer (.evtx)
         return "evtx"
     if head.startswith(b"\x89PNG") or head.startswith(b"\xff\xd8\xff") or head[:6] in (b"GIF87a", b"GIF89a") \
-            or (head[:4] == b"RIFF" and head[8:12] == b"WEBP") or head.startswith(b"BM"):
+            or (head[:4] == b"RIFF" and head[8:12] == b"WEBP") or head.startswith(b"BM") \
+            or head[:4] in (b"II*\x00", b"MM\x00*"):                    # (10 Nov) TIFF
         return "image"
     if head[:4] == b"RIFF" and head[8:12] == b"WAVE":
         return "audio"

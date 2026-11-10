@@ -141,13 +141,31 @@ def _image_model_result(file_path: str, subtopic_title: str, provenance_path: st
     # 1. provenance -------------------------------------------------------------------------------------
     for f in prov["findings"]:
         indicators.append(_ind(f["label"], f["detail"], "critical" if f["proof"] else "low", True))
+    summary = AI.metadata_summary(provenance_path or file_path)          # (10 Nov) what the file says about itself
+    indicators.append(_ind("File metadata (info only)", summary, "low", False))
     if prov["proof"]:
         first = next(f for f in prov["findings"] if f["proof"])
         candidates.append((95, 99, f"The file itself declares that it was made with AI: {first['detail']}"))
     engines.append("Provenance check (C2PA / IPTC / generator metadata)")
 
     # 2. AI-generated (whole picture) -------------------------------------------------------------------
-    if ai:
+    # (11 Nov) a BORDERLINE AI-image score (warning level, below the alert) on a picture that still carries a camera's
+    # full shooting data is "check" only: on modern generators the warning level also catches ~9% of real photos.
+    camera = AI.camera_capture(provenance_path or file_path) if ai and ai["level"] == "medium" and not prov["proof"] else None
+    if ai and camera:
+        p, meta = ai["probability"], ai["meta"]
+        indicators.append(_ind(
+            "AI-image model: borderline - but the photo carries full camera data",
+            f"The AI-image model rates the picture at {_pct(p)} likely AI-generated - just above its warning level "
+            f"({_pct(ai['thrVerify'])}) and below its alert ({_pct(ai['thrAlert'])}), where about 9% of real photos "
+            f"also land. The file still has the shooting data of a camera / phone: {camera}. AI generators do not write "
+            "that, so this is treated as 'check', not as a warning. Metadata can be copied, so this is not proof.",
+            "low", False))
+        candidates.append((min(AI.score_from(ai), 40), 55, f"AI-image model: borderline ({_pct(p)}), but the photo "
+                           f"carries full camera data ({camera}) - most likely a real photo; check its source if it "
+                           "matters."))
+        engines.append(f"AI-image model ({meta.get('architecture', 'CLIP')}, Colab-trained, ONNX)")
+    elif ai:
         p, level, meta = ai["probability"], ai["level"], ai["meta"]
         indicators.append(_ind(
             {"high": "AI-image model: looks AI-generated", "medium": "AI-image model: possibly AI-generated - verify",
@@ -235,6 +253,18 @@ def _image_model_result(file_path: str, subtopic_title: str, provenance_path: st
     return result, None
 
 
+def _lip_sync_check(file_path):
+    """(10 Nov) None when the face detector file is missing or the check crashes - never breaks the video result."""
+    from app.detectors import deepfake_image as DI
+    from app.detectors import lip_sync
+    if not os.path.exists(DI.FACE_DETECTOR_PATH):
+        return None
+    try:
+        return lip_sync.check(file_path, DI.FACE_DETECTOR_PATH)
+    except Exception:
+        return None
+
+
 def _video_face_check(file_path):
     from app.detectors import deepfake_video as DV
     try:
@@ -274,6 +304,8 @@ def _video_result(file_path: str | None, subtopic_title: str) -> dict:
                                                        "hasContentCredentials": False}
     face, why_face = _video_face_check(file_path) if file_path else (None, "no file was uploaded")
     indicators = [_ind(f["label"], f["detail"], "critical" if f["proof"] else "low", True) for f in prov["findings"]]
+    if file_path:                                            # (10 Nov) what the file says about itself
+        indicators.append(_ind("File metadata (info only)", VP.metadata_summary(file_path), "low", False))
     engines = ["Provenance check (C2PA Content Credentials / generator metadata)"]
     candidates = []
     if prov["proof"]:
@@ -310,6 +342,33 @@ def _video_result(file_path: str | None, subtopic_title: str) -> dict:
     else:
         indicators.append(_ind("Face-swap video model not installed", f"Not used: {why_face}.", "low", False))
 
+    # (10 Nov) lip-sync: does the mouth move with the voice? A hint only - at most "verify" (app/detectors/lip_sync.py)
+    lip = _lip_sync_check(file_path) if file_path else None
+    if lip:
+        st = lip["status"]
+        if st == "mismatch":
+            indicators.append(_ind(
+                "Lip-sync: the mouth does not follow the voice - verify",
+                f"Over the first seconds the mouth matched its own sound no better than sound from random other "
+                f"moments (agreement {lip['r']:.2f}, chance level {lip['chance']:.2f}). Lip-sync deepfakes and dubbed "
+                "videos look like this - but so do voice-overs, interviews, background music or several people "
+                "talking. Experimental check, not measured on a labelled dataset.", "medium", True))
+            candidates.append((55, 55, "Lip-sync check: the mouth movements do not follow the voice (could be a "
+                                       "lip-sync deepfake, dubbing or a voice-over)."))
+        elif st == "in_sync":
+            indicators.append(_ind("Lip-sync: the mouth follows the voice",
+                                   f"Mouth and speech agree clearly better than chance (agreement {lip['r']:.2f}, "
+                                   f"chance level {lip['chance']:.2f}). This does not rule out a good lip-sync fake.",
+                                   "low", False))
+        elif st == "weak":
+            indicators.append(_ind("Lip-sync: unclear",
+                                   f"Mouth and speech agree only a little better than chance (agreement {lip['r']:.2f}, "
+                                   f"chance level {lip['chance']:.2f}) - no conclusion.", "low", False))
+        else:
+            indicators.append(_ind("Lip-sync: not checked", f"Not checked: {lip.get('reason', 'not possible')}.",
+                                   "low", False))
+        engines.append("Lip-sync check (mouth vs speech, experimental)")
+
     if candidates:
         score, confidence, decider = max(candidates, key=lambda c: c[0])
         others = [c[2] for c in candidates if c[2] != decider]
@@ -320,7 +379,8 @@ def _video_result(file_path: str | None, subtopic_title: str) -> dict:
         else:
             explanation = (" ".join(c[2] for c in candidates) + " This lowers the risk but cannot prove the video "
                            "is genuine: this model checks face swaps only - not fully AI-generated videos (Sora, Veo, "
-                           "Kling ...), lip-sync changes or cloned voices.")
+                           "Kling ...)" + (" or cloned voices (the lip-sync check is experimental)." if lip and
+                                           lip["status"] != "not_checked" else ", lip-sync changes or cloned voices."))
         engine = "CYBERGUARD Deepfake Engine — " + " + ".join(engines)
     else:
         score, confidence = 0, 0
@@ -342,6 +402,8 @@ def _video_result(file_path: str | None, subtopic_title: str) -> dict:
             "For a face check, upload a version where a face is clearly visible for several seconds.",
             "Do not forward the video as real until its source is confirmed."])
     result["provenance"] = prov
+    if lip:
+        result["lipSync"] = lip
     if face:
         result["deepfakeVideoModel"] = {
             "probability": round(face["probability"], 4) if face["probability"] is not None else None,
@@ -395,6 +457,8 @@ def analyze_media(file_path: str | None, file_name: str, subtopic_title: str = "
             return voice.analyze_voice(file_path, file_name, subtopic_title, reference_path=reference_path)
         if kind == "image":                                  # (30 Oct) a picture is never sent to the video path
             is_video = False
+        elif kind == "video":                                # (10 Nov) a video renamed to .jpg / saved without a
+            is_video = True                                  # name ending is still read as a video
 
     why_no_model = "no file was uploaded"
     note = ""

@@ -2,6 +2,7 @@
 
 The e-mails here are made-up copies in the layout Gmail / Outlook show (account numbers changed); the scams use domains
 that do not exist (.top / .xyz), so no real site is contacted."""
+import os
 import uuid
 
 import pytest
@@ -362,3 +363,65 @@ def test_whole_word_brand_mismatch_and_forwarded_mail():
     fired = {i["label"] for i in _rule_indicators("Your PayPal account is limited", sender="x@pay-help.top")
              if i["triggered"]}
     assert "Sender domain mismatch" in fired
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# (10 Nov) "False positive" on a photo / video: the same file, and a re-sent (re-compressed) copy, are then safe
+# ---------------------------------------------------------------------------------------------------------------
+def _fake_deepfake(monkeypatch):
+    from app.services import analysis_service
+    from app.detectors.base import build_result
+    monkeypatch.setattr(analysis_service.deepfake, "analyze_media",
+                        lambda fp, name, title="", reference_path=None: build_result(
+                            indicators=[], base_score=92, confidence=90, engine_name="test",
+                            threat_type="AI-generated image", explanation="AI-image model: 97% likely AI-generated."))
+
+
+def _picture(path, quality=95, size=(320, 240), seed=5):
+    import numpy as np
+    from PIL import Image
+    rng = np.random.default_rng(seed)
+    y, x = np.mgrid[0:240, 0:320]
+    fx, fy, ph = 20 + seed % 23, 15 + seed % 17, seed * 0.7                # each seed is a different picture
+    base = (120 + 80 * np.sin(x / fx + ph) * np.cos(y / fy - ph) + rng.normal(0, 4, (240, 320))).clip(0, 255)
+    Image.fromarray(np.stack([base, base * 0.8, 255 - base], -1).astype("uint8")).resize(size).save(
+        path, "JPEG", quality=quality)
+    return path
+
+
+def _scan_file(client, path):
+    with open(path, "rb") as f:
+        return client.post("/api/analysis/scan", data={"moduleId": "deepfake", "subtopicId": "image-analysis",
+                                                       "subtopicTitle": "Image Analysis"},
+                           files={"file": (os.path.basename(path), f, "image/jpeg")}).json()
+
+
+def test_false_positive_on_a_photo_is_learned_also_for_a_resent_copy(auth_client, monkeypatch, tmp_path):
+    _fake_deepfake(monkeypatch)
+    original = _picture(str(tmp_path / "family.jpg"))
+    first = _scan_file(auth_client, original)
+    assert first["riskScore"] >= 71
+    inc = next(i for i in auth_client.get("/api/incidents").json() if i["scanId"] == first["scanId"])
+    r = auth_client.patch(f"/api/incidents/{inc['id']}", json={"status": "false_positive"})
+    assert r.json()["learned"] >= 2                                      # the file + its look
+
+    again = _scan_file(auth_client, original)
+    assert again["riskScore"] <= 20 and again["indicators"][0]["label"] == "You marked this exact file as safe"
+
+    resent = _picture(str(tmp_path / "IMG-20261110-WA0003.jpg"), quality=55, size=(256, 192))   # WhatsApp-like copy
+    third = _scan_file(auth_client, resent)
+    assert third["riskScore"] <= 20 and third["indicators"][0]["label"] == "You marked this picture / video as safe"
+
+    other = _scan_file(auth_client, _picture(str(tmp_path / "other.jpg"), seed=99))
+    assert other["riskScore"] >= 71                                      # a different picture is still checked
+
+    auth_client.patch(f"/api/incidents/{inc['id']}", json={"status": "open"})
+    assert _scan_file(auth_client, original)["riskScore"] >= 71           # undone
+
+
+def test_look_hash_tells_copies_from_different_pictures(tmp_path):
+    from app.services import feedback
+    a = feedback.look_hash(_picture(str(tmp_path / "a.jpg")))
+    b = feedback.look_hash(_picture(str(tmp_path / "b.jpg"), quality=40, size=(200, 150)))
+    c = feedback.look_hash(_picture(str(tmp_path / "c.jpg"), seed=99))
+    assert len(a) == 64 and feedback._bits_apart(a, b) <= feedback.IMG_MAX_BITS < feedback._bits_apart(a, c)

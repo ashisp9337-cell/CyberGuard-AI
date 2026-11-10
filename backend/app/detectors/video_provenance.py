@@ -157,3 +157,41 @@ def provenance(file_path: str) -> dict:
                              "detail": "The video's metadata mentions: " + ", ".join(gen) + "."})
     return {"proof": any(f["proof"] for f in findings), "kind": kind, "findings": findings,
             "hasContentCredentials": has_c2pa}
+
+
+_TAG_NAMES = {"encoder": "encoder", "creation_time": "date", "com.apple.quicktime.make": "camera / phone",
+              "com.apple.quicktime.model": "model", "com.apple.quicktime.software": "software",
+              "com.android.version": "Android version", "com.android.manufacturer": "phone",
+              "com.android.model": "model", "title": "title", "comment": "comment", "software": "software",
+              "handler_name": "made by"}
+
+
+def metadata_summary(file_path: str) -> str:
+    """(10 Nov) What the video's own metadata says (info only). Read from the file's CONTENT, so a renamed file is
+    read the same way. A recorded location is never shown, only that it is there."""
+    try:
+        import av
+        with av.open(file_path) as c:
+            tags = {str(k).lower(): str(v) for k, v in dict(c.metadata or {}).items()}
+            for st in c.streams:
+                for k, v in dict(st.metadata or {}).items():
+                    tags.setdefault(str(k).lower(), str(v))
+            fmt = c.format.name.split(",")[0] if c.format else "unknown"
+            fmt = {"mov": "MP4 / MOV", "matroska": "WebM / MKV", "avi": "AVI"}.get(fmt, fmt.upper())
+    except Exception:
+        return "The video's metadata could not be read."
+    parts, seen = [], set()
+    for key, label in _TAG_NAMES.items():
+        v = tags.get(key, "").strip()
+        if not v or label in seen or v.lower() in ("videohandler", "soundhandler", "core media video",
+                                                   "core media audio", "iso media file produced by google inc."):
+            continue
+        seen.add(label)
+        parts.append(f"{label}: {v[:60]}")
+    if any("location" in k or k in ("gps", "xyz") for k in tags):
+        parts.append("location stored (not shown)")
+    if not parts:
+        return (f"Container {fmt}. The video carries no metadata (no camera, app or date information) - normal for "
+                "videos sent through WhatsApp, Instagram, share links or screen recordings, so it proves nothing "
+                "either way; the video itself was checked.")
+    return f"Container {fmt}; " + "; ".join(parts) + "."

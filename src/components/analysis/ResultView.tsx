@@ -15,6 +15,7 @@ import { ResultExtras } from "@/components/analysis/ResultExtras";
 import { InsiderRiskCard } from "@/components/analysis/InsiderRiskCard";
 import { MalwareCard } from "@/components/analysis/MalwareCard";
 import { WindowsEventsCard } from "@/components/analysis/WindowsEventsCard";
+import { VoiceCard } from "@/components/analysis/VoiceCard";
 import { askThreatora } from "@/lib/threatora";
 
 const PRIORITY_META: Record<ResponseAction["priority"], { label: string; color: string; bg: string }> = {
@@ -50,6 +51,8 @@ export function ResultView({ result, onNewScan, onSave, newScanLabel = "Run Anot
   const missingModels = result.indicators
     .filter((i) => /not installed/i.test(i.label) || /not installed on this computer/i.test(i.description))
     .map((i) => (/not installed/i.test(i.label) ? i.label.replace(/\s*\(info only\)\s*$/i, "") : `${i.label}: model not installed`));
+  // (10 Nov) Deepfake: what the file's own metadata says (camera, app, date - or that sharing removed it)
+  const fileMeta = result.indicators.find((i) => i.label === "File metadata (info only)");
   const mitre = result.mitreAttack ?? [];
   const mitreById = new Map(mitre.map((t) => [t.id, t]));
 
@@ -132,6 +135,15 @@ export function ResultView({ result, onNewScan, onSave, newScanLabel = "Run Anot
               </div>
             </div>
           ))}
+          {fileMeta && (
+            <div className="flex items-start gap-3 rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3">
+              <ICONS.info size={16} className="text-cyan-300 mt-0.5 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-cyan-200">File metadata <span className="text-[11px] text-slate-500">(information, not counted in the score)</span></p>
+                <p className="text-xs text-slate-400 mt-0.5">{fileMeta.description}</p>
+              </div>
+            </div>
+          )}
         </CardBody>
       </Card>
 
@@ -142,6 +154,8 @@ export function ResultView({ result, onNewScan, onSave, newScanLabel = "Run Anot
       {result.insiderRisk && <InsiderRiskCard ir={result.insiderRisk} />}
       {/* Malware check of an uploaded file */}
       {result.malwareAnalysis && <MalwareCard ma={result.malwareAnalysis} />}
+      {/* (11 Nov) Voice & Audio: every check in plain words + the per-part timeline */}
+      {result.voiceAnalysis && <VoiceCard va={result.voiceAnalysis} />}
 
       {/* MITRE ATT&CK techniques, explained */}
       <MitreAttackCard techniques={mitre} />

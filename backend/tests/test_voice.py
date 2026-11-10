@@ -104,8 +104,10 @@ def no_speech_model(monkeypatch):
 def test_ai_voice_high_score_is_flagged_and_low_score_never_called_real(monkeypatch, note, no_speech_model):
     monkeypatch.setattr(voice, "ai_model", fake_ai(1.0))                        # sigmoid(4) = 0.982 -> above alert
     r = voice.analyze_voice(note, "note.ogg")
-    assert r["riskScore"] >= 71 and r["voiceAnalysis"]["aiVoice"]["score"] > 0.98
-    assert any(i["triggered"] and "AI-generated" in i["label"] for i in r["indicators"])
+    # (11 Nov) the model ALONE is "check carefully" (51-70), never critical: it flags ~1 in 4 real phone recordings
+    assert 51 <= r["riskScore"] <= voice.MODEL_ONLY_MAX and r["voiceAnalysis"]["aiVoice"]["score"] > 0.98
+    assert r["voiceAnalysis"]["modelOnlyCapped"] is True and "check carefully" in r["explanation"]
+    assert any(i["triggered"] and "AI-generated" in i["label"] and i["severity"] == "medium" for i in r["indicators"])
     assert "In-the-Wild" in next(i["description"] for i in r["indicators"] if "AI-generated" in i["label"])
     monkeypatch.setattr(voice, "ai_model", fake_ai(-1.0))                       # sigmoid(-4) = 0.018
     low = voice.analyze_voice(note, "note.ogg")
@@ -147,6 +149,57 @@ def test_metadata_naming_an_ai_voice_tool(monkeypatch, tmp_path, no_speech_model
     p = write(tmp_path / "x.mp3", tone(5.0), "mp3", "libmp3lame", 44_100, tags={"comment": "Generated with ElevenLabs"})
     r = voice.analyze_voice(p, "x.mp3")
     assert r["riskScore"] >= 80 and any(i["label"] == "File metadata names an AI voice tool" for i in r["indicators"])
+
+
+def test_aigc_label_in_the_file_is_proof_and_label_2_is_a_hint(monkeypatch, tmp_path, no_speech_model):
+    """(11 Nov) China's AI-content label (GB 45438-2025), as MiniMax writes it into an mp3 - the real-world clone that
+    the voice model alone could not tell from a real phone recording."""
+    monkeypatch.setattr(voice, "ai_model", fake_ai(-1.0))                       # the model sees nothing
+    tag = '{"Label":"1","ContentProducer":"MiniMax","ProduceID":"0742965299","ReservedCode1":"{\\"SecurityData\\":1}"}'
+    p = write(tmp_path / "clone.mp3", tone(5.0), "mp3", "libmp3lame", 32_000, tags={"AIGC": tag})
+    r = voice.analyze_voice(p, "clone.mp3")
+    assert r["riskScore"] >= 90, r["explanation"]
+    ind = next(i for i in r["indicators"] if i["label"].startswith("AI-content label"))
+    assert ind["triggered"] and "MiniMax" in ind["description"] and r["voiceAnalysis"]["aigcLabel"]["label"] == "1"
+    p2 = write(tmp_path / "maybe.mp3", tone(5.0), "mp3", "libmp3lame", 32_000,
+               tags={"AIGC": '{"Label":"2","ContentProducer":"X"}'})
+    assert 51 <= voice.analyze_voice(p2, "maybe.mp3")["riskScore"] <= 70
+
+
+def test_content_credentials_and_more_tool_names_in_audio(monkeypatch, tmp_path, no_speech_model):
+    """(11 Nov) C2PA inside the audio file and the names of more voice tools are proof, whatever the model says."""
+    monkeypatch.setattr(voice, "ai_model", fake_ai(-1.0))
+    c2pa = write(tmp_path / "c.mp3", tone(5.0), "mp3", "libmp3lame", 32_000,
+                 tags={"comment": "c2pa jumb DigitalSourceType trainedAlgorithmicMedia"})
+    r = voice.analyze_voice(c2pa, "c.mp3")
+    assert r["riskScore"] >= 95 and r["voiceAnalysis"]["contentCredentials"] == "ai"
+    for tool in ("Exported from HeyGen", "Kokoro voice", "Amazon Polly"):
+        p = write(tmp_path / "t.mp3", tone(5.0), "mp3", "libmp3lame", 32_000, tags={"comment": tool})
+        assert voice.analyze_voice(p, "t.mp3")["riskScore"] >= 80, tool
+
+
+def test_audio_metadata_is_shown_as_information_only(monkeypatch, tmp_path, no_speech_model):
+    monkeypatch.setattr(voice, "ai_model", fake_ai(-1.0))
+    p = write(tmp_path / "rec.m4a", tone(5.0), "mp4", "aac", 48_000, tags={"title": "class notes"})
+    r = voice.analyze_voice(p, "rec.m4a")
+    meta = next(i for i in r["indicators"] if i["label"] == "File metadata (info only)")
+    assert meta["triggered"] is False and "MP4 / M4A" in meta["description"] and "48 kHz" in meta["description"]
+    assert "title: class notes" in meta["description"] and r["riskScore"] < 51
+
+
+def test_model_with_backing_keeps_its_full_score(monkeypatch, tmp_path, no_speech_model):
+    monkeypatch.setattr(voice, "ai_model", fake_ai(1.0))
+    p = write(tmp_path / "clone.mp3", tone(5.0), "mp3", "libmp3lame", 32_000,
+              tags={"AIGC": '{"Label":"1","ContentProducer":"MiniMax"}'})
+    r = voice.analyze_voice(p, "clone.mp3")
+    assert r["riskScore"] >= 92 and not r["voiceAnalysis"].get("modelOnlyCapped")
+
+
+def test_a_phone_recording_without_tags_is_not_mistaken_for_a_label(monkeypatch, tmp_path, no_speech_model):
+    monkeypatch.setattr(voice, "ai_model", fake_ai(-1.0))
+    p = write(tmp_path / "rec.m4a", tone(5.0), "mp4", "aac", 48_000, tags={"title": "Label 1 - lecture notes"})
+    r = voice.analyze_voice(p, "rec.m4a")
+    assert r["riskScore"] < 51 and "aigcLabel" not in r["voiceAnalysis"]
 
 
 # ---- speech content: a real voice reading a scam script is still a scam ------------------------------------------
@@ -246,5 +299,9 @@ def test_stored_voice_summary_is_small_and_has_no_audio():
           "levels": {"alert": 0.9, "verify": 0.7}}, "speech": {"language": "hi", "transcriptExcerpt": "x" * 900,
           "contentScore": 85}, "voiceMatch": {"done": True, "similarity": 0.1, "mismatchLevel": 0.4, "match": False}}
     out = scan_store.detail_fields({"voiceAnalysis": va})["voiceAnalysis"]
-    assert len(out["speech"]["transcriptExcerpt"]) == 200 and out["aiVoice"] == {"score": 0.97, "alert": 0.9, "verify": 0.7}
+    assert len(out["speech"]["transcriptExcerpt"]) == 200 and out["aiVoice"] == {"score": 0.97, "alert": 0.9, "verify": 0.7,
+                                                                                   "clipScores": [0.9, 0.9, 0.9]}
+    big = scan_store.detail_fields({"voiceAnalysis": va | {"aiVoice": {"score": 0.5, "clipScores": [0.5] * 99,
+                                                                       "levels": {}}}})["voiceAnalysis"]
+    assert len(big["aiVoice"]["clipScores"]) == 15                    # (11 Nov) the timeline is kept small
     assert out["voiceMatch"]["match"] is False

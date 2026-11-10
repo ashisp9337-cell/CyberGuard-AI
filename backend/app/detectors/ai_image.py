@@ -8,6 +8,8 @@ Two independent checks:
        Microsoft Designer, ... add them) - IPTC DigitalSourceType "trainedAlgorithmicMedia"
      * Stable Diffusion / ComfyUI / InvokeAI / NovelAI generation settings in PNG text chunks
      * a generator's name in the metadata (EXIF Software, XMP CreatorTool, ...)
+     * (10 Nov) Google Gemini's VISIBLE sparkle watermark in the bottom-right corner (part of the pixels, so it
+       survives sharing) - gemini_watermark()
    Found  -> proof the picture is (partly) AI-made.
    Absent -> proves nothing: screenshots, WhatsApp and re-saving remove it. That is why there is also:
 
@@ -166,7 +168,175 @@ def provenance(file_path: str) -> dict:
     if names:
         findings.append({"label": "AI generator named in the metadata",
                          "detail": "The image's metadata mentions: " + ", ".join(names) + ".", "proof": True})
+    mark = gemini_watermark(file_path)                       # (10 Nov) survives sharing, unlike metadata
+    if mark:
+        findings.append({"label": "Google Gemini watermark (visible sparkle)",
+                         "detail": (f"The bottom-right corner carries Gemini's sparkle logo ({mark['size']} px, "
+                                    f"{mark['margin']} px from the edges, match {mark['match']:.2f}). Google adds it to "
+                                    "every picture Gemini creates or edits - so this picture was made or changed by "
+                                    "Gemini AI, even if the people in it look real."),
+                         "proof": True})
     return {"proof": any(f["proof"] for f in findings), "findings": findings, "hasContentCredentials": has_c2pa}
+
+
+_NO_META = ("The file carries no metadata (no camera, app or date information). That is normal for pictures sent "
+            "through WhatsApp, Instagram, Telegram, share links or screenshots - they remove it - so it proves "
+            "nothing either way; the picture itself was checked.")
+
+
+def metadata_summary(file_path: str) -> str:
+    """(10 Nov) What the picture's own metadata says, in one line - shown on every image result (info only).
+    Read from the file's CONTENT, so a renamed file (.jpg called .png, or no ending) is read the same way.
+    The GPS position is never shown, only that it is there."""
+    try:
+        from PIL import Image, ExifTags
+        try:
+            import pillow_heif
+            pillow_heif.register_heif_opener()
+        except Exception:
+            pass
+        with Image.open(file_path) as im:
+            fmt = im.format or "unknown"
+            exif = im.getexif()
+            info = dict(im.info)
+            sub = {}
+            try:
+                sub = dict(exif.get_ifd(ExifTags.IFD.Exif))
+            except Exception:
+                pass
+            has_gps = False
+            try:
+                has_gps = bool(exif.get_ifd(ExifTags.IFD.GPSInfo))
+            except Exception:
+                pass
+    except Exception:
+        return "The file's metadata could not be read."
+    parts = []
+    make, model = str(exif.get(271, "") or "").strip(" \x00"), str(exif.get(272, "") or "").strip(" \x00")
+    if make or model:
+        parts.append("camera / phone: " + " ".join(dict.fromkeys(x for x in (make, model) if x)))
+    if exif.get(305):
+        parts.append(f"made with: {str(exif.get(305)).strip(chr(0))[:60]}")
+    taken = sub.get(36867) or exif.get(306)
+    if taken:
+        parts.append(f"date: {str(taken).strip(chr(0))[:19]}")
+    if has_gps:
+        parts.append("GPS location stored (not shown)")
+    if info.get("xmp") or info.get("XML:com.adobe.xmp"):
+        parts.append("XMP editing data")
+    com = info.get("comment")
+    if com:
+        com = com.decode("utf-8", "ignore") if isinstance(com, bytes) else str(com)
+        if com.strip():
+            parts.append(f"comment: {com.strip()[:60]}")
+    text_keys = [k for k in info if isinstance(info.get(k), str) and k.lower() not in ("xml:com.adobe.xmp",)]
+    if fmt == "PNG" and text_keys:
+        parts.append("PNG text fields: " + ", ".join(sorted(text_keys)[:5]))
+    try:
+        with open(file_path, "rb") as f:
+            head = f.read(MAX_META_BYTES)
+        if b"c2pa" in head or b"jumb" in head:
+            parts.append("Content Credentials (C2PA)")
+    except OSError:
+        pass
+    if not parts:
+        return f"Format {fmt}. " + _NO_META
+    return f"Format {fmt}; " + "; ".join(parts) + (". A camera / phone name is a hint of a real photo, not proof: "
+                                                   "metadata can be copied or edited." if make or model else ".")
+
+
+# (11 Nov) Editing / beauty / AI apps: a photo saved by one of them may be changed, so its camera data no longer vouches
+# for the pixels.
+EDITOR_RE = re.compile(r"photoshop|lightroom|gimp|snapseed|picsart|canva|facetune|meitu|remini|faceapp|lensa|photoroom|"
+                       r"pixelmator|affinity|capcut|fotor|airbrush|beautyplus|b612|\bsnow\b|ulike|youcam|vsco|"
+                       r"firefly|midjourney|dall|stable ?diffusion|comfyui|gemini|imagen|\bai\b", re.I)
+CAPTURE_TAGS = {33434: "exposure time", 33437: "aperture", 34855: "ISO", 37386: "focal length"}
+
+
+def camera_capture(file_path: str) -> str | None:
+    """(11 Nov) The picture still carries a camera's full shooting data: maker + model + the moment it was taken + at
+    least 2 of exposure time / aperture / ISO / focal length, and no editing or AI app in "Software". AI generators do
+    not write these; WhatsApp / social media remove them. -> "Xiaomi 22101320I (exposure time, aperture, ISO)" or None.
+    It is still not proof (metadata can be copied), so it only softens a BORDERLINE AI-image score, never an alert."""
+    try:
+        from PIL import Image, ExifTags
+        try:
+            import pillow_heif
+            pillow_heif.register_heif_opener()
+        except Exception:
+            pass
+        with Image.open(file_path) as im:
+            exif = im.getexif()
+            sub = dict(exif.get_ifd(ExifTags.IFD.Exif))
+    except Exception:
+        return None
+    make, model = str(exif.get(271, "") or "").strip(" \x00"), str(exif.get(272, "") or "").strip(" \x00")
+    software = str(exif.get(305, "") or "") + " " + str(sub.get(42032, "") or "")
+    shot = [name for tag, name in CAPTURE_TAGS.items() if sub.get(tag) not in (None, "", 0)]
+    if not (make and model and sub.get(36867) and len(shot) >= 2) or EDITOR_RE.search(software):
+        return None
+    return f"{' '.join(dict.fromkeys((make, model)))} ({', '.join(shot)})"
+
+
+# (10 Nov) Gemini's VISIBLE watermark: a white four-pointed sparkle, blended over the bottom-right corner, its size n
+# and its distance from the right and bottom edges about 2/3 n (48 px at 32 px, 96 px at 64 px). Metadata is removed
+# when a picture is shared; this mark is part of the pixels, so it survives WhatsApp / share links / screenshots.
+# Measured (scratch test, 10 Nov): found on a real Gemini picture (match 0.93); highest match on 600 real photos and
+# screenshots (BSDS500 + app screenshots) 0.77. The alert needs 0.85, so a missing mark proves nothing (it is not
+# found on busy backgrounds, after cropping, or when someone removed it), but a found one is strong evidence.
+WATERMARK_MATCH = 0.85
+
+
+def _sparkle(n: int) -> np.ndarray:
+    c = (n - 1) / 2
+    y, x = np.mgrid[0:n, 0:n]
+    u, v = np.abs((x - c) / (n / 2)), np.abs((y - c) / (n / 2))
+    d = (u ** 0.7 + v ** 0.7) ** (1 / 0.7)
+    return np.clip((1.0 - d) / 0.08 + 0.5, 0, 1).astype(np.float32)
+
+
+def gemini_watermark(file_path: str) -> dict | None:
+    """-> {"size", "margin", "match", "alpha"} when Gemini's sparkle is in the bottom-right corner, else None."""
+    try:
+        import cv2
+        from PIL import Image, ImageOps
+        with Image.open(file_path) as im:
+            if getattr(im, "is_animated", False):
+                im.seek(0)
+            if im.width * im.height > 60_000_000:
+                return None
+            im = ImageOps.exif_transpose(im)
+            gray = np.asarray(im.convert("L"), dtype=np.float32)
+    except Exception:
+        return None
+    h, w = gray.shape
+    m = max(w, h)
+    best = None
+    sizes = sorted({int(round(s)) for s in np.geomspace(max(16, 0.015 * m), max(20, 0.1 * m), 24)} | {48, 96})
+    for n in sizes:
+        lo, hi = int(0.45 * n), int(0.95 * n) + 1                # allowed distance from the right / bottom edge
+        reg = n + hi
+        if n > min(w, h) // 4 or reg > min(w, h):
+            continue
+        region = np.ascontiguousarray(gray[h - reg:, w - reg:])
+        t = _sparkle(n)
+        r = cv2.matchTemplate(region, t, cv2.TM_CCOEFF_NORMED)
+        mr = reg - np.arange(r.shape[1]) - n                     # right margin for each x
+        mb = reg - np.arange(r.shape[0]) - n                     # bottom margin for each y
+        ok = ((mr[None, :] >= lo) & (mr[None, :] <= hi) & (mb[:, None] >= lo) & (mb[:, None] <= hi)
+              & (np.abs(mr[None, :] - mb[:, None]) <= max(3, 0.2 * n)))
+        rr = np.where(ok & np.isfinite(r), r, -1.0)
+        y, x = np.unravel_index(int(np.argmax(rr)), rr.shape)
+        match = float(rr[y, x])
+        if best is not None and match <= best["match"]:
+            continue
+        patch = region[y:y + n, x:x + n].ravel()
+        (c0, c1), *_ = np.linalg.lstsq(np.stack([np.ones_like(patch), t.ravel()], 1), patch, rcond=None)
+        best = {"size": n, "margin": int(mr[x]), "match": match, "brighten": float(c1),
+                "alpha": float(c1 / max(255.0 - c0, 1.0))}
+    if best and best["match"] >= WATERMARK_MATCH and best["brighten"] >= 4 and 0.15 <= best["alpha"] <= 1.0:
+        return best
+    return None
 
 
 # ------------------------------------------------------------------------------------------------------------

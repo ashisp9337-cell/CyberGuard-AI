@@ -71,7 +71,9 @@ export interface PcActions {
 
 export interface PcBlock {
   name: string;
-  kind: "port" | "address";
+  /** (10 Nov) "program" = one program cut off from one address */
+  kind: "port" | "address" | "program";
+  program?: string;
   port?: number;
   protocol?: string;
   address?: string;
@@ -122,4 +124,11 @@ export async function closeConnection(c: PcConnection): Promise<PcActionResult> 
 
 export async function endProcess(pid: number, name: string): Promise<PcActionResult> {
   return apiClient.post<PcActionResult>("/api/pc-network/end-process", { pid, name });
+}
+
+/** (10 Nov) Cut one program off from one address: firewall rule for that program + the live connection dropped. */
+export async function cutOff(c: PcConnection): Promise<PcActionResult> {
+  return apiClient.post<PcActionResult>("/api/pc-network/cut-off", {
+    pid: c.pid, name: c.program, remoteAddress: c.remote,
+    localAddress: c.localAddress, localPort: c.localPort, remotePort: c.remotePort });
 }

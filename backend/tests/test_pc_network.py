@@ -291,3 +291,61 @@ def test_end_button_is_not_offered_for_protected_programs(fake):
         assert can == {"postgres.exe": False, "invoice.exe": True, "python.exe": False, "System": False}
     finally:
         FakeProc.PROCS.pop(os.getpid(), None)
+
+
+# ---- (10 Nov) cut one program off from one server -------------------------------------------------------------------
+def _fake_proc(monkeypatch, tmp_path, name="brave.exe", helper=True):
+    exe = tmp_path / "Brave Software" / name
+    exe.parent.mkdir(parents=True, exist_ok=True)
+    exe.write_bytes(b"MZ")
+    ended = []
+
+    class Proc:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def name(self):
+            return name
+
+        def exe(self):
+            return str(exe)
+
+        def cmdline(self):
+            return [str(exe), "--type=utility", "--utility-sub-type=network.mojom.NetworkService"] if helper else [str(exe)]
+
+        def terminate(self):
+            ended.append(self.pid)
+
+        def wait(self, timeout=None):
+            return 0
+    monkeypatch.setattr(psutil, "Process", Proc)
+    return str(exe), ended
+
+
+def test_cut_off_blocks_that_program_from_that_address_and_restarts_the_browser_helper(actions, monkeypatch, tmp_path):
+    A, calls = actions
+    exe, ended = _fake_proc(monkeypatch, tmp_path)
+    r = A.cut_off(27392, "brave.exe", "2a03:2880:f322:120:face:b00c:0:167")
+    assert r["ok"] and "network helper was restarted" in r["message"] and ended == [27392]
+    assert ["add", "rule", "name=CyberGuard block brave.exe to 2a03:2880:f322:120:face:b00c:0:167", "dir=out",
+            "action=block", f"program={exe}", "remoteip=2a03:2880:f322:120:face:b00c:0:167"] in calls
+    b = A.list_blocks()[0]
+    assert b["kind"] == "program" and b["program"] == "brave.exe"
+    assert A.unblock(b["name"])["ok"] and A.list_blocks() == []
+
+
+def test_cut_off_never_ends_an_ordinary_program(actions, monkeypatch, tmp_path):
+    A, _ = actions
+    _, ended = _fake_proc(monkeypatch, tmp_path, name="Code.exe", helper=False)
+    r = A.cut_off(31012, "Code.exe", "2a03:2880::1")
+    assert ended == [] and "New connections are blocked" in r["message"]
+
+
+@pytest.mark.parametrize("pid,name,ip", [(27392, "chrome.exe", "8.8.8.8"), (27392, "brave.exe", "127.0.0.1"),
+                                         (27392, "brave.exe", "8.8.8.8; netsh advfirewall reset")])
+def test_cut_off_refuses_a_changed_program_or_a_bad_address(actions, monkeypatch, tmp_path, pid, name, ip):
+    A, calls = actions
+    _fake_proc(monkeypatch, tmp_path)
+    with pytest.raises(A.ActionError):
+        A.cut_off(pid, name, ip)
+    assert calls == []

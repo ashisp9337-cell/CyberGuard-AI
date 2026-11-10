@@ -11,6 +11,12 @@ really the person it claims to be?
                       voices do not match, that is a strong warning. A match never proves the voice is real - a good
                       clone is made to match.
   4. File facts       format / codec / sample rate, and metadata naming an AI voice tool (e.g. ElevenLabs).
+                      (11 Nov) + the "AIGC" label that AI tools must embed under China's labelling standard
+                      (GB 45438-2025; MiniMax, Doubao, ... write it): Label "1" = the tool itself declares the audio
+                      AI-generated (proof), "2" / "3" = possibly / suspected.
+(11 Nov) The AI-voice model ALONE is never "critical": on real-world recordings it never saw (In-the-Wild) it wrongly
+flags about 1 in 4 real voices - phone recorders with noise suppression look "synthetic" to it. Without anything
+else (AI label / tool name, scam words, voice mismatch) its verdict is "check carefully" (at most MODEL_ONLY_MAX).
 The audio is only decoded (PyAV); nothing is played or run. The verdict never says "proven real".
 """
 from __future__ import annotations
@@ -35,7 +41,17 @@ MATCH_SECONDS = 30
 MIN_MATCH_SPEECH_S = 2.0
 AI_TOOL_TAG = re.compile(r"eleven ?labs|play\.?ht|resemble\.?ai|murf\.?ai|speechify|descript|voicemod|uberduck|fakeyou|"
                          r"\btortoise\b|\bxtts\b|coqui|\bbark\b|\brvc\b|so-?vits|vall-?e|openvoice|fish ?audio|cartesia|"
-                         r"\bsuno\b|text.?to.?speech|\btts\b", re.I)
+                         r"\bsuno\b|text.?to.?speech|\btts\b|minimax|hailuo|"
+                         # (11 Nov) more voice generators / cloning tools that write their name into exports
+                         r"\bpolly\b|wavenet|neural ?voice|azure (ai )?speech|chatterbox|f5-?tts|kokoro|styletts|"
+                         r"\bpiper\b|heygen|synthesia|naturalreader|ttsmaker|speechgen|lovo\.?ai|wellsaid|"
+                         r"voice ?clon|cloned voice|voicechanger|voice changer|udio\.com|doubao|volcengine|cosyvoice|"
+                         r"seed-?tts|\bindextts\b|sesame csm", re.I)
+# (11 Nov) China's mandatory AI-content label (GB 45438-2025) in file metadata: {"Label":"1","ContentProducer":...}
+AIGC_LABEL = re.compile(r'"?label"?\s*[:=]\s*"?([123])\b', re.I)
+AIGC_PRODUCER = re.compile(r'"?contentproducer"?\s*[:=]\s*"?([^",}]{1,60})', re.I)
+AIGC_MEANING = {"1": "AI-generated", "2": "possibly AI-generated", "3": "suspected to be AI-generated"}
+MODEL_ONLY_MAX = 70          # the AI-voice model alone: "check carefully", never "critical" (see above)
 
 _CACHE: dict = {}
 
@@ -186,6 +202,40 @@ def _ind(triggered, label, desc, severity, weight, mitre=None):
             "mitre": mitre, "id": f"IND_{uuid.uuid4().hex[:12]}"}
 
 
+_FACT_TAGS = {"encoder": "encoder", "creation_time": "date", "date": "date", "com.android.manufacturer": "phone",
+              "com.android.model": "model", "com.android.version": "Android version", "com.apple.quicktime.make": "phone",
+              "com.apple.quicktime.model": "model", "handler_name": "made by", "artist": "artist", "title": "title",
+              "comment": "comment", "software": "software"}
+
+
+_CONTAINER = {"mov": "MP4 / M4A", "ogg": "OGG", "mp3": "MP3", "wav": "WAV", "flac": "FLAC", "aac": "AAC",
+              "matroska": "WebM / MKV"}
+
+
+def _facts_summary(facts: dict) -> str:
+    """(11 Nov) What the audio file says about itself, in one line (info only; never counted in the score)."""
+    if not facts:
+        return "The file's details could not be read."
+    head = ", ".join(x for x in (
+        _CONTAINER.get((facts.get("container") or "").split(",")[0], (facts.get("container") or "").split(",")[0].upper()),
+        {"mp3float": "mp3", "libopus": "opus"}.get(facts.get("codec") or "", facts.get("codec") or ""),
+        f"{facts['sampleRate'] / 1000:g} kHz" if facts.get("sampleRate") else "",
+        {1: "mono", 2: "stereo"}.get(facts.get("channels") or 0, ""),
+        f"{facts['seconds']:.1f} s" if facts.get("seconds") else "") if x)
+    seen, found = set(), []
+    for k, name in _FACT_TAGS.items():
+        v = str((facts.get("tags") or {}).get(k, "")).strip()
+        if v and name not in seen and not v.startswith("[0]"):
+            seen.add(name)
+            found.append(f"{name}: {v[:60]}")
+    if any("aigc" in k for k in (facts.get("tags") or {})):
+        found.append("AI-content (AIGC) label present")
+    if not found:
+        return (f"{head}. No recorder, app or date information - normal for WhatsApp / Telegram voice notes and "
+                "downloads (they remove it), so it proves nothing either way.")
+    return f"{head}; " + "; ".join(found) + ". Metadata is a hint, not proof: it can be copied or edited."
+
+
 def analyze_voice(file_path: str, file_name: str = "recording", subtopic_title: str = "Voice & Audio Analysis",
                   reference_path: str | None = None) -> dict:
     from app.detectors import voice_audio as V
@@ -212,13 +262,57 @@ def analyze_voice(file_path: str, file_name: str = "recording", subtopic_title: 
         floors.append(80)
         parts.append(f"its metadata names an AI voice tool ({', '.join(tag_hits)})")
 
+    # 4a. (11 Nov) C2PA Content Credentials inside the audio file (ID3 / MP4 / WAV / FLAC): the source type
+    # "trainedAlgorithmicMedia" = the tool that made it declared it AI-generated
+    try:
+        from app.detectors import video_provenance as VP
+        from app.detectors.ai_image import AI_SOURCE_TYPES
+        raw = VP._metadata(file_path)
+        has_c2pa = b"c2pa" in raw or b"jumb" in raw
+        ai_type = next((t for t in AI_SOURCE_TYPES if t in raw), None) if (has_c2pa or b"igitalSourceType" in raw) else None
+    except Exception:
+        has_c2pa, ai_type = False, None
+    va["contentCredentials"] = "ai" if ai_type else "present" if has_c2pa else None
+    if ai_type:
+        partly = ai_type == b"compositeWithTrainedAlgorithmicMedia"
+        indicators.append(_ind(True, "Content Credentials: audio " + ("partly " if partly else "") + "made with AI",
+                               f"The file's Content Credentials (C2PA) record the source as '{ai_type.decode()}': "
+                               + ("real audio changed with AI." if partly else
+                                  "the tool that made it declared it AI-generated."), "critical", 45, ["T1656"]))
+        floors.append(90 if partly else 95)
+        parts.append("its Content Credentials declare it made with AI")
+    elif has_c2pa:
+        parts.append("it carries Content Credentials that do not declare AI (check them at contentcredentials.org/verify)")
+
+    # 4b. (11 Nov) the AIGC label of China's AI-content labelling standard
+    aigc = next(((k, v) for k, v in (facts.get("tags") or {}).items() if "aigc" in k or '"contentproducer"' in v.lower()),
+                None)
+    lab = AIGC_LABEL.search(aigc[1]) if aigc else None
+    if lab:
+        prod = AIGC_PRODUCER.search(aigc[1])
+        who = f" by {prod.group(1).strip()}" if prod else ""
+        proof = lab.group(1) == "1"
+        indicators.append(_ind(True, "AI-content label in the file: " + ("made by AI" if proof else "possibly AI"),
+                               f"The file carries the official AIGC label (China's AI-content labelling standard, which "
+                               f"AI tools must embed): Label {lab.group(1)} = \"{AIGC_MEANING[lab.group(1)]}\"{who}. "
+                               + ("The tool that made it declared it AI-generated." if proof else
+                                  "The tool was not sure - check carefully."), "critical" if proof else "medium",
+                               45 if proof else 20, ["T1656"]))
+        floors.append(92 if proof else 60)
+        parts.append(f"its AIGC label says {AIGC_MEANING[lab.group(1)]}{who}")
+        va["aigcLabel"] = {"label": lab.group(1), "producer": prod.group(1).strip() if prod else None}
+
+    indicators.append(_ind(False, "File metadata (info only)", _facts_summary(facts), "low", 0, None))
+
     # 1. AI voice model
+    model_ind, model_pts = None, 0
     if not clips:
         parts.append("there is less than 1 second of speech, so the voice could not be judged")
         va["aiVoice"] = None
     else:
         ai = ai_voice_score(clips)
         va["aiVoice"] = ai and {k: ai[k] for k in ("score", "clipScores", "levels")}
+        va["clipSeconds"] = V.CLIP_S
         if ai is None:
             _, why = ai_model()
             parts.append(f"the AI-voice model is not available ({why})")
@@ -231,11 +325,11 @@ def analyze_voice(file_path: str, file_name: str = "recording", subtopic_title: 
             perf = (f" On real-world deepfakes it never saw (In-the-Wild) this model has AUC {itw['AUC']:.2f}, catches "
                     f"{itw.get('fake caught at alert', 0):.0%} at this level and wrongly flags "
                     f"{itw.get('real flagged at alert (false alarms)', 0):.0%} of real recordings.") if itw.get("AUC") else ""
+            model_ind, model_pts = len(indicators), pts
             indicators.append(_ind(pts >= 51, "AI-generated / cloned voice (voice model)",
                                    f"Voice model score {ai['score']:.2f} over {len(clips)} clip(s) of 4 s "
                                    f"(alert {lv['alert']:.2f}, check-carefully {lv['verify']:.2f}).{perf}",
                                    sev if pts >= 51 else "low", min(pts, 60), ["T1656"]))
-            floors.append(pts if pts >= 51 else 0)
             parts.append(f"the voice model scored it {ai['score']:.2f} - "
                          + ("typical of AI-generated or cloned speech" if pts >= 71 else
                             "possibly AI-generated - check carefully" if pts >= 51 else
@@ -285,6 +379,20 @@ def analyze_voice(file_path: str, file_name: str = "recording", subtopic_title: 
                                    "low", 0, None))
             parts.append("the voice matches the genuine recording (a good clone can match too)")
 
+    # (11 Nov) the model alone: "check carefully" at most; anything else that counts (an AI label / tool name, scam
+    # words, a voice mismatch) is needed for a higher verdict.
+    if model_pts >= 51:
+        backed = bool(floors)
+        if not backed and model_pts > MODEL_ONLY_MAX:
+            ind = indicators[model_ind]
+            ind["severity"] = "medium"
+            ind["label"] = "Possibly AI-generated / cloned voice (voice model) - check carefully"
+            ind["description"] += (f" Nothing else points to a fake, so this alone is 'check carefully' (at most "
+                                   f"{MODEL_ONLY_MAX}): phone recordings with noise suppression can look synthetic to it.")
+            parts.append("nothing else points to a fake, so the voice model alone says 'check carefully' - call the "
+                         "person back on a number you already know")
+            va["modelOnlyCapped"] = True
+        floors.append(model_pts if backed else min(model_pts, MODEL_ONLY_MAX))
     score = max(floors) if floors else 0
     triggered = [i for i in indicators if i["triggered"]]
     confidence = 45 + min(len(triggered) * 10, 35) + (10 if va.get("aiVoice") else 0)

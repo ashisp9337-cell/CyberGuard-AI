@@ -256,3 +256,59 @@ def test_low_scores_use_the_raw_model_output():
     assert DI._low_score(0.79, 0.9999976932934962) <= 3          # far below the warning level in model terms
     assert DI._low_score(0.999999, 0.9999976932934962) == 25     # just below it
     assert AI._low_score(0.3, 0.5941) == 0 and AI._low_score(0.58, 0.5941) > 20
+
+
+# ---- (10 Nov) Gemini's visible sparkle watermark (survives sharing, unlike metadata) ----------------------------
+def _photo_like(w=864, h=1184, seed=1):
+    """A camera-like picture: smooth shading + fine sensor noise (no real person in the test files)."""
+    rng = np.random.default_rng(seed)
+    y, x = np.mgrid[0:h, 0:w]
+    base = 150 + 60 * np.sin(x / 140.0) * np.cos(y / 170.0) + rng.normal(0, 3, (h, w))
+    return np.clip(np.stack([base, base * 0.95, base * 0.9], -1), 0, 255)
+
+
+def _with_sparkle(a, n, margin, alpha=0.5):
+    h, w = a.shape[:2]
+    t = AI._sparkle(n)[..., None] * alpha
+    y0, x0 = h - margin - n, w - margin - n
+    a = a.copy()
+    a[y0:y0 + n, x0:x0 + n] = t * 255 + (1 - t) * a[y0:y0 + n, x0:x0 + n]
+    return a
+
+
+def _save(a, path, quality=85):
+    Image.fromarray(a.astype(np.uint8)).save(path, "JPEG", quality=quality)
+    return str(path)
+
+
+@pytest.mark.parametrize("w,h,n,margin", [(864, 1184, 48, 32), (1408, 1536, 96, 64), (1024, 1024, 48, 32)])
+def test_gemini_sparkle_is_found_and_counts_as_proof(tmp_path, w, h, n, margin):
+    p = _save(_with_sparkle(_photo_like(w, h), n, margin), tmp_path / "gemini.jpg")
+    mark = AI.gemini_watermark(p)
+    assert mark and abs(mark["size"] - n) <= 0.15 * n and mark["match"] >= AI.WATERMARK_MATCH
+    prov = AI.provenance(p)
+    assert prov["proof"] and prov["findings"][0]["label"] == "Google Gemini watermark (visible sparkle)"
+
+
+def test_sparkle_survives_whatsapp_style_resize_and_recompression(tmp_path):
+    a = _with_sparkle(_photo_like(), 48, 32)
+    im = Image.fromarray(a.astype(np.uint8)).resize((648, 888), Image.BILINEAR)
+    p = tmp_path / "shared.jpg"
+    im.save(p, "JPEG", quality=70)
+    assert AI.gemini_watermark(str(p))
+
+
+@pytest.mark.parametrize("case", ["plain", "star_in_the_middle", "star_far_from_corner", "too_faint"])
+def test_no_sparkle_no_claim(tmp_path, case):
+    a = _photo_like(seed=2)
+    if case == "star_in_the_middle":                       # a sparkle that is not where Gemini puts it
+        h, w = a.shape[:2]
+        t = AI._sparkle(48)[..., None] * 0.5
+        a[h // 2:h // 2 + 48, w // 2:w // 2 + 48] = t * 255 + (1 - t) * a[h // 2:h // 2 + 48, w // 2:w // 2 + 48]
+    elif case == "star_far_from_corner":
+        a = _with_sparkle(a, 48, 150)
+    elif case == "too_faint":
+        a = _with_sparkle(a, 48, 32, alpha=0.01)
+    p = _save(a, tmp_path / "real.jpg")
+    assert AI.gemini_watermark(p) is None
+    assert not AI.provenance(p)["proof"]

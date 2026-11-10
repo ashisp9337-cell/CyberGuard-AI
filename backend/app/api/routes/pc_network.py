@@ -97,3 +97,22 @@ async def end_process(request: Request, body: EndBody, user: User = Depends(requ
                       db: Session = Depends(get_db)):
     return await _act(request, db, user, "pc.end_process", f"{body.name} (pid {body.pid})",
                       pc_actions.end_process, body.pid, body.name)
+
+
+class CutOffBody(BaseModel):
+    pid: int = Field(ge=1)
+    name: str = Field(min_length=1, max_length=260)
+    remoteAddress: str = Field(min_length=2, max_length=64)
+    localAddress: str = Field(default="", max_length=64)
+    localPort: int = Field(default=0, ge=0, le=65535)
+    remotePort: int = Field(default=0, ge=0, le=65535)
+
+
+@router.post("/cut-off")
+@limiter.limit("20/minute")
+async def cut_off(request: Request, body: CutOffBody, user: User = Depends(require_admin),
+                  db: Session = Depends(get_db)):
+    """(10 Nov) Cut one program off from one address: firewall rule for that program + drop the live connection."""
+    return await _act(request, db, user, "pc.cut_off", f"{body.name} (pid {body.pid}) -> {body.remoteAddress}",
+                      pc_actions.cut_off, body.pid, body.name, body.remoteAddress, body.localAddress,
+                      body.localPort, body.remotePort)

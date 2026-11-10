@@ -6,6 +6,7 @@ import { TextInput, TextArea } from "@/components/ui/Input";
 import { FileUploader } from "@/components/analysis/FileUploader";
 import { ScanProgressView } from "@/components/analysis/ScanProgressView";
 import { ResultView } from "@/components/analysis/ResultView";
+import { ReverseImageSearchCard } from "@/components/analysis/ReverseImageSearchCard";
 import { runAnalysis, type RunAnalysisInput } from "@/services/api/analysisService";
 import { useToast } from "@/context/ToastContext";
 import { useAppContext } from "@/context/AppContext";
@@ -78,7 +79,9 @@ export function AnalysisWorkspace({ module: mod, subtopic }: { module: Detection
 
   function handleFileSelect(f: File) {
     const ext = "." + f.name.split(".").pop()?.toLowerCase();
-    if (subtopic.acceptedFileTypes?.length && !subtopic.acceptedFileTypes.includes(ext)) {
+    // (10 Nov) a photo / video / recording saved without a name ending is read by its content in the Deepfake module
+    const noEnding = !f.name.includes(".") && subtopic.moduleId === "deepfake";
+    if (!noEnding && subtopic.acceptedFileTypes?.length && !subtopic.acceptedFileTypes.includes(ext)) {
       setError(`Unsupported file type. Accepted: ${subtopic.acceptedFileTypes.join(", ")}`);
       return;
     }
@@ -279,6 +282,11 @@ export function AnalysisWorkspace({ module: mod, subtopic }: { module: Detection
               }
             }}
           />
+          {/* (10 Nov) find the picture / video frame online: older copies and the real source */}
+          {mod.id === "deepfake" && fileBlob && !/^audio\//.test(fileBlob.type)
+            && !/\.(mp3|wav|ogg|opus|m4a|aac|flac|amr|awb|3ga)$/i.test(fileBlob.name) && (
+            <div className="mt-5"><ReverseImageSearchCard file={fileBlob} /></div>
+          )}
         </motion.div>
       )}
     </AnimatePresence>

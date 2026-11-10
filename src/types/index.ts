@@ -150,6 +150,22 @@ export interface AnalysisResult {
   insiderRisk?: InsiderRiskInfo | null;
   malwareAnalysis?: MalwareAnalysisInfo | null;
   windowsEvents?: WindowsEventsInfo | null;
+  voiceAnalysis?: VoiceAnalysisInfo | null;
+}
+
+// (11 Nov) Voice & Audio Analysis summary (backend app/services/scan_store.py _voice_analysis) - no audio, no voiceprint
+export interface VoiceAnalysisInfo {
+  speechSeconds: number | null;
+  clipsScored: number;
+  clipSeconds?: number | null;
+  aiVoice: { score: number | null; alert: number | null; verify: number | null; clipScores?: (number | null)[] } | null;
+  aiVoiceUnavailable?: string | null;
+  speech: { language: string; transcriptExcerpt: string; contentScore: number | null } | null;
+  voiceMatch: { done: boolean; similarity: number | null; mismatchLevel: number | null; match: boolean | null;
+                reason: string | null } | null;
+  modelOnlyCapped?: boolean;
+  aigcLabel?: { label: string; producer: string | null } | null;
+  contentCredentials?: "ai" | "present" | null;
 }
 
 // Windows event-log incidents (backend app/services/scan_store.py _windows_events)

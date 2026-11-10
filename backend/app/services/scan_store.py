@@ -95,8 +95,17 @@ def _voice_analysis(va) -> dict | None:
     vm = va.get("voiceMatch") if isinstance(va.get("voiceMatch"), dict) else None
     lv = (ai or {}).get("levels") if isinstance((ai or {}).get("levels"), dict) else {}
     return {"speechSeconds": _num(va.get("speechSeconds")), "clipsScored": _int(va.get("clipsScored")),
-            "aiVoice": {"score": _num(ai.get("score")), "alert": _num(lv.get("alert")), "verify": _num(lv.get("verify"))}
+            "aiVoice": {"score": _num(ai.get("score")), "alert": _num(lv.get("alert")), "verify": _num(lv.get("verify")),
+                        # (11 Nov) per-clip scores for the timeline chart (at most 15 numbers)
+                        "clipScores": [_num(c) for c in (ai.get("clipScores") or [])[:15]
+                                       if isinstance(c, (int, float))]}
             if ai else None,
+            "clipSeconds": _num(va.get("clipSeconds")),
+            "modelOnlyCapped": bool(va.get("modelOnlyCapped")),
+            "aigcLabel": {"label": str((va.get("aigcLabel") or {}).get("label") or "")[:2],
+                          "producer": str((va.get("aigcLabel") or {}).get("producer") or "")[:60] or None}
+            if isinstance(va.get("aigcLabel"), dict) else None,
+            "contentCredentials": va.get("contentCredentials") if va.get("contentCredentials") in ("ai", "present") else None,
             "aiVoiceUnavailable": str(va["aiVoiceUnavailable"])[:200] if va.get("aiVoiceUnavailable") else None,
             "speech": {"language": str(sp.get("language") or "")[:10], "transcriptExcerpt": str(sp.get("transcriptExcerpt") or "")[:200],
                        "contentScore": _int(sp.get("contentScore")) if sp.get("contentScore") is not None else None}
