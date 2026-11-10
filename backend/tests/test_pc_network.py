@@ -141,3 +141,153 @@ def test_setup_hint_names_the_python_that_runs_cyberguard(monkeypatch):
     monkeypatch.setattr(PC.sys, "executable", os.path.join(backend, "my venv", "python"))
     assert f'& "{os.path.join("my venv", "python")}" -m pip' in PC.install_hint()
     assert backend not in PC.install_hint()          # relative path only: the user / folder names stay hidden
+
+
+# ---- (10 Nov) open / closed ports, who is on the other side, actions ----------------------------------------------
+def test_port_status_lists_open_and_closed_ports(fake):
+    fake([conn("0.0.0.0", 3389, status="LISTEN", pid=4), conn("127.0.0.1", 5432, status="LISTEN", pid=200),
+          conn("192.168.1.10", 51000, "142.250.183.14", 443, pid=100)])
+    s = PC.snapshot()
+    st = {p["port"]: p for p in s["portStatus"]}
+    assert st[3389]["state"] == "open" and st[3389]["scope"] == "all networks" and st[3389]["risk"] == "high"
+    assert st[5432]["state"] == "open" and st[5432]["risk"] == "low"           # this computer only
+    assert st[4444]["state"] == "closed" and st[22]["state"] == "closed"
+    c = s["connections"][0]
+    assert c["remoteService"] == "secure web (HTTPS)" and c["where"] == "the internet"
+    assert c["localAddress"] == "192.168.1.10" and c["localPort"] == 51000
+    assert "ESTABLISHED" in s["stateMeaning"] and "actions" in s and "blocked" in s
+
+
+def test_owner_names_come_from_reverse_dns_suffixes():
+    assert PC.owner_of("bom12s08-in-f14.1e100.net") == "Google"
+    assert PC.owner_of("ec2-3-1-2-3.ap-south-1.compute.amazonaws.com.") == "Amazon Web Services"
+    assert PC.owner_of("evil1e100.net") == ""                                   # a suffix, not just text inside
+
+
+@pytest.fixture()
+def actions(monkeypatch, tmp_path):
+    """Windows + administrator, with netsh and the state file faked (no firewall is touched)."""
+    from app.services import pc_actions as A
+    calls = []
+
+    class Done:
+        def __init__(self, rc=0, out="Ok."):
+            self.returncode, self.stdout, self.stderr = rc, out, ""
+    monkeypatch.setattr(A, "is_windows", lambda: True)
+    monkeypatch.setattr(A, "is_admin", lambda: True)
+    monkeypatch.setattr(A, "STATE_FILE", str(tmp_path / "pc_blocks.json"))
+    monkeypatch.setattr(A, "_netsh", lambda args: calls.append(args) or Done())
+    return A, calls
+
+
+def test_block_and_unblock_a_port_and_an_address(actions):
+    A, calls = actions
+    assert A.block_port(4444)["ok"]
+    assert calls[-1] == ["add", "rule", "name=CyberGuard block port TCP 4444", "dir=in", "action=block",
+                         "protocol=TCP", "localport=4444"]
+    assert A.block_address("45.9.20.1")["ok"]
+    assert ["add", "rule", "name=CyberGuard block address 45.9.20.1", "dir=out", "action=block",
+            "remoteip=45.9.20.1"] in calls
+    assert {b["name"] for b in A.list_blocks()} == {"CyberGuard block port TCP 4444", "CyberGuard block address 45.9.20.1"}
+    assert A.block_port(4444)["message"].startswith("Already blocked")
+    assert A.unblock("CyberGuard block port TCP 4444")["ok"]
+    assert [b["name"] for b in A.list_blocks()] == ["CyberGuard block address 45.9.20.1"]
+    with pytest.raises(A.ActionError):
+        A.unblock("Core Networking - DNS (UDP-Out)")          # only rules CyberGuard made itself
+
+
+@pytest.mark.parametrize("bad", ["45.9.20.1; netsh advfirewall reset", "127.0.0.1", "0.0.0.0", "not-an-ip", "::1"])
+def test_only_real_outside_addresses_can_be_blocked(actions, bad):
+    A, calls = actions
+    with pytest.raises(A.ActionError):
+        A.block_address(bad)
+    assert calls == []
+
+
+def test_actions_are_off_in_production_and_without_admin(actions, monkeypatch):
+    A, calls = actions
+    from app.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "ENVIRONMENT", "production")
+    with pytest.raises(A.ActionError) as e:
+        A.block_port(3389)
+    assert e.value.status == 403 and not A.capabilities()["enabled"]
+    monkeypatch.setattr(get_settings(), "ENVIRONMENT", "development")
+    monkeypatch.setattr(A, "is_admin", lambda: False)
+    with pytest.raises(A.ActionError) as e:
+        A.block_port(3389)
+    assert "as administrator" in e.value.message and calls == []
+
+
+def test_end_process_refuses_windows_core_cyberguard_and_a_changed_pid(actions, monkeypatch):
+    A, _ = actions
+    import os
+
+    class P:
+        def __init__(self, pid):
+            if pid == 999:
+                raise psutil.NoSuchProcess(pid)
+            self.pid = pid
+            self.ended = False
+
+        def name(self):
+            return {700: "lsass.exe", 701: "postgres.exe", 702: "nc.exe"}.get(self.pid, "python.exe")
+
+        def parents(self):
+            return []
+
+        def children(self, recursive=False):
+            return []
+
+        def terminate(self):
+            ended.append(self.pid)
+
+        def wait(self, timeout=None):
+            return 0
+    ended = []
+    monkeypatch.setattr(psutil, "Process", P)
+    for pid, name in ((700, "lsass.exe"), (701, "postgres.exe"), (os.getpid(), "python.exe"), (4, "System")):
+        with pytest.raises(A.ActionError):
+            A.end_process(pid, name)
+    with pytest.raises(A.ActionError) as e:
+        A.end_process(702, "chrome.exe")                     # the id now belongs to another program
+    assert "refresh" in e.value.message
+    with pytest.raises(A.ActionError):
+        A.end_process(999, "nc.exe")
+    assert ended == []
+    assert A.end_process(702, "nc.exe")["ok"] and ended == [702]
+
+
+def test_close_connection_needs_ipv4(actions):
+    A, _ = actions
+    with pytest.raises(A.ActionError) as e:
+        A.close_connection("fe80::1", 50000, "2404:6800::1", 443)
+    assert "IPv4" in e.value.message
+
+
+def test_action_api_is_admin_only_and_logged(admin_client, actions, monkeypatch):
+    A, calls = actions
+    r = admin_client.post("/api/pc-network/block-port", json={"port": 4444, "protocol": "TCP"})
+    assert r.status_code == 200 and r.json()["ok"]
+    r = admin_client.post("/api/pc-network/block-address", json={"address": "127.0.0.1"})
+    assert r.status_code == 400 and "own / special" in r.json()["error"]["message"]
+    r = admin_client.post("/api/pc-network/block-port", json={"port": 70000})
+    assert r.status_code == 422
+    log = admin_client.get("/api/audit").json()
+    items = log.get("items", log) if isinstance(log, dict) else log
+    acts = [i["action"] for i in items]
+    assert "pc.block_port" in acts and "pc.block_address" in acts
+    from app.core.config import get_settings
+    monkeypatch.setattr(get_settings(), "ADMIN_EMAILS", "someone-else@example.com")
+
+
+def test_end_button_is_not_offered_for_protected_programs(fake):
+    import os
+    FakeProc.PROCS[os.getpid()] = ("python.exe", "")
+    try:
+        fake([conn("0.0.0.0", 5432, status="LISTEN", pid=200), conn("0.0.0.0", 4444, status="LISTEN", pid=300),
+              conn("127.0.0.1", 8000, status="LISTEN", pid=os.getpid()), conn("0.0.0.0", 445, status="LISTEN", pid=4)])
+        s = PC.snapshot()
+        can = {r["program"]: r["canEnd"] for r in s["listening"]}
+        assert can == {"postgres.exe": False, "invoice.exe": True, "python.exe": False, "System": False}
+    finally:
+        FakeProc.PROCS.pop(os.getpid(), None)

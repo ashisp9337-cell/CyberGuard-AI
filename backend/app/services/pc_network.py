@@ -2,8 +2,9 @@
 Live PC network monitor (6 Nov): this computer's OPEN PORTS (programs waiting for connections) and its LIVE NETWORK
 CONNECTIONS, with the suspicious ones explained in plain words.
 
-READ-ONLY by design: nothing is closed, blocked, killed or changed, nothing is sent anywhere, and nothing is stored -
-it is a fresh look every time the page asks. Program COMMAND LINES are never read (they can hold passwords / tokens);
+Looking is READ-ONLY: nothing is closed, blocked, killed or changed, nothing is sent anywhere, and nothing is stored -
+it is a fresh look every time the page asks. (10 Nov) Changing things is a separate, explicit step: the administrator
+presses Block / Close / End on the page (app/services/pc_actions.py). Program COMMAND LINES are never read (they can hold passwords / tokens);
 only the program's name and the folder it runs from.
 
 What is flagged, and why (facts, not guesses - each one is a thing a security check would tell you to look at):
@@ -52,6 +53,29 @@ EXPOSED = {
     135: ("Windows RPC", "medium", "share only on trusted networks"),
 }
 _WINDOWS_BUILTIN = {135, 139, 445}
+
+# (10 Nov) What the OTHER side's port usually means - so "142.250.183.14:443" reads "secure web (HTTPS)".
+REMOTE_SERVICE = {80: "web (HTTP, not encrypted)", 443: "secure web (HTTPS)", 53: "DNS (looks up website names)",
+                  853: "DNS over TLS", 123: "time sync (NTP)", 25: "mail sending (SMTP)", 465: "mail sending (SMTPS)",
+                  587: "mail sending (SMTP)", 993: "mail inbox (IMAPS)", 995: "mail inbox (POP3S)", 22: "SSH remote login",
+                  3389: "Remote Desktop (RDP)", 5228: "Google push notifications", 5222: "chat / WhatsApp (XMPP)",
+                  5223: "Apple push notifications", 3478: "voice / video call (STUN)", 19302: "Google Meet / call (STUN)",
+                  1883: "IoT messages (MQTT)", 8883: "IoT messages (MQTT over TLS)", 5432: "PostgreSQL database",
+                  3306: "MySQL database", 8080: "web (HTTP, other port)", 8443: "secure web (other port)",
+                  7680: "Windows Update sharing (Delivery Optimization)"}
+# (10 Nov) What each connection state means, in plain words (shown on the PC Network page)
+STATE_MEANING = {
+    "ESTABLISHED": "connected and able to exchange data right now",
+    "SYN_SENT": "this PC is trying to connect and has no answer yet (many of these = blocked site, or a program "
+                "scanning the network)",
+    "SYN_RECV": "another computer is connecting to this PC",
+    "TIME_WAIT": "closed a moment ago; Windows keeps the entry about 2 minutes, then it disappears",
+    "CLOSE_WAIT": "the other side closed it; the program here has not closed its end yet",
+    "FIN_WAIT1": "closing", "FIN_WAIT2": "closing", "LAST_ACK": "closing", "CLOSING": "closing",
+    "LISTEN": "waiting for connections (an open port)", "UDP": "UDP message stream (no connection state)",
+}
+# (10 Nov) Ports whose OPEN / CLOSED state is always shown, so you can see at a glance what is shut
+WATCHED_PORTS = sorted(set(EXPOSED) | {1337, 4444, 6667, 31337, 12345, 54321, 80, 443})
 _RISKY_DIRS = re.compile(r"[\\/](?:appdata[\\/]local[\\/]temp|windows[\\/]temp|downloads|users[\\/]public)[\\/]|"
                          r"^/(?:tmp|var/tmp|dev/shm)/", re.I)
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
@@ -219,7 +243,13 @@ def snapshot(flagged_ips: set[str] | None = None) -> dict:
     except psutil.AccessDenied:
         return {"available": False, "reason": "This system only lists network connections to an administrator "
                                               "(macOS needs the backend started with sudo)."}
-    return judge_connections(rows, flagged_ips)
+    out = judge_connections(rows, flagged_ips)
+    add_remote_names(out["connections"])           # (10 Nov) who is on the other side (this PC only, not agents)
+    from app.services import pc_actions
+    out["actions"] = pc_actions.capabilities()     # (10 Nov) can this backend block / close / end things?
+    out["blocked"] = pc_actions.list_blocks()
+    pc_actions.mark_endable(out)
+    return out
 
 
 def judge_connections(rows: list[dict], flagged_ips: set[str] | None = None) -> dict:
@@ -267,8 +297,10 @@ def judge_connections(rows: list[dict], flagged_ips: set[str] | None = None) -> 
             continue
         if not rip:
             continue
-        row = {"protocol": proto, "local": f"{lip}:{lport}", "remote": rip, "remotePort": rport, "status": status,
-               "program": proc["name"], "pid": proc["pid"], "outside": not _is_local(rip)}
+        row = {"protocol": proto, "local": f"{lip}:{lport}", "localAddress": lip, "localPort": lport, "remote": rip,
+               "remotePort": rport, "status": status, "program": proc["name"], "pid": proc["pid"],
+               "outside": not _is_local(rip), "remoteService": REMOTE_SERVICE.get(rport, ""),
+               "where": _where(rip)}
         active.append(row)
         if rport in BACKDOOR_PORTS or (lport in BACKDOOR_PORTS and status == "ESTABLISHED"):
             port = rport if rport in BACKDOOR_PORTS else lport
@@ -293,6 +325,23 @@ def judge_connections(rows: list[dict], flagged_ips: set[str] | None = None) -> 
     active.sort(key=lambda r: (not r["outside"], r["program"].lower(), r["remote"]))
     remote = Counter(r["remote"] for r in active if r["outside"])
     progs = Counter(r["program"] for r in active)
+    open_tcp = {}
+    for r in listening:
+        if r["protocol"] == "TCP":
+            cur = open_tcp.get(r["port"])
+            if cur is None or _WIDER[r["scope"]] > _WIDER[cur["scope"]]:
+                open_tcp[r["port"]] = r
+    port_status = []
+    for port in WATCHED_PORTS:
+        r = open_tcp.get(port)
+        name = EXPOSED.get(port, ("", "", ""))[0] or (f"backdoor / attack-tool port" if port in BACKDOOR_PORTS
+                                                      else REMOTE_SERVICE.get(port, ""))
+        port_status.append({"port": port, "service": name, "state": "open" if r else "closed",
+                            "scope": r["scope"] if r else "", "program": r["program"] if r else "",
+                            "pid": r["pid"] if r else None,
+                            "risk": ("high" if port in BACKDOOR_PORTS or (r["scope"] != "this computer only"
+                                                                        and EXPOSED.get(port, ("", ""))[1] == "high")
+                                     else "medium" if r["scope"] != "this computer only" else "low") if r else "none"})
     return {
         "available": True, "takenAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "seconds": round(time.time() - t0, 2),
@@ -303,11 +352,89 @@ def judge_connections(rows: list[dict], flagged_ips: set[str] | None = None) -> 
                     "high": sum(1 for f in findings if f["severity"] == "high"),
                     "medium": sum(1 for f in findings if f["severity"] == "medium")},
         "findings": findings, "listening": listening[:MAX_CONNECTIONS], "connections": active[:MAX_CONNECTIONS],
+        "portStatus": port_status, "stateMeaning": STATE_MEANING,
         "truncated": len(active) > MAX_CONNECTIONS,
         "topRemote": [{"address": a, "connections": n} for a, n in remote.most_common(8)],
         "topPrograms": [{"program": p, "connections": n} for p, n in progs.most_common(8)],
-        "note": "Read-only view: nothing was closed, blocked or changed, and nothing was saved.",
+        "note": "A fresh look: nothing was closed, blocked or saved unless you pressed an action button.",
     }
+
+
+_WIDER = {"this computer only": 0, "your network": 1, "all networks": 2}
+
+
+def _where(ip: str) -> str:
+    """(10 Nov) Where the other side of a connection is, in plain words."""
+    try:
+        a = ipaddress.ip_address(ip.split("%")[0])
+    except ValueError:
+        return ""
+    if a.is_loopback:
+        return "this computer (a program talking to another program on this PC)"
+    if a.is_link_local:
+        return "this local network segment (auto-configured address)"
+    if _is_local(ip):
+        return "your local network (router, another PC, phone, printer)"
+    return "the internet"
+
+
+# (10 Nov) The organisation behind a remote address, read from its reverse-DNS name (the name its owner gave it).
+_OWNERS = (("1e100.net", "Google"), ("google.com", "Google"), ("googleusercontent.com", "Google Cloud"),
+           ("amazonaws.com", "Amazon Web Services"), ("cloudfront.net", "Amazon CloudFront"),
+           ("akamaitechnologies.com", "Akamai (content delivery)"), ("akamaiedge.net", "Akamai (content delivery)"),
+           ("msedge.net", "Microsoft"), ("microsoft.com", "Microsoft"), ("windows.net", "Microsoft Azure"),
+           ("azure.com", "Microsoft Azure"), ("live.com", "Microsoft"), ("office.com", "Microsoft 365"),
+           ("fbcdn.net", "Meta (Facebook / Instagram / WhatsApp)"), ("facebook.com", "Meta"),
+           ("whatsapp.net", "WhatsApp"), ("cloudflare.com", "Cloudflare"), ("github.com", "GitHub"),
+           ("apple.com", "Apple"), ("icloud.com", "Apple iCloud"), ("telegram.org", "Telegram"),
+           ("jio.com", "Reliance Jio"), ("airtel.in", "Airtel"), ("bsnl.in", "BSNL"), ("akamai.net", "Akamai"),
+           ("fastly.net", "Fastly (content delivery)"), ("linode.com", "Akamai Linode cloud"),
+           ("digitalocean.com", "DigitalOcean cloud"), ("hetzner.com", "Hetzner cloud"), ("ovh.net", "OVH cloud"))
+_NAME_CACHE: dict = {}          # ip -> (name, owner, time)
+NAME_TTL = 600
+
+
+def owner_of(name: str) -> str:
+    n = (name or "").lower().rstrip(".")
+    for suffix, owner in _OWNERS:
+        if n == suffix or n.endswith("." + suffix):
+            return owner
+    return ""
+
+
+def add_remote_names(rows: list[dict], budget_seconds: float = 2.0, max_new: int = 40) -> None:
+    """Reverse-DNS names for internet addresses (cached 10 minutes, at most `max_new` new look-ups and ~2 seconds per
+    refresh, run in parallel). Unknown names stay empty - the address is still shown."""
+    import socket
+    from concurrent.futures import ThreadPoolExecutor, wait
+    now = time.time()
+    todo = []
+    for r in rows:
+        ip = r.get("remote")
+        if not ip or not r.get("outside"):
+            continue
+        hit = _NAME_CACHE.get(ip)
+        if hit and now - hit[2] < NAME_TTL:
+            continue
+        if ip not in todo:
+            todo.append(ip)
+    todo = todo[:max_new]
+
+    def look(ip):
+        try:
+            name = socket.gethostbyaddr(ip)[0]
+        except (OSError, UnicodeError):
+            name = ""
+        _NAME_CACHE[ip] = (name, owner_of(name), time.time())
+
+    if todo:
+        ex = ThreadPoolExecutor(max_workers=min(16, len(todo)))
+        wait([ex.submit(look, ip) for ip in todo], timeout=budget_seconds)
+        ex.shutdown(wait=False, cancel_futures=True)
+    for r in rows:
+        hit = _NAME_CACHE.get(r.get("remote", ""))
+        if hit:
+            r["remoteName"], r["owner"] = hit[0], hit[1]
 
 
 def _is_local(ip: str) -> bool:

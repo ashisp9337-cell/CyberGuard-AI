@@ -78,3 +78,7 @@ backend/demo_samples/
 agent/agent_config.json
 agent/agent_state.json
 agent/*.tmp
+
+# (10 Nov) Windows Firewall rules made from the PC Network page (this PC only)
+backend/pc_blocks.json
+backend/pc_blocks.json.tmp

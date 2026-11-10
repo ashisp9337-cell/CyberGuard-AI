@@ -107,6 +107,9 @@ class Settings(BaseSettings):
 
     # ---- Automatic protection (background watchers, see app/automation/) ----
     AUTOMATION_ENABLED: bool = True        # master switch; each watcher also has an on/off in Settings
+    # (10 Nov) PC Network page: let the administrator block a port / an address with Windows Firewall, close a live
+    # connection or end a program ON THE COMPUTER THE BACKEND RUNS ON. Always off in production (a cloud server).
+    PC_ACTIONS_ENABLED: bool = True
     AUTOMATION_USER_EMAIL: str = ""        # CyberGuard account that receives automatic findings (default: first account)
     # Gmail inbox (read-only IMAP). Defaults to the SMTP login used for email alerts.
     IMAP_HOST: str = "imap.gmail.com"
