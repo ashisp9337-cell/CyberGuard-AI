@@ -117,6 +117,66 @@ def _add_link(ev: EmailEvent, url: str, text: str, source: str, seen: set):
     ev.links.append(Link(url=url, display_text=text or "", source=source))
 
 
+# (10 Nov) An e-mail COPIED FROM A MAIL APP'S SCREEN (Gmail, Outlook, Yahoo ...) has no raw headers - it starts with
+#   DigiLocker <noreply@digilocker.gov.in>
+#   Sun 8 Nov, 13:40 (2 days ago)
+#   to me
+# The sender line is the most important fact of an e-mail (real domain or look-alike?), so it is recognised and used.
+_SENDER_LINE_RE = re.compile(r"^\s*(?:from:\s*)?(?P<name>[^<>\n]{0,80}?)\s*<(?P<addr>[^<>@\s]{1,64}@[^<>@\s]{1,190}\.[A-Za-z]{2,24})>"
+                             r"\s*(?:\(.{0,40}\))?\s*(?:via\s+[\w.-]{1,80}\.[A-Za-z]{2,24})?\s*(?:unsubscribe)?\s*$", re.I)
+_BARE_ADDR_RE = re.compile(r"^\s*(?:from:\s*)?(?P<addr>[^<>@\s]{1,64}@[^<>@\s]{1,190}\.[A-Za-z]{2,24})"
+                           r"\s*(?:via\s+[\w.-]{1,80}\.[A-Za-z]{2,24})?\s*(?:unsubscribe)?\s*$", re.I)
+# (10 Nov) Gmail shows "<sender> via amazonses.com" and an "Unsubscribe" link on the sender line: both are copied.
+# Wording that only e-mails use - a body copied WITHOUT the sender line is still an e-mail.
+MAIL_ONLY_WORDS_RE = re.compile(r"\b(?:(?:do not|don'?t|please do not) reply to this (?:e-?mail|mail)|"
+                                r"this (?:is an? )?(?:auto(?:matically)?[- ]generated|system[- ]generated|computer[- ]generated)"
+                                r" (?:e-?mail|mail)|this e-?mail (?:was|is|has been) (?:sent|intended|generated)|"
+                                r"you (?:are )?receiv(?:ed|ing) this e-?mail|unsubscribe from (?:these|our|this) (?:e-?mails?|mailing))", re.I)
+_TO_LINE_RE = re.compile(r"^\s*to\s*:?\s+(me\b.*|[^\n]{1,120}@[^\n]{1,120}|[\w .,'&-]{1,80})\s*$", re.I)
+_DATE_LINE_RE = re.compile(r"^\s*(?:(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*,?\s+.{0,40}\d{1,2}:\d{2}.*|"
+                           r"\d{1,2}[\s/.-](?:\d{1,2}|[a-z]{3,9})[\s/.-]\d{2,4},?\s+\d{1,2}:\d{2}.*|"
+                           r".{0,40}\d{1,2}:\d{2}\s*(?:am|pm)?\s*\(\s*\d+\s+(?:minutes?|hours?|days?|weeks?)\s+ago\s*\).*)$", re.I)
+_MAIL_WORDS_RE = re.compile(r"\b(?:this|the above) e-?mail\b|\breply to this e-?mail\b|\bauto(?:matically)?[- ]generated "
+                            r"e-?mail\b|\bunsubscribe\b", re.I)
+_LABEL_LINES = {"inbox", "spam", "updates", "promotions", "social", "important", "external", "starred"}
+
+
+def pasted_mail_view(text: str) -> tuple[str, str, str] | None:
+    """(sender, subject, body) when the text was copied from a mail app's reading view, else None.
+
+    Needs a sender line ("Name <address>", or a bare address) within the first 4 lines AND one more mail sign: a
+    recipient line ("to me"), a date line ("Sun 8 Nov, 13:40 (2 days ago)") or e-mail wording ("Do not reply to this
+    email", "unsubscribe"). A short SMS that merely mentions an address does not qualify."""
+    if not text or _looks_like_raw_email(text):
+        return None
+    lines = text.strip().splitlines()
+    first = [(i, ln) for i, ln in enumerate(lines[:12]) if ln.strip()][:4]
+    hit = None
+    for i, ln in first:
+        m = _SENDER_LINE_RE.match(ln) or _BARE_ADDR_RE.match(ln)
+        if m:
+            hit = (i, m)
+            break
+    if hit is None:
+        return None
+    idx, m = hit
+    head = lines[idx + 1: idx + 6]
+    signs = sum([any(_TO_LINE_RE.match(l) for l in head), any(_DATE_LINE_RE.match(l) for l in head),
+                 bool(_MAIL_WORDS_RE.search(text))])
+    if signs < 1:
+        return None
+    name = (m.groupdict().get("name") or "").strip().strip('"').strip()
+    addr = m.group("addr").strip()
+    sender = f"{name} <{addr}>" if name else addr
+    before = [l.strip() for l in lines[:idx] if l.strip() and l.strip().lower() not in _LABEL_LINES]
+    subject = before[0][:200] if before else ""
+    rest = lines[idx + 1:]
+    k = 0
+    while k < len(rest) and k < 6 and (not rest[k].strip() or _TO_LINE_RE.match(rest[k]) or _DATE_LINE_RE.match(rest[k])):
+        k += 1                                          # drop the date / "to me" lines under the sender
+    return sender, subject, "\n".join(rest[k:]).strip()
+
+
 def _looks_like_raw_email(text: str) -> bool:
     """True when pasted text starts with real mail headers (From:, Subject: ...)."""
     first = [l for l in text.lstrip().splitlines()[:15] if l.strip()]
@@ -132,6 +192,9 @@ def parse_email(raw: bytes | str) -> EmailEvent:
     """Parse .eml bytes, a pasted raw email, or plain body text."""
     if isinstance(raw, str):
         if not _looks_like_raw_email(raw):
+            view = pasted_mail_view(raw)            # (10 Nov) copied from a mail app's screen: keep the sender
+            if view:
+                return parse_body_only(view[2], sender=view[0], subject=view[1])
             return parse_body_only(raw)
         raw = raw.encode("utf-8", errors="ignore")
 

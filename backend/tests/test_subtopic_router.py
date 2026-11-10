@@ -357,3 +357,39 @@ def test_api_explicit_subtopic_unchanged(auth_client):
         "textInput": SSH_LOG})
     body = r.json()
     assert r.status_code == 200 and body["subtopicId"] == "password-spraying" and body["routing"] is None
+
+
+# (10 Nov) e-mails COPIED FROM A MAIL APP'S SCREEN have no raw headers; they must still go to the e-mail pipeline
+# (found on a real DigiLocker sign-in code e-mail pasted from Gmail: auto-detect sent it to SMS, which scored 70).
+GMAIL_COPY = ("DigiLocker <noreply@digilocker.gov.in>\nSun 8 Nov, 13:40 (2 days ago)\nto me\n\nDear DigiLocker User,\n\n"
+              "You are attempting to sign in to your DigiLocker account using the registered mobile number ******1111.\n\n"
+              "Your One-Time Password (OTP) for validating your DigiLocker login generated at 2026-11-08 13:40:16 is:\n\n"
+              "123456\nThis OTP is valid for 10 minutes and not to be shared with anyone.\n"
+              "If you did not initiate this request, please contact DigiLocker support.\n\nRegards,\nDigiLocker Team\n\n"
+              "This is an auto-generated email. Do not reply to this email.")
+
+
+def test_email_copied_from_gmail_goes_to_the_email_pipeline(spies):
+    route("phishing", text=GMAIL_COPY)
+    assert called(spies) == ["analyze_email"]
+
+
+def test_short_messages_that_mention_an_address_stay_messages(spies):
+    for sms in ("Send your CV to hr@acme-careers.example before Friday to get the job offer",
+                "Your parcel is held. Mail support@indiapost-help.example now",
+                "hr@acme.example\nSend your resume today"):            # an address, but no date / recipient / e-mail words
+        spies["analyze_text"].calls.clear()
+        route("phishing", text=sms)
+        assert called(spies) == ["analyze_text"], sms
+
+
+def test_pasted_mail_view_reads_the_sender_and_drops_the_screen_lines():
+    from app.email_pipeline.parser import parse_email, pasted_mail_view
+    sender, subject, body = pasted_mail_view(GMAIL_COPY)
+    assert sender == "DigiLocker <noreply@digilocker.gov.in>" and body.startswith("Dear DigiLocker User,")
+    ev = parse_email(GMAIL_COPY)
+    assert ev.from_address == "noreply@digilocker.gov.in" and ev.from_domain == "digilocker.gov.in"
+    subj = pasted_mail_view("Your sign-in code\nInbox\nAcme <no-reply@acme.example>\n10:42 AM (5 minutes ago)\nto me\n\nHi")
+    assert subj[1] == "Your sign-in code" and subj[2] == "Hi"
+    assert pasted_mail_view("hi there, call me") is None
+    assert pasted_mail_view("From: a@b.example\nSubject: x\n\nbody") is None             # real headers: parsed normally

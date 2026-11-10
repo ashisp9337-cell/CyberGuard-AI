@@ -220,3 +220,29 @@ def test_brand_detector_reports_when_the_sender_is_the_brand():
     text = "Swiggy: your order is on its way"
     assert analyze_brand_impersonation(text, {"senderEmail": "no-reply@swiggy.com"}, "x")["senderVerifiedBrand"]
     assert not analyze_brand_impersonation(text, {"senderEmail": "no-reply@swlggy.com"}, "x")["senderVerifiedBrand"]
+
+
+def test_genuine_sign_in_code_email_copied_from_gmail_is_safe_but_a_look_alike_is_not():
+    """(10 Nov) a real DigiLocker sign-in code e-mail, pasted from Gmail's screen, scored 46-49 ("credential request")
+    and auto-detect called it an SMS (70). It GIVES a code and says it is "not to be shared" - a genuine code delivery."""
+    from app.email_pipeline import analyze_email
+    from test_subtopic_router import GMAIL_COPY
+    good = analyze_email(GMAIL_COPY, network=False)
+    assert good["riskScore"] <= 25 and good["email"]["from_address"] == "noreply@digilocker.gov.in"
+    fake = GMAIL_COPY.replace("noreply@digilocker.gov.in", "noreply@digilocker-verify.top").replace(
+        "If you did not initiate this request, please contact DigiLocker support.",
+        "To keep your account active, reply to this email with the OTP and your Aadhaar number within 30 minutes.")
+    bad = analyze_email(fake, network=False)
+    assert bad["riskScore"] >= 51, bad["explanation"]
+
+
+def test_otp_notice_wording_variants():
+    from app.detectors.phishing import otp_notice
+    assert otp_notice("Your One-Time Password (OTP) for validating your login generated at 2026-11-08 13:40:16 is:\n\n"
+                      "123456\nThis OTP is valid for 10 minutes and not to be shared with anyone.")
+    assert otp_notice("123456 is your OTP for login. It must not be shared.")
+    for scam in ("Your OTP is 482913. Do not share it. Verify now at http://sbi-kyc-update.top",
+                 "your OTP for KYC is 482913 and it is not to be shared. Please reply with the OTP to our agent.",
+                 "Your one-time password is: 552190. Please enter the code on the link we sent. Do not share.",
+                 "I sent you a code by mistake, it is not to be shared but please forward me the 6 digit code now"):
+        assert not otp_notice(scam), scam

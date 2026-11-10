@@ -72,7 +72,7 @@ _OTP = (_P(r"(ओटीपी|\botp\b|पिन|\bpin\b|\bcvv\b|कोड|\bcode
 _OTP_SAFE = _P(r"(न |ना |मत |नहीं|कभी|किसी को|किसी के साथ|\b(na|mat|nahi|kabhi|kisi)\b|ନାହିଁ|କାହାକୁ)")
 # 4. lottery / prize / KBC - pay a fee or tax first
 _LOTTERY = (_P(r"(लॉटरी|लाटरी|इनाम|पुरस्कार राशि|कौन बनेगा करोड़पति|केबीसी|लकी ड्रा|जीता है|जीते हैं|\b(lottery|inaam|inam|"
-               r"kbc|lucky draw|jeeta hai|jeet gaye|you (have )?won|winner)\b|ଲଟେରୀ|ପୁରସ୍କାର)"),
+               r"kbc|lucky draw|jeeta hai|jeet gaye|you (have )?won(?!\s*['’]\s*t\b)|winner)\b|ଲଟେରୀ|ପୁରସ୍କାର)"),   # not "you won't"
             # a fee / tax first, or "call the manager on WhatsApp and give your lottery number" (the fee comes on the call)
             _P(r"(शुल्क|फीस|टैक्स|प्रोसेसिंग|रजिस्ट्रेशन|जमा कर|पैसे भेज|लॉटरी नंबर|मैनेजर|व्हाट्सएप कॉल|\b(fee|fees|tax|"
                r"jama kar\w*|deposit|processing|registration|paise bhej\w*|lottery number|(bank )?manager|whatsapp call)\b|ଶୁଳ୍କ|ଜମା)"),

@@ -55,14 +55,15 @@ export async function fetchIncidentSummary(): Promise<IncidentSummary> {
   return apiClient.get<IncidentSummary>("/api/incidents/summary");
 }
 
-export async function updateIncidentStatus(id: string, status: IncidentStatus, note = ""): Promise<Incident> {
-  return apiClient.patch<Incident>(`/api/incidents/${id}`, { status, note });
+export async function updateIncidentStatus(id: string, status: IncidentStatus, note = ""): Promise<Incident & { learned?: number }> {
+  return apiClient.patch<Incident & { learned?: number }>(`/api/incidents/${id}`, { status, note });
 }
 
 export interface BulkResult {
   matched: number;
   changed: number;
   status: IncidentStatus;
+  learned?: number;
   summary: IncidentSummary;
 }
 

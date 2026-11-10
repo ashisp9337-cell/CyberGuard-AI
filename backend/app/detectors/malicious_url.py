@@ -157,6 +157,8 @@ def _live_indicators(url: str, registry_out: dict | None = None) -> list[dict]:
         add(True, "Domain does not resolve", f"'{host}' does not resolve to any real server right now.", "critical", 30)
     if whois_r["status"] == "ok":
         age = whois_r["age_days"]
+        if registry_out is not None:
+            registry_out["ageDays"] = age          # (10 Nov) analyze_url uses it: an old domain is no look-alike
         add(age < 30, "Recently registered domain", f"Domain was registered only {age} day(s) ago.", "high", 22)
         add(30 <= age < 90, "Young domain", f"Domain was registered {age} day(s) ago.", "medium", 10)
     if ssl_r["status"] == "ok":
@@ -462,8 +464,24 @@ def analyze_url(url: str, subtopic_title: str = "Malicious URL Analysis", subtop
     if any(i["triggered"] and i["label"] in VERIFY_FLOOR_LABELS for i in indicators):
         blended = max(blended, 51)
 
+    # (10 Nov) The look-alike model's "close to X - check carefully" (verify level, not "imitates") on a domain that
+    # has been registered for 3+ years with nothing else wrong (kayak.co.in, craigslist.hk, oneindia.in, look.com):
+    # look-alike phishing domains are days or months old, so the "verify" floor is not applied - the points stay.
+    age_days = registry_box.get("ageDays")
+    if age_days is None and isinstance(registry_box.get("registry"), dict):
+        age_days = registry_box["registry"].get("ageDays")
+    established = isinstance(age_days, (int, float)) and age_days >= 3 * 365
+    other_red_flags = [i for i in indicators if i["triggered"] and i.get("weight", 0) > 0
+                       and not i["label"].startswith("Look-alike domain model")]
+    old_lookalike = bool(sub and established and sub["subtopic"] == "lookalike-domain" and sub["level"] == "medium"
+                         and not other_red_flags)
+    if old_lookalike:
+        indicators.append({"label": "Established domain", "severity": "low", "weight": 0, "triggered": True,
+                           "description": f"This domain was registered about {int(age_days) // 365} year(s) ago. "
+                                          "Look-alike phishing domains are usually only days or months old, so the "
+                                          "look-alike note alone is not treated as a threat."})
     # A subtopic's own trained model can only RAISE the score: alert level -> 71-100, verify level -> 51-70.
-    if sub and sub["level"] in ("high", "medium"):
+    if sub and sub["level"] in ("high", "medium") and not old_lookalike:
         blended = max(blended, _model_points(sub))
 
     # Open redirect (added 19 Oct): score the hidden destination with this same engine (one level deep).

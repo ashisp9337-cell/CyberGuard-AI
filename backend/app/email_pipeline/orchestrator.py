@@ -123,10 +123,46 @@ def _split_trusted(ev: EmailEvent, urls: list[str]) -> tuple[list[str], list[str
     return scan, trusted
 
 
+# (10 Nov) Mail-security services rewrite every link so they can check it again at click time. The wrapper is
+# the company's own security product, not where the link goes: the link INSIDE it is the one to judge.
+# (registered domain, path start, query parameter that holds the real link)
+LINK_WRAPPERS = (("trendmicro.com", "/wis/clicktime/", "url"), ("outlook.com", "/", "url"),   # *.safelinks.protection
+                 ("cudasvc.com", "/url", "a"), ("google.com", "/url", "q"), ("google.com", "/url", "url"))
+
+
+def unwrap_link(url: str, depth: int = 0) -> str:
+    """The real destination of a link rewritten by a mail-security service (Trend Micro, Microsoft Safe Links,
+    Barracuda, Proofpoint, Google redirect); any other link is returned unchanged."""
+    from urllib.parse import parse_qs, unquote, urlsplit
+    if depth > 3:
+        return url
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return url
+    host = (parts.hostname or "").lower()
+    reg = registered_domain(host)
+    inner = None
+    if reg in ("urldefense.com", "proofpoint.com") and parts.path.startswith("/v3/__") and "__;" in url:
+        inner = url.split("/v3/__", 1)[1].split("__;", 1)[0]      # Proofpoint v3: /v3/__<link>__;<checksum>
+    for dom, path, key in LINK_WRAPPERS:
+        if inner is None and reg == dom and parts.path.startswith(path) and \
+                (dom != "outlook.com" or host.endswith(".safelinks.protection.outlook.com")):
+            vals = parse_qs(parts.query).get(key)
+            if vals:
+                inner = vals[0]
+    if inner:
+        inner = unquote(inner) if "%3a" in inner[:12].lower() else inner
+        if inner.lower().startswith(("http://", "https://")):
+            return unwrap_link(inner, depth + 1)
+    return url
+
+
 def _unique_urls(urls: list[str], limit: int = MAX_URLS) -> list[str]:
-    """One URL per host, capped."""
+    """One URL per host, capped (links inside mail-security wrappers are unwrapped first)."""
     seen, out = set(), []
     for u in urls:
+        u = unwrap_link(u)
         host = split_url(u)["host"]
         if not host or host in seen or u.lower().startswith(("javascript:", "data:")):
             continue

@@ -15,6 +15,8 @@ Rules, in order:
   5. Genuine account-security notifications are re-labelled as possible
      account takeover instead of phishing.
 """
+import re
+
 from app.detectors.base import build_result
 
 IMPERSONATION_CATEGORY = {
@@ -26,7 +28,25 @@ IMPERSONATION_CATEGORY = {
     "contact-impersonation": ("Known-contact impersonation", ["T1566", "T1656"]),
 }
 TEXT_COMPONENTS = ("phishing", "impersonation", "sender")
+STRUCTURAL_LINK_LABELS = {"Unusually long URL", "High character entropy", "Excessive hyphens in domain/path",
+                          "Excessive subdomains"}
+SOFT_TEXT_LABELS = {"No sender email given to verify", "Urgency language detected", "Generic greeting",
+                    "Multiple brands named in one message", "Spelling anomalies", "Sender domain not matched to any known brand",
+                    "Message claims government/bank authority", "Claims to be a government agency"}
 CONTENT_COMPONENTS = ("url", "qr", "attachment")
+
+
+_ASK_SECRET_RE = re.compile(r"\b(?:enter|share|send|provide|confirm|update|verify|submit|reply|respond|type|give|tell|"
+                            r"fill(?: in)?|re-?enter|validate|disclose)\b[^.\n]{0,50}?(?<![a-z])(?:password|passcode|otp|"
+                            r"one[- ]time (?:password|code)|pin|cvv|card number|card details|account number|aadhaar|"
+                            r"login (?:id|details|credentials)|credentials|net ?banking (?:id|password))(?![a-z])", re.I)
+
+
+def asks_for_secret(text: str) -> bool:
+    """(10 Nov) The text ASKS the reader to give a secret ('enter your password', 'share the OTP'), outside a
+    'never share' warning. 'The PDF password is your date of birth' tells, it does not ask."""
+    from app.detectors.phishing import _CRED_WARNING_RE
+    return bool(_ASK_SECRET_RE.search(_CRED_WARNING_RE.sub(" ", text or "")))
 
 
 CLAIM_TO_DETECTOR = {"government": "government-impersonation", "bank": "financial-impersonation",
@@ -94,12 +114,41 @@ def fuse(ev, components: list[dict], trust: dict) -> dict:
                and not (enrich_labels & hard_sender_flags))
     if vouched:
         text_adj = min(text_adj, 25 if text_ev < 85 else 45)
+        # (10 Nov) the bank's own authenticated newsletter: its click-tracking links (SendGrid, OneLink ...) are long
+        # and random-looking by design. Length / randomness / hyphens alone prove nothing about such a link; anything
+        # real about it (blocklist hit, look-alike name, dead or new domain, redirect to another site) still counts.
+        def _link_score(c):
+            fired = [i for i in (c["result"].get("indicators") or []) if i.get("triggered") and i.get("weight", 0) > 0]
+            if c["component"] == "url" and fired and all(i["label"] in STRUCTURAL_LINK_LABELS for i in fired):
+                return min(c["score"], 25)
+            return c["score"]
+        content_ev = max([_link_score(c) for c in components if c["component"] in CONTENT_COMPONENTS] or [0])
+    # (10 Nov) An e-mail COPIED from Gmail / Outlook (no headers, so SPF / DKIM / DMARC cannot be read) whose sender
+    # address is an official domain of the organisation it names (alerts@hdfcbank.net for HDFC Bank). The mail app
+    # already ran those checks when it arrived, and these banks publish strict DMARC, so a forged From: rarely reaches
+    # the inbox. Wording alone ("Dear Customer", "report immediately", "password-protected statement") then cannot make
+    # it phishing - but links, attachments and QR codes are still judged on their own, exactly as for vouched mail.
+    pasted_official_org = None
+    if not vouched and not (ev.auth or {}).get("available") and sender_domain and sender_domain not in FREEMAIL_DOMAINS \
+            and not (enrich_labels & hard_sender_flags) and not getattr(ev, "reply_to_address", ""):
+        from app.email_pipeline.org_directory import official_sender_entity
+        pasted_official_org = official_sender_entity(
+            sender_domain, f"{getattr(ev, 'from_display_name', '')}\n{getattr(ev, 'subject', '')}\n{ev.full_text[:4000]}")
+    if pasted_official_org is not None:
+        fired = {i["label"] for c in components if c["component"] in TEXT_COMPONENTS
+                 for i in (c["result"].get("indicators") or []) if i.get("triggered")}
+        if fired & {"Financial lure / prize claim", "Account or parcel held until you pay"} or \
+                any(l.startswith("Scam pattern") for l in fired) or asks_for_secret(ev.full_text):
+            pasted_official_org = None          # genuine banks never ask for these, whoever the sender seems to be
+    pasted_official = pasted_official_org is not None
+    if pasted_official:
+        text_adj = min(text_adj, 20 if text_ev < 85 else 50)
 
     # -- 1 + 2. strongest evidence + corroboration ---------------------------------------
     score = max(text_adj, content_ev)
     agreeing = [k for k in ("phishing", "impersonation", "sender", "url", "qr", "attachment")
                 if best(k) and (best(k)["score"] - (reduction if k in TEXT_COMPONENTS else 0)) > 50
-                and not (vouched and k in TEXT_COMPONENTS)]
+                and not ((vouched or pasted_official) and k in TEXT_COMPONENTS)]
     if len(agreeing) > 1:
         score += min(20, 7 * (len(agreeing) - 1))
 
@@ -121,6 +170,16 @@ def fuse(ev, components: list[dict], trust: dict) -> dict:
         floors.append((80, "Authority claim from a personal email account"))
     for f, _ in floors:
         score = max(score, f)
+    # (10 Nov) A body copied WITHOUT its sender line, with no link, attachment or QR code, and only soft wording
+    # signals (urgency, "Dear Customer", no sender to check, several names): nothing proves it is fake and the sender
+    # cannot be checked, so it is "check the sender" (at most 55), not a confirmed attack. Any request for a password /
+    # OTP / money, a scam pattern or a risky link keeps the full score.
+    no_sender_soft = False
+    if not getattr(ev, "from_address", "") and not floors and content_ev == 0 and not ev.links \
+            and not [a for a in ev.attachments if not a.is_inline] and score > 55:
+        fired = {i["label"] for c in components for i in (c["result"].get("indicators") or []) if i.get("triggered")}
+        if fired and fired <= SOFT_TEXT_LABELS:
+            score, no_sender_soft = 55, True
     score = int(max(0, min(100, round(score))))
 
     # -- 5. category -------------------------------------------------------------------------
@@ -139,7 +198,14 @@ def fuse(ev, components: list[dict], trust: dict) -> dict:
         category, mitre = "Malware delivery (malicious attachment)", ["T1566.001", "T1204.002"]
     elif best("qr") and best("qr")["score"] >= 60 and best("qr")["score"] >= text_adj:
         category, mitre = "QR code phishing (quishing)", ["T1566.002"]
-    elif not vouched and best("impersonation") and best("impersonation")["score"] >= max(text_adj - 5, 51):
+    elif not (vouched or pasted_official) and best("impersonation") and (
+            best("impersonation")["score"] >= max(text_adj - 5, 51)
+            # (10 Nov) the sender's name claims a BANK or a GOVERNMENT office its address does not belong to: that is
+            # bank / government impersonation, even when the mail also carries a bad link (a brand like Microsoft
+            # with a bad link stays "credential phishing", as before)
+            or ("Sender impersonates an organisation" in enrich_labels
+                and (_claimed_impersonation(ev, by.get("impersonation", [])) or {}).get("name")
+                in ("financial-impersonation", "government-impersonation"))):
         imp = _claimed_impersonation(ev, by.get("impersonation", [])) or best("impersonation")
         category, mitre = IMPERSONATION_CATEGORY.get(imp["name"], ("Impersonation", ["T1656"]))
     elif best("url") and best("url")["score"] >= 60 or "Link text hides the real destination" in enrich_labels:
@@ -149,6 +215,14 @@ def fuse(ev, components: list[dict], trust: dict) -> dict:
 
     # -- indicators: sender/auth checks + every triggered detector finding ------------------------
     indicators, seen = [], set()
+    if pasted_official:
+        indicators.append({"id": "IND_official_sender", "label": "Official sender address (copied e-mail)",
+                           "description": f"'{sender_domain}' is an official domain of {pasted_official_org['name']}. A "
+                           "copied e-mail has no SPF / DKIM / DMARC results, so this is not proof - your mail app checked "
+                           "them when it arrived. Its wording alone was not treated as a threat; its links, attachments "
+                           "and QR codes were still checked. For full proof upload the original (.eml) file (Gmail: "
+                           "⋮ > Download message).", "severity": "low", "weight": 0, "triggered": True})
+        seen.add(indicators[0]["label"])
     for i in ev.enrichment_indicators:
         if i["label"] not in seen:
             seen.add(i["label"])
@@ -156,7 +230,7 @@ def fuse(ev, components: list[dict], trust: dict) -> dict:
     for c in sorted(components, key=lambda c: -c["score"]):
         if c["component"] == "sender":
             continue
-        if vouched and c["component"] in ("phishing", "impersonation"):
+        if (vouched or pasted_official) and c["component"] in ("phishing", "impersonation"):
             continue  # overruled by sender authentication; still listed under "components"
         for i in c["result"].get("indicators", []):
             if i.get("triggered") and i["label"] not in seen:
@@ -171,11 +245,17 @@ def fuse(ev, components: list[dict], trust: dict) -> dict:
     reasons = "; ".join(i["label"] for i in top) or "no red flags"
     ran = ", ".join(sorted({c["name"] for c in components}))
     trust_txt = f" Trust adjustments: -{reduction} (authenticated sender)." if reduction else ""
+    if pasted_official:
+        trust_txt += (f" The sender address is an official {pasted_official_org['name']} domain, so the wording alone "
+                      "was not counted as a threat; links and attachments were still checked.")
     explanation = (f"{category} — risk {score}/100. Top reasons: {reasons}. "
                    f"Checked: {auth_txt}; {len(ev.links)} link(s); {len([x for x in ev.attachments if not x.is_inline])} "
                    f"attachment(s); detectors: {ran}.{trust_txt}")
     if floors:
         explanation += f" Escalated because: {max(floors)[1]}."
+    if no_sender_soft:
+        explanation += (" Only the message body was copied, so the sender could not be checked and nothing in it proves "
+                        "it is fake: copy the whole e-mail including the sender line (Name <address>) and scan again.")
 
     recs = []
     if score > 70:
@@ -195,7 +275,7 @@ def fuse(ev, components: list[dict], trust: dict) -> dict:
                           threat_type=category, explanation=explanation, extra_recommendations=recs)
     result["category"] = category
     result["mitre"] = mitre
-    result["trust"] = trust | {"reduction": reduction}
+    result["trust"] = trust | {"reduction": reduction, "pasted_official": pasted_official}
     result["escalations"] = [r for _, r in sorted(floors, reverse=True)]
     result["components"] = [{"component": c["component"], "name": c["name"], "score": c["score"],
                              "classification": c["result"].get("classification"),

@@ -22,6 +22,7 @@ crashes, same convention as every other detector in this project).
 from __future__ import annotations
 
 import json
+import re
 import os
 import uuid
 
@@ -79,8 +80,13 @@ def _domain_of(email: str) -> str:
 def _find_claimed_institution(text: str, domains: dict) -> str | None:
     """Which institution (if any) does the message claim to be from? Longest name wins on overlap."""
     low = text.lower()
-    matches = [name for name in domains if name in low]
+    # (10 Nov) whole names only: "rbi" is not inside "rbiretaildirect", "sbi" is not inside "sbicard"
+    matches = [name for name in domains if re.search(rf"(?<![a-z0-9]){re.escape(name)}(?![a-z0-9])", low)]
     return max(matches, key=len) if matches else None
+
+
+def _is_own(domain: str, real_domains) -> bool:
+    return bool(domain) and any(domain == d or domain.endswith("." + d) for d in real_domains)
 
 
 def _ind(triggered: bool, label: str, description: str, severity: str, weight: int) -> dict:
@@ -99,7 +105,12 @@ def analyze_financial_impersonation(text: str, extra_field_values: dict, subtopi
         real_domains = [d.lower() for d in domains.get(claimed, [])]
         actual_domain = _domain_of(sender_email)
         # the bank's own domain or a subdomain of it (alerts.hdfcbank.net) is genuine; look-alikes are not
-        own = bool(actual_domain) and any(actual_domain == d or actual_domain.endswith("." + d) for d in real_domains)
+        own = _is_own(actual_domain, real_domains)
+        # (10 Nov) the sender is itself a real bank (kotak.bank.in) writing ABOUT another institution ("invest with
+        # RBI Retail Direct"): that is a mention, not impersonation
+        sender_bank = None if own else next((n for n, ds in domains.items()
+                                             if _is_own(actual_domain, [x.lower() for x in ds])), None)
+        own = own or sender_bank is not None
         if sender_email and real_domains and not own:
             indicators.append(_ind(
                 True, "Sender domain does not match the claimed institution",

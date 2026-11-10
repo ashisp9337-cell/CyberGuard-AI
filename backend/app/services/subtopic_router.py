@@ -266,7 +266,7 @@ def _read_text(file_path: str | None, limit: int = 200_000) -> str:
 # ---------------------------------------------------------------------------
 # Text structure helpers
 # ---------------------------------------------------------------------------
-HEADER_RE = re.compile(r"^(from|to|subject|date|received|message-id|reply-to|return-path|cc|"
+HEADER_RE = re.compile(r"^(from|to|subject|date|received|message-id|reply-to|return-path|cc|bcc|sent|"   # (10 Nov) Outlook copy: Sent:
                        r"mime-version|content-type|authentication-results|delivered-to)\s*:", re.I)
 SINGLE_URL_RE = re.compile(r"^(?:https?://|www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d+)?(?:[/?#]\S*)?$", re.I)
 URL_IN_TEXT_RE = re.compile(r"(?:https?://|www\.)[^\s<>\"')]+", re.I)
@@ -285,6 +285,21 @@ def is_email_text(text: str) -> bool:
         elif not ln[:1].isspace():                  # a non-header, non-continuation line: not a header block
             break
     return "from" in names and len(names) >= 2
+
+
+def is_pasted_mail(text: str) -> bool:
+    """(10 Nov) An e-mail copied from a mail app's reading view (sender line 'Name <address>' + date / 'to me' line
+    or e-mail wording) - the same rule the e-mail pipeline uses to read it."""
+    from app.email_pipeline.parser import pasted_mail_view
+    return pasted_mail_view(text or "") is not None
+
+
+def is_mail_body(text: str) -> bool:
+    """(10 Nov) An e-mail body copied without its sender line: wording only e-mails use ("Please do not reply to this
+    e-mail", "This is a system-generated e-mail") in a text of several lines. SMS never say this about themselves."""
+    from app.email_pipeline.parser import MAIL_ONLY_WORDS_RE
+    t = text or ""
+    return len([ln for ln in t.splitlines() if ln.strip()]) >= 3 and bool(MAIL_ONLY_WORDS_RE.search(t))
 
 
 def single_url(text: str | None) -> str | None:
@@ -316,8 +331,8 @@ def _classify_phishing(text, url_input, kind, file_text, extra) -> Classificatio
         raise RoutingError("unsupported", f"A {kind} file cannot be analysed by any phishing detector. "
                            "Upload an e-mail (.eml), a QR image, or paste the message / URL.")
     body = text or file_text or ""
-    if kind == "text" and file_text and is_email_text(file_text):
-        return Classification(m, "email-analysis", "email-headers", ["Uploaded text file has an e-mail header block"])
+    if kind == "text" and file_text and (is_email_text(file_text) or is_pasted_mail(file_text) or is_mail_body(file_text)):
+        return Classification(m, "email-analysis", "email-headers", ["Uploaded text file holds an e-mail"])
 
     url = (url_input or "").strip() or single_url(body)
     if url:
@@ -331,6 +346,14 @@ def _classify_phishing(text, url_input, kind, file_text, extra) -> Classificatio
         raise RoutingError("undetermined", "Nothing to analyse: paste the message, e-mail or URL, or upload a file.")
     if is_email_text(body):
         return Classification(m, "email-analysis", "email-headers", ["Text starts with an e-mail header block (From:, Subject:, ...)"])
+    if is_pasted_mail(body):                    # (10 Nov) copied from Gmail / Outlook's screen: no raw headers
+        return Classification(m, "email-analysis", "email-structure",
+                              ["E-mail copied from a mail app: sender line 'Name <address>' with a date / recipient "
+                               "line or e-mail wording"])
+    if is_mail_body(body):                      # (10 Nov) body copied without the sender line, e-mail-only wording
+        return Classification(m, "email-analysis", "email-wording",
+                              ["Text uses wording only e-mails use (e.g. 'do not reply to this e-mail', 'this is a "
+                               "system-generated e-mail'). Tip: copy the sender line too, so the sender can be checked"])
 
     platform = str(extra.get("platform") or extra.get("source") or "").strip().lower()
     if platform in SOCIAL_PLATFORMS:
@@ -346,7 +369,7 @@ def _classify_phishing(text, url_input, kind, file_text, extra) -> Classificatio
     social_terms = bool(re.search(r"\b(DM|direct message|followers?|your (post|page|reel|story|profile)|"
                                   r"verified badge|blue tick|copyright (strike|violation))\b", body, re.I))
     evidence = sum([social_link, handle, named, social_terms])
-    if social_link or (named and evidence >= 2):
+    if social_link or (named and evidence >= 2) or (handle and social_terms):   # (10 Nov) "@name ... DM us"
         reasons = [r for r, ok in (("social-platform link", social_link), ("@handle", handle),
                                    ("platform named", named), ("social-platform terms", social_terms)) if ok]
         return Classification(m, "social-media-analysis", "message-structure", reasons)
@@ -748,7 +771,10 @@ CYBER_PATTERNS = [
         r"(^\s*<?\d{0,3}>?[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\S+\s+\S+(\[\d+\])?:|"
         r"^\s*\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[^\n]{0,40}\b(DEBUG|INFO|NOTICE|WARN|WARNING|ERROR|CRITICAL|FATAL)\b|"
         r"\"(GET|POST|HEAD|PUT|DELETE) \S+ HTTP/[\d.]+\" \d{3}|"
-        r"\b(event ?id|eventcode)\s*[=:]?\s*\d{3,5}\b)", re.I | re.M),
+        r"\b(event ?id|eventcode)\s*[=:]?\s*\d{3,5}\b|"
+        # (10 Nov) Apache / nginx error log: "[Sun Dec 04 04:47:44 2005] [error] ..." / "[... 2026] [core:warn]"
+        r"^\s*\[(mon|tue|wed|thu|fri|sat|sun) [a-z]{3} \d{1,2} \d{2}:\d{2}:\d{2}(\.\d+)? \d{4}\] \[(\w+:)?"
+        r"(emerg|alert|crit|error|warn|notice|info|debug|trace\d?)\])", re.I | re.M),
         "system / application log lines"),
     # (31 Oct) after the log formats: a normal application log that names the user ("INFO app=erp user=ashis
     # action=view_timetable") is an application log, not insider risk. The insider engine still reads it either way

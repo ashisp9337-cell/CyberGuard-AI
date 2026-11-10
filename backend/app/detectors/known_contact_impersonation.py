@@ -62,7 +62,12 @@ CODE_RE = re.compile(
     r"\b((share|send|forward|tell|text) (me )?(the |that |your )?(otp|code|pin|verification code)|"
     r"(otp|code) (that )?(was )?(sent|came|come) (to you|to your)|sent you an? (otp|code)|"
     r"(otp|code) by mistake|(\d|six|four)[- ]digit (code|otp|number)[^.\n]{0,60}\b(forward|send|share|tell)|"
-    r"(forward|send|share) (it|that|the (code|otp|message)) (to me|back)|code (on|to) your (phone|number))\b", re.I)
+    r"(forward|send|share) (that|the) (code|otp) (to me|back)|"
+    # (10 Nov) "send it to me" is only about a code when a code / OTP is named next to it ("Take a pic and send it to me"
+    # is not)
+    r"(otp|code)\b[^.\n]{0,80}\b(forward|send|share) (it|that|the message) (to me|back)|"
+    r"(forward|send|share) (it|that|the message) (to me|back)\b[^.\n]{0,40}\b(otp|code)|"
+    r"code (on|to) your (phone|number))\b", re.I)
 PRESSURE_RE = re.compile(r"\b(urgent|urgently|asap|right now|immediately|today itself|quick(ly)?|emergency|"
                          r"in trouble|don'?t tell|i promise|pay you back|will return)\b", re.I)
 

@@ -56,15 +56,32 @@ def update_incident(event_id: str, body: StatusChange, request: Request,
     # 404 (not 403) for someone else's incident, so ids can't be probed.
     if event is None or event.user_id != user.id or event.severity not in inc.INCIDENT_SEVERITIES:
         raise HTTPException(status_code=404, detail={"error": {"code": "NOT_FOUND", "message": "Incident not found."}})
+    old = inc.state(event)["status"]
     try:
         inc.change_status(event, body.status, by=user.email, note=body.note)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={"error": {"code": "INVALID_STATUS", "message": str(exc)}})
+    learned = _learn(db, user, event, old, body.status)
     audit.log(db, action="incident.status", user=user, request=request, target=event.title,
-              detail={"incidentId": event.id, "to": body.status, "note": body.note[:200]})
+              detail={"incidentId": event.id, "to": body.status, "note": body.note[:200], "learned": learned})
     db.commit()
     db.refresh(event)
-    return inc.to_dict(event)
+    return inc.to_dict(event) | {"learned": learned}
+
+
+def _learn(db, user, event, old: str, new: str) -> int:
+    """(10 Nov) "False positive" teaches CyberGuard for this user (app/services/feedback.py); changing it back undoes
+    that. Never breaks the status change itself."""
+    from app.services import feedback
+    try:
+        with db.begin_nested():
+            if new == "false_positive" and old != "false_positive":
+                return feedback.learn_false_positive(db, user.id, event)
+            if old == "false_positive" and new != "false_positive":
+                return feedback.unlearn_false_positive(db, user.id, event)
+    except Exception:
+        pass
+    return 0
 
 
 @router.post("/bulk")
@@ -80,15 +97,17 @@ def bulk_update(body: BulkStatusChange, request: Request, user: User = Depends(g
     else:
         wanted = set(body.ids[:1000])
         targets = [e for e in events if e.id in wanted]
-    changed = 0
+    changed = learned = 0
     for e in targets:
-        if inc.state(e)["status"] != body.status:
+        old = inc.state(e)["status"]
+        if old != body.status:
             inc.change_status(e, body.status, by=user.email, note=body.note)
+            learned += _learn(db, user, e, old, body.status)
             changed += 1
     audit.log(db, action="incident.bulk", user=user, request=request, target=f"{changed} incident(s)",
               detail={"to": body.status, "matched": len(targets), "changed": changed})
     db.commit()
-    return {"matched": len(targets), "changed": changed, "status": body.status,
+    return {"matched": len(targets), "changed": changed, "status": body.status, "learned": learned,
             "summary": inc.summary(_incident_events(db, user))}
 
 

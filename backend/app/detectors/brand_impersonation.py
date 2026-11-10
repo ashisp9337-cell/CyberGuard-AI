@@ -60,6 +60,16 @@ def _is_brand_domain(domain: str, real_domains) -> bool:
     return bool(domain) and any(domain == d or domain.endswith("." + d) for d in real_domains)
 
 
+def _distinct_brands(brands: list[str]) -> list[str]:
+    """(10 Nov) 'hdfc' and 'hdfcbank' are one company (their real domains overlap): count it once."""
+    out: list[str] = []
+    for b in brands:
+        dom = {d.lower() for d in BRAND_DOMAINS.get(b, set())}
+        if not any(dom & {d.lower() for d in BRAND_DOMAINS.get(o, set())} for o in out):
+            out.append(b)
+    return out
+
+
 def _ind(triggered: bool, label: str, description: str, severity: str, weight: int) -> dict:
     return {"id": f"IND_{uuid.uuid4().hex[:12]}", "label": label, "description": description,
             "severity": severity, "weight": weight, "triggered": bool(triggered)}
@@ -79,8 +89,21 @@ def analyze_brand_impersonation(text: str, extra_field_values: dict, subtopic_ti
 
     claimed_brands = find_brands(text)
     actual_domain = _domain_of(sender_email)
-    if claimed_brands:
-        claimed = claimed_brands[0]  # first-mentioned brand is treated as the claimed identity
+    # (10 Nov) The brand the sender's own domain belongs to is the sender's identity; other brands in the text are the
+    # shop paid / the partner ("Rs 450 debited ... to ZOMATO" from alerts@hdfcbank.net is HDFC Bank, not Zomato).
+    own = [b for b in claimed_brands if actual_domain and _is_brand_domain(actual_domain, {d.lower() for d in
+                                                                                           BRAND_DOMAINS.get(b, set())})]
+    if own:
+        claimed_brands = own + [b for b in claimed_brands if b not in own]
+    from app.email_pipeline.org_directory import official_sender_entity
+    official_org = None if own else official_sender_entity(actual_domain, text)   # e.g. a bank not in the brand list
+    if claimed_brands and official_org:
+        indicators.append(_ind(
+            False, "Sender domain does not match the claimed brand",
+            f"'{actual_domain}' is an official domain of {official_org['name']}; the other names in the message "
+            f"({', '.join(b.title() for b in claimed_brands[:3])}) are not a claim to be them.", "low", 0))
+    elif claimed_brands:
+        claimed = claimed_brands[0]  # the sender's own brand if it is named, else the first-mentioned brand
         real_domains = {d.lower() for d in BRAND_DOMAINS.get(claimed, set())}
         if sender_email and real_domains and not _is_brand_domain(actual_domain, real_domains):
             indicators.append(_ind(
@@ -96,7 +119,7 @@ def analyze_brand_impersonation(text: str, extra_field_values: dict, subtopic_ti
                 "to check against its real domain.",
                 "low", 5,
             ))
-        if len(claimed_brands) > 1:
+        if len(_distinct_brands(claimed_brands)) > 1 and not own:
             indicators.append(_ind(
                 True, "Multiple brands named in one message",
                 f"The message names several different brands ({', '.join(b.title() for b in claimed_brands[:4])}), "
@@ -111,8 +134,8 @@ def analyze_brand_impersonation(text: str, extra_field_values: dict, subtopic_ti
             "low", 6,
         ))
 
-    sender_verified = bool(claimed_brands and sender_email and _is_brand_domain(
-        actual_domain, {d.lower() for d in BRAND_DOMAINS.get(claimed_brands[0], set())}))
+    sender_verified = bool(claimed_brands and sender_email and (official_org or _is_brand_domain(
+        actual_domain, {d.lower() for d in BRAND_DOMAINS.get(claimed_brands[0], set())})))
     hold_scam = bool(_HOLD_RE.search(text) and _PAY_DEMAND_RE.search(text)) and not sender_verified
     indicators.append(_ind(
         hold_scam, "Account or parcel held until you pay",
@@ -177,4 +200,4 @@ def analyze_brand_impersonation(text: str, extra_field_values: dict, subtopic_ti
     # (4 Nov) The sender's own domain IS the brand the message names (e.g. offers@mailer.amazon.in naming Amazon).
     # The email pipeline uses this together with SPF/DKIM/DMARC to stop flagging genuine brand newsletters.
     result["senderVerifiedBrand"] = sender_verified
-    return result
+    return result

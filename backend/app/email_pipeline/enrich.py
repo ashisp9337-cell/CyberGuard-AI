@@ -26,7 +26,8 @@ IP_IN_RECEIVED_RE = re.compile(r"\[?((?:\d{1,3}\.){3}\d{1,3})\]?")
 DOMAIN_IN_TEXT_RE = re.compile(r"\b((?:[a-z0-9-]+\.)+[a-z]{2,})\b", re.I)
 EMAIL_IN_NAME_RE = re.compile(r"[a-z0-9._%+-]+@([a-z0-9.-]+\.[a-z]{2,})", re.I)
 SCRIPTED_MAILERS = re.compile(r"phpmailer|swiftmailer|python|curl|sendblaster|mass mail|atomic mail|gammadyne", re.I)
-REPLY_PREFIX = re.compile(r"^\s*(re|fw|fwd)\s*:", re.I)
+# (10 Nov) "RE:" only: a forward ("FW:") is a NEW message in every mail app, it never carries In-Reply-To
+REPLY_PREFIX = re.compile(r"^\s*re\s*:", re.I)
 
 
 def _ind(triggered, label, description, severity, weight, source, mitre=None):
@@ -112,6 +113,13 @@ def claimed_entities(ev: EmailEvent) -> list[dict]:
             out.append({"name": e["name"], "category": e["category"], "where": where,
                         "official": orgs.is_official_sender(e, ev.from_domain),
                         "_entity": e})
+    # (10 Nov) The sender's name IS an organisation and the address really belongs to it ("Kotak 811"
+    # <kotak811@kotak.bank.in>): other organisations in the subject / opening lines are what the mail is ABOUT
+    # ("Invest ... with RBI Retail Direct", "pay your Airtel bill"), not who it pretends to be.
+    if any(c["official"] and c["where"] == "display_name" for c in out):
+        for c in out:
+            if not c["official"] and c["where"] in ("subject", "body_header"):
+                c["where"] = "mention"
     return out
 
 
@@ -224,10 +232,13 @@ def enrich(ev: EmailEvent, *, db=None, user_id: str | None = None, network: bool
                     "suspicious when DKIM is not aligned either.", "low", 5, "sender"))
 
     # ---- 6. Fake reply thread ------------------------------------------------
-    ind.append(_ind(bool(ev.is_structured and REPLY_PREFIX.match(ev.subject or "")
+    # (10 Nov) only for a real mail file (it has a Message-ID or Received lines): a copied "From / To / Subject: RE:"
+    # never shows In-Reply-To, so its absence proves nothing there
+    full_headers = bool(ev.message_id or ev.received_chain or (ev.auth or {}).get("available"))
+    ind.append(_ind(bool(ev.is_structured and full_headers and REPLY_PREFIX.match(ev.subject or "")
                          and not ev.in_reply_to and not ev.references),
                     "Fake reply thread",
-                    "Subject starts with RE:/FW: but the email is not part of any existing conversation — "
+                    "Subject starts with RE: but the email is not part of any existing conversation — "
                     "a trick to make it look trusted.", "medium", 12, "sender", "T1566"))
 
     # ---- 7. Sender history ------------------------------------------------
@@ -296,6 +307,6 @@ def trust_signals(ev: EmailEvent) -> dict:
         "spf_pass": a.get("spf") == "pass",
         "known_sender": bool(h.get("available") and h.get("safe_count", 0) >= 2),
         "official_domain_for_claim": bool(official) and not any(not c["official"] for c in ev.claimed_entities
-                                                                 if c["where"] != "body_header"),
+                                                                 if c["where"] not in ("body_header", "mention")),
         "real_thread": bool(ev.in_reply_to or ev.references),
     }

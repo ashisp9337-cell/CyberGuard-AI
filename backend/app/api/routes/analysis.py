@@ -153,6 +153,15 @@ async def scan(
                 os.remove(p)
     target = result.pop("_target", file_name or urlInput or textInput or "submission")
     target_type = result.pop("_target_type", "text")
+    # (10 Nov) what this user marked as a false positive earlier (same message / trusted sender) - applied BEFORE any
+    # response action, so a message the user called safe is never quarantined again
+    try:
+        from app.services import feedback
+        key = feedback.fingerprint(moduleId, textInput or urlInput or (
+            f"sha256:{result['sha256']}" if result.get("sha256") else None))
+        feedback.apply_user_verdict(db, user.id, moduleId, result, key)
+    except Exception:
+        pass
     # Threat-specific response actions (quarantine, block IP, revoke session, report ...).
     response_playbook.apply(result, moduleId, subtopicId, _playbook_text(urlInput, textInput, target))
 

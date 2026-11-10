@@ -18,7 +18,14 @@ def save_result(db, *, user_id: str, module_id: str, subtopic_id: str, subtopic_
     Also checks the scan's URLs/domains/IPs/senders/file hashes against IOCs from earlier risky scans
     ("seen before" raises the score) and remembers this scan's ones if it is risky (app/services/ioc.py),
     and tags the result with MITRE ATT&CK techniques and their explanations (app/services/mitre.py)."""
-    from app.services import ioc, mitre
+    from app.services import feedback, ioc, mitre
+    try:                                    # (10 Nov) automatic / chat scans: the user's false-positive decisions too
+        if not result.get("userVerdict"):
+            key = result.get("feedbackKey") or (feedback.fingerprint(module_id, target) if target_type in ("text", "url")
+                                                else None)
+            feedback.apply_user_verdict(db, user_id, module_id, result, key)
+    except Exception:
+        pass
     try:
         cands = ioc.candidates(result, target, module_id)
         hits = ioc.lookup(db, user_id, cands)

@@ -51,6 +51,7 @@ MULTI_PART_SUFFIXES = {
     "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk",
     "com.au", "net.au", "org.au", "edu.au", "gov.au",
     "co.in", "net.in", "org.in", "ac.in", "gov.in", "nic.in", "edu.in", "res.in",
+    "bank.in", "fin.in",    # (10 Nov) RBI's bank-only / finance-only zones: kotak.bank.in is Kotak's own site, not "bank.in"
     "co.jp", "ne.jp", "or.jp", "com.br", "com.mx", "com.ar", "com.cn", "net.cn",
     "co.za", "com.sg", "com.tr", "co.nz", "com.pk", "com.bd", "co.id", "com.my",
     "com.ph", "com.vn", "co.kr", "com.hk", "com.tw", "co.il", "com.ng", "co.ke",
@@ -331,4 +332,4 @@ def extract_features_v2(url: str) -> list:
         round(sum(c.isupper() for c in path_and_query) / max(len(path_and_query), 1), 4),
         1.0 if any(ord(c) > 127 for c in raw) else 0.0,
         float(len(reg)), float(len(subdomain)),
-    ]
+    ]

@@ -48,10 +48,13 @@ BANK_ALIASES = {
     "icici bank": ["icici"],
     "punjab national bank": ["pnb"],
     "kotak mahindra bank": ["kotak"],
-    "bank of baroda": ["bob", "baroda"],
+    "bank of baroda": ["bob world", "bob card"],   # (10 Nov) not "bob" (a name) or "baroda" (the city)
     "union bank of india": ["union bank"],
     "idfc first bank": ["idfc"],
 }
+
+
+COMMON_WORDS = {"yes", "first", "axis", "union", "indian", "central", "federal", "capital", "unity", "city"}
 
 
 def _load_banks() -> list[dict]:
@@ -61,13 +64,19 @@ def _load_banks() -> list[dict]:
     except Exception:
         data = {}
     out = []
+    given = data.get("_keywords") or {}         # (10 Nov) banks added from RBI's list name their own keywords
     for name, domains in data.items():
-        if name.startswith("_") or name in ("rbi", "reserve bank of india"):
-            continue
-        kws = {name} | set(BANK_ALIASES.get(name, []))
-        short = name.replace(" bank", "").strip()
-        if len(short) >= 4 and short not in ("yes", "first"):  # avoid everyday words
-            kws.add(short)
+        if name.startswith("_") or name in ("rbi", "reserve bank of india", "state bank of india"):
+            continue                            # RBI is a government entity below; "state bank of india" = sbi
+        if name in given:                       # the list's own names replace the raw key ("chase" -> "chase bank")
+            kws = set(given[name]) | set(BANK_ALIASES.get(name, []))
+        else:
+            kws = {name} | set(BANK_ALIASES.get(name, []))
+            # "hdfc bank" -> "hdfc". (10 Nov) Never an everyday word or an "of ..." phrase: "axis" (x-axis), "union of
+            # india" (court papers), "of america" are not banks.
+            short = name[: -len(" bank")].strip() if name.endswith(" bank") else ""
+            if len(short) >= 4 and " of " not in f" {short} " and short not in COMMON_WORDS:
+                kws.add(short)
         out.append({"name": name.title() if len(name) > 4 else name.upper(), "category": "bank",
                     "keywords": sorted(kws), "domains": set(domains), "suffixes": ()})
     return out
@@ -117,8 +126,8 @@ ORG_ENTITIES: list[dict] = [
 # Global brands from the URL detector's list (paypal, microsoft, amazon, ...).
 _existing = {kw for e in ORG_ENTITIES for kw in e["keywords"]}
 for _brand, _domains in BRAND_DOMAINS.items():
-    if _brand in _existing or _brand in ("onlinesbi", "hdfcbank", "icicibank", "axisbank"):
-        continue
+    if _brand in _existing or _brand in ("onlinesbi", "hdfcbank", "icicibank", "axisbank", "chase", "ledger", "allegro"):
+        continue                    # (10 Nov) chase / ledger / allegro are everyday words (brand_text.AMBIGUOUS)
     _extra = set()
     if _brand == "microsoft":
         _extra = {"microsoftonline.com", "accountprotection.microsoft.com"}
@@ -147,6 +156,14 @@ def is_official_sender(entity: dict, domain: str) -> bool:
     for d in entity["domains"]:
         if domain == d or domain.endswith("." + d) or reg == d:
             return True
+    # (10 Nov) <bank>.bank.in: RBI's zone that only real Indian banks can register (IDRBT checks every one), so
+    # kotak.bank.in / hdfc.bank.in are the bank's own even when our list has only the older .com address.
+    if entity.get("category") == "bank" and reg.endswith(".bank.in"):
+        label = reg[: -len(".bank.in")]
+        for k in entity.get("keywords", []):
+            k = k.replace(" ", "")
+            if label == k or (len(k) >= 4 and label.startswith(k)):
+                return True
     return any(domain.endswith(s) for s in entity.get("suffixes", ()))
 
 
@@ -154,8 +171,27 @@ def find_entities(text: str) -> list[dict]:
     """Organisations mentioned in a piece of text."""
     if not text:
         return []
-    found = []
+    hits = []                                   # (entity, [(start, end) of each name match])
     for e in ORG_ENTITIES:
-        if any(p.search(text) for p in e["_patterns"]):
-            found.append(e)
-    return found
+        spans = [(m.start(), m.end()) for p in e["_patterns"] for m in p.finditer(text)]
+        if spans:
+            hits.append((e, spans))
+    # (10 Nov) a name inside a longer name of ANOTHER organisation is not a mention of it: "State Bank of India"
+    # and "Reserve Bank of India" contain "Bank of India", "Indian Overseas Bank" is not "Indian Bank".
+    def inside_other(e, span):
+        return any(o is not e and os_ <= span[0] and span[1] <= oe and (oe - os_) > (span[1] - span[0])
+                   for o, spans in hits for os_, oe in spans)
+    return [e for e, spans in hits if any(not inside_other(e, sp) for sp in spans)]
+
+
+def official_sender_entity(sender_domain: str, text: str) -> dict | None:
+    """(10 Nov) The organisation named in `text` that `sender_domain` really belongs to, else None.
+    A genuine alert from alerts@hdfcbank.net that mentions the shop you paid (Zomato, Amazon) comes from HDFC Bank:
+    the shop's name is not a claim to BE the shop. Free-mail addresses never count."""
+    domain = (sender_domain or "").lower().strip()
+    if not domain or domain in FREEMAIL_DOMAINS:
+        return None
+    for e in find_entities(text or ""):
+        if is_official_sender(e, domain):
+            return e
+    return None

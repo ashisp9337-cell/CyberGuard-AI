@@ -112,9 +112,12 @@ def risky_bare_domains(text: str) -> list[str]:
     return out
 
 
-_OTP_GIVEN = re.compile(r"\b(otp|one[- ]time (password|code)|verification code|security code|code)\b[^.\n]{0,60}"
-                        r"\b(is|:)\s*\d{4,8}\b|\b\d{4,8}\b[^.\n]{0,15}\bis (your|the)( [a-z0-9&-]+){0,2} (otp|code|one[- ]time|verification code)", re.I)
-_DONT_SHARE = re.compile(r"\b(do not|don'?t|never) (share|disclose|tell)", re.I)
+# (10 Nov) also e-mail wording: "Your One-Time Password (OTP) for validating your DigiLocker login generated at
+# 2026-11-08 13:40:16 is:" with the code on its own line, and "not to be shared with anyone"
+_OTP_GIVEN = re.compile(r"\b(otp|one[- ]time (password|code)|verification code|security code|code)\b[^\n]{0,110}?"
+                        r"\b(is|:)\s*:?\s*\d{4,8}\b|\b\d{4,8}\b[^.\n]{0,15}\bis (your|the)( [a-z0-9&-]+){0,2} (otp|code|one[- ]time|verification code)", re.I)
+_DONT_SHARE = re.compile(r"\b(do not|don'?t|never|please do not|please don'?t) (share|disclose|tell)|"
+                         r"\b(not|never) (to )?be (shared|disclosed)|\b(must|should) not be (shared|disclosed)", re.I)
 _OTP_ASK = re.compile(r"\b(share|send|forward|tell|reply( with)?|enter|give)\b[^.\n]{0,25}\b(otp|code|pin)\b", re.I)
 
 
@@ -280,6 +283,37 @@ def scam_patterns(text: str, topic: str | None = None) -> tuple[list[dict], int]
                          "weight": 0, "triggered": True})
             floor = max(floor, fl)
     return inds, floor
+# (10 Nov) Credential words as whole words ("pin" is not "shopping", "otp" is not inside another word), and not
+# inside a safety warning: "HDFC Bank never asks for your password, OTP or PIN" / "do not share your PIN" is what
+# genuine banks write, not a request.
+_CRED_WORD_RE = re.compile(r"(?<![a-z0-9])(?:" + "|".join(re.escape(w) for w in CREDENTIAL_WORDS) + r")(?![a-z0-9])", re.I)
+_CRED_WARNING_RE = re.compile(r"(?:\bnever|\bnot|n't|\bno one will|\bnobody will)\s+(?:[a-z]+\s+){0,2}?(?:ask|asks|asked|"
+                              r"request|requests|share|disclose|reveal|tell|give|call|calls|e-?mail|sms)\b"
+                              r"(?:(?!\b(?:but|however|instead|please|kindly|so|now|just|except|only)\b)[^.\n!?;]){0,80}", re.I)
+
+
+def credential_request(text: str) -> bool:
+    """True when the text mentions a password / OTP / PIN ... outside a 'never share / we never ask' warning."""
+    return bool(_CRED_WORD_RE.search(_CRED_WARNING_RE.sub(" ", text or "")))
+
+
+def _asks_for_secret(text: str) -> bool:
+    from app.email_pipeline.fusion import asks_for_secret
+    return asks_for_secret(text)
+
+
+def _official_sender(sender_lower: str, text: str) -> bool:
+    """(10 Nov) The sender's domain belongs to an organisation named in the text: a bank alert naming the shop paid
+    (Amazon, Zomato) or the word "bank" is not a mismatch."""
+    if "@" not in sender_lower:
+        return False
+    try:
+        from app.email_pipeline.org_directory import official_sender_entity
+        return official_sender_entity(sender_lower.rsplit("@", 1)[-1].strip("> "), text) is not None
+    except Exception:
+        return False
+
+
 GENERIC_GREETING_RE = re.compile(r"^\s*(dear (customer|user|member|sir/madam)|hello,)", re.I)
 MISSPELLINGS = ["verifiy", "recieve", "acount", "securty", "confimation", "immediatly", "informations", "kindly", "beneficery"]
 
@@ -296,7 +330,10 @@ def _rule_indicators(text: str, sender: str | None, reply_to: str | None = None)
         "Message pressures the recipient to act immediately ('act now', 'account will be suspended').",
         "high", 18)
 
-    cred_hit = any(w in lower for w in CREDENTIAL_WORDS) and not otp_notice(text)
+    # (10 Nov) a message that only MENTIONS a password ("thank you for registering ... your password", "your password
+    # was changed") is not a request: it must ask for it, or carry a link where it could be typed in
+    cred_hit = credential_request(text) and not otp_notice(text) and (
+        _asks_for_secret(text) or bool(LINK_RE.search(text) or risky_bare_domains(text)))
     add(cred_hit, "Credential request",
         "Content asks the recipient for a password, OTP, PIN, or similar sensitive credential.",
         "critical", 25)
@@ -316,9 +353,12 @@ def _rule_indicators(text: str, sender: str | None, reply_to: str | None = None)
         "Message lacks personalization typical of legitimate correspondence.", "low", 5)
 
     sender_lower = (sender or "").lower()
+    # (10 Nov) whole words, and only real brand names: "ups" is not inside "groups", "irs" not inside "first", "apple"
+    # not inside "pineapple"; "bank" and "chase" are everyday words, not a brand claim
     domain_mismatch = bool(sender) and any(
-        brand in text.lower() and brand not in sender_lower for brand in KNOWN_BRANDS
-    )
+        brand not in sender_lower and re.search(rf"(?<![a-z0-9]){re.escape(brand)}(?![a-z0-9])", lower)
+        for brand in KNOWN_BRANDS if brand not in ("bank", "chase")
+    ) and not _official_sender(sender_lower, text)
     add(domain_mismatch, "Sender domain mismatch",
         "The claimed brand in the message body does not match the sender's domain.",
         "high", 20)
@@ -463,6 +503,9 @@ def analyze_text(text: str, sender: str | None = None, subtopic_title: str = "Ph
         confidence = max(confidence, 80)
     elif text and otp_notice(text):
         blended = min(blended, 20)           # a genuine code delivery ("... is 482913. Do not share it")
+        explanation += (" It reads like a genuine one-time-code message: it GIVES you a code, says not to share it, "
+                        "has no link and asks for nothing back - scams ask you to share or enter the code. So the score "
+                        "is held at 20. If you did not try to sign in, someone may know your password: change it.")
     for ind in rule_indicators:
         ind["id"] = f"IND_{uuid.uuid4().hex[:12]}"
 

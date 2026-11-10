@@ -83,8 +83,12 @@ export function IncidentsCard() {
     if (status === item.status) return;
     setBusy(item.id);
     try {
-      await updateIncidentStatus(item.id, status);
-      notify({ variant: "success", title: `Incident marked ${STATUS_META[status].label.toLowerCase()}` });
+      const res = await updateIncidentStatus(item.id, status);
+      notify({ variant: "success", title: `Incident marked ${STATUS_META[status].label.toLowerCase()}`,
+               description: status === "false_positive" && (res.learned ?? 0) > 0
+                 ? "Learned: scanning the same message again gives Safe, and its sender, links and files are trusted for you."
+                 : item.status === "false_positive" && (res.learned ?? 0) > 0
+                   ? "What CyberGuard learned from the false positive was undone." : undefined });
       await load();
     } catch (err) {
       notify({ variant: "critical", title: "Could not update incident",
@@ -101,7 +105,10 @@ export function IncidentsCard() {
     setBusy("bulk");
     try {
       const res = await bulkUpdateIncidents(status, allActive ? { scope: "active" } : { ids: [...selected] });
-      notify({ variant: "success", title: `${res.changed} incident${res.changed === 1 ? "" : "s"} marked ${label}` });
+      notify({ variant: "success", title: `${res.changed} incident${res.changed === 1 ? "" : "s"} marked ${label}`,
+               description: status === "false_positive" && (res.learned ?? 0) > 0
+                 ? "Learned: the same messages will scan as Safe, and their senders, links and files are trusted for you."
+                 : undefined });
       clearSelection();
       await load();
     } catch (err) {
