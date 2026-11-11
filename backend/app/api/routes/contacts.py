@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user
 from app.db.database import get_db
 from app.db.models import KnownContact, User
-from app.services import audit
+from app.core.rate_limit import limiter
+from app.services import audit, contact_import
 from app.schemas.contacts import ContactCreate, ContactUpdate
 
 router = APIRouter(prefix="/api/contacts", tags=["contacts"])
@@ -47,6 +48,57 @@ def create_contact(body: ContactCreate, request: Request, user: User = Depends(g
     db.commit()
     db.refresh(contact)
     return _to_out(contact)
+
+
+MAX_CONTACTS_PER_USER = 5000
+
+
+@router.post("/import")
+@limiter.limit("6/minute")
+async def import_contacts(request: Request, file: UploadFile = File(...), user: User = Depends(get_current_user),
+                          db: Session = Depends(get_db)):
+    """(11 Nov) Import names (+ first e-mail) from a phone / Google / Outlook contacts export (.vcf or .csv). Phone
+    numbers and everything else in the file are ignored; the file is read in memory and never stored."""
+    raw = await file.read(contact_import.MAX_BYTES + 1)
+    try:
+        kind, found, no_name = contact_import.parse(raw)
+    except contact_import.ImportError_ as e:
+        raise HTTPException(status_code=400, detail={"error": {"code": "CONTACT_IMPORT_FAILED", "message": str(e)}})
+    existing = db.query(KnownContact).filter(KnownContact.user_id == user.id).all()
+    have = {(c.display_name.strip().lower(), (c.authorized_email or "").lower()) for c in existing}
+    have_names = {k[0] for k in have}
+    room = MAX_CONTACTS_PER_USER - len(existing)
+    added = duplicates = over = 0
+    for c in found:
+        key = (c["name"].lower(), c["email"])
+        # the same name already saved (with or without an e-mail) is the same person: never a second copy
+        if key in have or (key[0] in have_names and not c["email"]):
+            duplicates += 1
+            continue
+        if added >= room:
+            over += 1
+            continue
+        db.add(KnownContact(user_id=user.id, display_name=c["name"], role_label="", authorized_email=c["email"],
+                            authorized_domain=c["email"].split("@")[-1] if c["email"] else "",
+                            notes="Imported from a contacts file"))
+        have.add(key)
+        have_names.add(key[0])
+        added += 1
+    # the activity log records how many - never the names
+    audit.log(db, action="contact.import", user=user, request=request, target=kind,
+              detail={"imported": added, "duplicates": duplicates, "withoutName": no_name, "overLimit": over})
+    db.commit()
+    return {"format": kind, "imported": added, "duplicates": duplicates, "withoutName": no_name, "overLimit": over,
+            "total": len(existing) + added}
+
+
+@router.delete("", status_code=200)
+def delete_all_contacts(request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """(11 Nov) Remove every saved contact of THIS user (e.g. after importing the wrong file)."""
+    n = db.query(KnownContact).filter(KnownContact.user_id == user.id).delete(synchronize_session=False)
+    audit.log(db, action="contact.delete_all", user=user, request=request, target="all", detail={"removed": n})
+    db.commit()
+    return {"removed": n}
 
 
 @router.put("/{contact_id}")

@@ -43,3 +43,24 @@ export async function updateContact(id: string, patch: Partial<ContactInput>): P
 export async function deleteContact(id: string): Promise<void> {
   await apiClient.delete<void>(`/api/contacts/${id}`);
 }
+
+// (11 Nov) Import from a phone / Google / Outlook contacts export (.vcf or .csv). Only names and the first e-mail
+// are kept - phone numbers and everything else in the file are ignored by the server and never stored.
+export interface ContactImportResult {
+  format: string;
+  imported: number;
+  duplicates: number;
+  withoutName: number;
+  overLimit: number;
+  total: number;
+}
+
+export async function importContacts(file: File): Promise<ContactImportResult> {
+  const form = new FormData();
+  form.append("file", file);
+  return apiClient.post<ContactImportResult>("/api/contacts/import", form);
+}
+
+export async function deleteAllContacts(): Promise<{ removed: number }> {
+  return apiClient.delete<{ removed: number }>("/api/contacts");
+}

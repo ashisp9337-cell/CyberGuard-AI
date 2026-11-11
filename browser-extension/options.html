@@ -5,7 +5,7 @@
 <body><main>
   <h1>CyberGuard AI - Safe Browsing</h1>
   <p>This extension asks <strong>your own CyberGuard AI on this computer</strong> about each website before it opens,
-     and warns you about dangerous ones. Nothing is sent to any other server. Protection stays OFF until you switch it on.</p>
+     and warns you about dangerous ones. Nothing is sent to any other server (unless you switch on "threat lists" below). Protection stays OFF until you switch it on.</p>
 
   <div class="card">
     <h2>1. Connect to your CyberGuard</h2>
@@ -27,6 +27,11 @@
       <strong>Also check login pages</strong><br><span class="small">Only on a page that asks for a password, card or OTP:
       its page code (with everything you typed removed) is checked by the fake-login-page model. Your browser will ask you
       to allow the extension to read pages.</span></label></div>
+    <div class="switch"><input type="checkbox" id="feeds"><label for="feeds" style="margin:0;color:var(--text);font-size:14px">
+      <strong>Also look each site up on threat lists</strong><br><span class="small">Your CyberGuard asks VirusTotal,
+      URLhaus and AbuseIPDB (with the keys in its settings) about the <em>website's name only</em> - never the full
+      address, so no page paths, searches or codes are sent. Those three services do see which site names you visit.
+      Well-known official sites are not looked up. The results show in this extension's popup.</span></label></div>
     <div class="row" style="margin-top:8px"><button id="off" class="danger">Turn everything off</button>
       <span id="perm" class="small"></span></div>
   </div>

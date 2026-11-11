@@ -7,10 +7,15 @@
 //  3. Only if you also allowed "check login pages": on a page that asks for a password / card / OTP, the page's code
 //     (with anything typed removed) is judged by the fake-login-page model.
 // A dangerous page is replaced by a warning page; you can still continue if you are sure.
+//  4. (11 Nov) Only if you also allowed "threat lists": the SITE NAME (never the full address) is looked up by your
+//     CyberGuard on VirusTotal, URLhaus and AbuseIPDB (with your own keys). The results show in the popup; a site
+//     those lists call dangerous gets the warning page too.
 const api = globalThis.browser ?? globalThis.chrome;
-const DEFAULTS = { backend: "http://127.0.0.1:8000", token: "", enabled: false, pageCheck: false, allow: [] };
+const DEFAULTS = { backend: "http://127.0.0.1:8000", token: "", enabled: false, pageCheck: false, feeds: false, allow: [] };
 const recent = new Map();          // tabId -> {url, level, score, reasons, at}
 const started = new Map();         // tabId -> the address the navigation started with (to see redirects)
+const reps = new Map();            // tabId -> {host, ...threat-list results}
+const repCache = new Map();        // host -> {at, rep}  (30 minutes; the server keeps its own 12-hour cache)
 
 async function settings() {
   return { ...DEFAULTS, ...(await api.storage.local.get(Object.keys(DEFAULTS))) };
@@ -66,6 +71,38 @@ async function ask(url, redirects = [], html = null) {
   }
 }
 
+async function reputation(tabId, url) {
+  const s = await settings();
+  if (!s.enabled || !s.feeds || !s.token) return;
+  const host = hostOf(url);
+  let rep = null;
+  const hit = repCache.get(host);
+  if (hit && Date.now() - hit.at < 30 * 60 * 1000) rep = hit.rep;
+  else {
+    try {
+      const r = await fetch(`${s.backend}/api/extension/reputation`, {
+        method: "POST", headers: { "Content-Type": "application/json", "X-CyberGuard-Extension": s.token },
+        body: JSON.stringify({ url }),
+      });
+      if (!r.ok) return;
+      rep = await r.json();
+    } catch { return; }
+    if (repCache.size > 500) repCache.clear();
+    repCache.set(host, { at: Date.now(), rep });
+  }
+  if (!rep || rep.level === "skip") return;
+  reps.set(tabId, rep);
+  const cur = recent.get(tabId);
+  if (rep.level === "danger" && !(await allowedForNow(host))) {
+    await show(tabId, url, { level: "danger", score: Math.max(90, cur ? cur.score : 0), reasons: rep.notes || [] });
+  } else if (rep.level === "verify" && (!cur || cur.level === "safe")) {
+    try {
+      await api.action.setBadgeText({ tabId, text: "?" });
+      await api.action.setBadgeBackgroundColor({ tabId, color: "#d97706" });
+    } catch { /* closed */ }
+  }
+}
+
 async function show(tabId, url, v) {
   if (!v || v.level === "skip") return;
   recent.set(tabId, { url, level: v.level, score: v.score, reasons: v.reasons || [], at: Date.now() });
@@ -83,7 +120,9 @@ async function show(tabId, url, v) {
 async function judge(tabId, url, redirects = [], html = null) {
   if (isPrivate(url) || url.startsWith(api.runtime.getURL(""))) return;
   if (await allowedForNow(hostOf(url))) return;
-  await show(tabId, url, await ask(url, redirects, html));
+  const v = await ask(url, redirects, html);
+  await show(tabId, url, v);
+  if (v && v.level !== "danger" && v.level !== "skip" && !html) reputation(tabId, url);     // in the background
 }
 
 api.webNavigation.onBeforeNavigate.addListener((d) => {
@@ -111,7 +150,7 @@ api.webNavigation.onCompleted.addListener(async (d) => {
   } catch { /* pages the browser does not let extensions read (web store, PDF viewer ...) */ }
 });
 
-api.tabs.onRemoved.addListener((tabId) => { recent.delete(tabId); started.delete(tabId); });
+api.tabs.onRemoved.addListener((tabId) => { recent.delete(tabId); started.delete(tabId); reps.delete(tabId); });
 
 api.runtime.onInstalled.addListener((info) => {
   if (info.reason === "install") api.runtime.openOptionsPage();       // explain and ask first
@@ -125,7 +164,8 @@ api.runtime.onMessage.addListener((msg, sender, reply) => {
       await api.storage.session.set({ sessionAllow: sessionAllow.slice(-200) });
       reply({ ok: true });
     } else if (msg && msg.type === "verdict") {
-      reply(recent.get(msg.tabId) || null);
+      const v = recent.get(msg.tabId);
+      reply(v ? { ...v, rep: reps.get(msg.tabId) || null } : null);
     } else if (msg && msg.type === "ping") {
       const s = await settings();
       try {

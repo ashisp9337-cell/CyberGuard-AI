@@ -10,12 +10,13 @@ function cleanBackend(v) {
 }
 
 async function load() {
-  const s = await api.storage.local.get(["backend", "token", "enabled", "pageCheck", "allow"]);
+  const s = await api.storage.local.get(["backend", "token", "enabled", "pageCheck", "feeds", "allow"]);
   $("backend").value = s.backend || "http://127.0.0.1:8000";
   $("token").value = s.token || "";
   $("enabled").checked = Boolean(s.enabled);
   $("pageCheck").checked = Boolean(s.pageCheck) && await api.permissions.contains(ALL);
   $("allow").value = (s.allow || []).join("\n");
+  $("feeds").checked = Boolean(s.feeds);
 }
 
 $("connect").addEventListener("click", async () => {
@@ -38,6 +39,12 @@ $("enabled").addEventListener("change", async (e) => {
   $("perm").textContent = e.target.checked ? "Protection is ON." : "Protection is OFF.";
 });
 
+$("feeds").addEventListener("change", async (e) => {
+  await api.storage.local.set({ feeds: e.target.checked });
+  $("perm").textContent = e.target.checked ? "Site names will be looked up on VirusTotal, URLhaus and AbuseIPDB."
+    : "Threat lists are not asked any more.";
+});
+
 $("pageCheck").addEventListener("change", async (e) => {
   if (e.target.checked) {
     const ok = await api.permissions.request(ALL);        // the browser's own permission prompt
@@ -51,7 +58,7 @@ $("pageCheck").addEventListener("change", async (e) => {
 });
 
 $("off").addEventListener("click", async () => {
-  await api.storage.local.set({ enabled: false, pageCheck: false });
+  await api.storage.local.set({ enabled: false, pageCheck: false, feeds: false });
   try { await api.permissions.remove(ALL); } catch { /* not granted */ }
   await load();
   $("perm").textContent = "Everything is off. Nothing is sent.";

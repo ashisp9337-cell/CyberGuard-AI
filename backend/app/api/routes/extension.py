@@ -212,6 +212,82 @@ def _save_finding(user_id: str, url: str, verdict: dict) -> str | None:
     return scan_id
 
 
+class ReputationIn(BaseModel):
+    url: str = Field(max_length=4096)
+
+
+def reputation(url: str) -> dict:
+    """(11 Nov) What VirusTotal, URLhaus and AbuseIPDB know about the SITE (opt-in in the extension). Only the site
+    name goes to VirusTotal / URLhaus; AbuseIPDB gets the server address the name resolves to. The website itself is
+    never contacted. Well-known official sites are not looked up (saves the free quotas)."""
+    from concurrent.futures import ThreadPoolExecutor
+    from app.detectors import trusted_domains
+    from app.detectors.url_features_v2 import registered_domain
+    from app.services import network_intel, threat_intelligence as TI
+    host = (urlsplit(url).hostname or "").lower().rstrip(".")[:253]
+    site = registered_domain(host) or host
+    out = {"host": host, "site": site, "level": "safe", "notes": []}
+    if trusted_domains.is_trusted(url):
+        out["notes"].append("Well-known official site - the outside services were not asked (saves your free limits).")
+        out["trusted"] = True
+        return out
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        vt_f = pool.submit(TI.check_virustotal_domain_sync, site)
+        uh_f = pool.submit(TI.check_urlhaus_host_sync, host)
+        dns = network_intel.resolve_domain(host) if not _is_ip(host) else {"ips": [host]}
+        ips = (dns.get("ips") or []) if isinstance(dns, dict) else []
+        ip = next((a for a in ips if "." in a), ips[0] if ips else None)
+        ab = TI.check_abuseipdb_sync(ip) if ip else {"status": "skipped"}
+        vt, uh = vt_f.result(), uh_f.result()
+    out |= {"virustotal": vt, "urlhaus": uh, "abuseipdb": {k: ab.get(k) for k in
+                                                         ("status", "ip", "abuseScore", "totalReports", "isWhitelisted", "isp")}}
+    danger = verify = False
+    if vt.get("status") == "ok" and vt.get("malicious", 0) + vt.get("suspicious", 0) > 0:
+        votes = vt["malicious"] + vt["suspicious"]
+        danger |= vt["malicious"] >= 3
+        verify |= votes >= 1
+        out["notes"].append(f"VirusTotal: {votes} of {vt['total']} security vendors flag {site}.")
+    if uh.get("status") == "ok" and uh.get("listed"):
+        danger |= uh.get("online", 0) > 0
+        verify = True
+        out["notes"].append(f"URLhaus: {host} is on the malware list ({uh['urlCount']} link(s), {uh['online']} still "
+                            f"online{', ' + ', '.join(uh['threats']) if uh.get('threats') else ''}).")
+    if ab.get("status") == "ok" and not ab.get("isWhitelisted") and ab.get("abuseScore", 0) >= 75 and ab.get("totalReports", 0) >= 5:
+        verify |= _is_ip(host)                     # a named site may share its server with others: a note only
+        out["notes"].append(f"AbuseIPDB: its server {ab['ip']} has an abuse score of {ab['abuseScore']}% "
+                            f"({ab['totalReports']} reports in 90 days)" + ("." if _is_ip(host) else
+                            " - shared servers can host good and bad sites, so this alone is not a verdict."))
+    out["level"] = "danger" if danger else "verify" if verify else "safe"
+    return out
+
+
+def _is_ip(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host.strip("[]"))
+        return True
+    except ValueError:
+        return False
+
+
+@router.post("/reputation")
+@limiter.limit("60/minute")
+async def site_reputation(body: ReputationIn, request: Request, user_id: str = Depends(extension_user)):
+    why = skip_reason(body.url)
+    if why:
+        return {"level": "skip", "reason": why}
+    out = await run_in_threadpool(reputation, body.url)
+    if out["level"] == "danger":
+        from app.detectors.base import build_result
+        result = build_result(indicators=[
+            {"id": f"IND_rep_{i}", "label": "Listed by a threat-intelligence service", "description": n[:300],
+             "severity": "critical", "weight": 35, "triggered": True} for i, n in enumerate(out["notes"])],
+            base_score=90, confidence=85, engine_name="CyberGuard browser extension (threat feeds)",
+            threat_type="Malicious URL", explanation=" ".join(out["notes"])[:400])
+        out["savedAsFinding"] = bool(await run_in_threadpool(
+            _save_finding, user_id, body.url, {"host": out["host"], "score": 90, "_result": result}))
+    return out
+
+
 @router.post("/check")
 @limiter.limit("300/minute")
 async def check(body: CheckIn, request: Request, user_id: str = Depends(extension_user)):

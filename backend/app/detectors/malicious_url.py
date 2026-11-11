@@ -133,9 +133,10 @@ def _live_indicators(url: str, registry_out: dict | None = None) -> list[dict]:
     # All lookups run at the same time. WHOIS is the slowest (often 3-4 s, many servers never answer) and only gives
     # the registration date, which the registry (RDAP) lookup also gives: when the registry answered with a date we do
     # NOT wait for WHOIS (it finishes or times out in the background). WHOIS is only waited for as a fallback.
-    pool = ThreadPoolExecutor(max_workers=6)
+    pool = ThreadPoolExecutor(max_workers=7)
     try:
         dns_f = pool.submit(network_intel.resolve_domain, host)
+        abuse_f = pool.submit(_abuse_lookup, host, dns_f)                 # (11 Nov) waits for DNS, then AbuseIPDB
         whois_f = pool.submit(network_intel.get_domain_age, host)
         ssl_f = pool.submit(network_intel.get_ssl_info, host)
         vt_f = pool.submit(threat_intelligence.check_virustotal_url_sync, url)
@@ -143,6 +144,7 @@ def _live_indicators(url: str, registry_out: dict | None = None) -> list[dict]:
         reg_f = pool.submit(_registry, host)
         reg = reg_f.result()
         dns_r, ssl_r, vt_r, uh_r = dns_f.result(), ssl_f.result(), vt_f.result(), uh_f.result()
+        ab_r = abuse_f.result()
         if reg and reg.get("ageDays") is not None:
             whois_r = {"status": "ok", "age_days": int(reg["ageDays"])}     # registry date: no need to wait for WHOIS
         else:
@@ -176,7 +178,49 @@ def _live_indicators(url: str, registry_out: dict | None = None) -> list[dict]:
         add(votes > 0, "Flagged by VirusTotal", f"{votes} vendor(s) flag this as malicious.", "critical", min(35, 15 + votes * 2))
     if uh_r.get("status") == "ok" and uh_r.get("query_status") == "ok":
         add(True, "Listed on URLhaus malware feed", f"Threat type: {uh_r.get('threat')}.", "critical", 35)
+    _abuse_indicator(add, ab_r, host)
     return indicators
+
+
+def _abuse_lookup(host: str, dns_f) -> dict:
+    """(11 Nov) AbuseIPDB for the link's server: the address in the link itself, or the first address its name
+    resolves to. Skipped (no outside call) without ABUSEIPDB_API_KEY."""
+    if not (settings.ABUSEIPDB_API_KEY or "").strip():
+        return {"status": "unavailable"}
+    ip = host.strip("[]") if IP_RE.match(host) or ":" in host else None
+    if ip is None:
+        try:
+            dns = dns_f.result(timeout=6)
+        except Exception:
+            return {"status": "error"}
+        ips = (dns.get("ips") or []) if isinstance(dns, dict) else []
+        ip = next((a for a in ips if "." in a), ips[0] if ips else None)
+    return threat_intelligence.check_abuseipdb_sync(ip) if ip else {"status": "skipped"}
+
+
+def _abuse_indicator(add, r: dict, host: str) -> None:
+    """A link on a raw IP address reported for abuse is a strong sign; a NAMED site on a reported address is weaker -
+    shared hosting puts thousands of sites on one address, so one bad neighbour must not condemn a real site."""
+    if r.get("status") != "ok":
+        return
+    score, reports, where = r["abuseScore"], r["totalReports"], f"{r['ip']}" + (f" ({r['isp']})" if r.get("isp") else "")
+    raw_ip = bool(IP_RE.match(host)) or ":" in host
+    if r.get("isWhitelisted"):
+        add(False, "Server address checked on AbuseIPDB",
+            f"{where} is on AbuseIPDB's allow-list (a well-known provider); abuse score {score}%.", "low", 0)
+    elif score >= 75 and reports >= 5:
+        add(True, "Server address reported for abuse (AbuseIPDB)",
+            f"{where} has an AbuseIPDB abuse score of {score}% from {reports} report(s) in the last 90 days"
+            + ("." if raw_ip else " - the link's site runs on that address; shared hosting can mix good and bad sites, "
+               "so this supports the other checks rather than deciding alone."), "high" if raw_ip else "medium",
+            25 if raw_ip else 12)
+    elif score >= 25 and reports >= 2:
+        add(True, "Server address has some abuse reports (AbuseIPDB)",
+            f"{where}: abuse score {score}% from {reports} report(s) in the last 90 days.", "medium" if raw_ip else "low",
+            10 if raw_ip else 5)
+    else:
+        add(False, "Server address checked on AbuseIPDB",
+            f"{where}: abuse score {score}% ({reports} report(s) in the last 90 days) - nothing notable.", "low", 0)
 
 
 def _extra_rules(url: str) -> list[dict]:

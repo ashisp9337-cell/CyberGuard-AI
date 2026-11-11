@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "CyberGuard AI - Safe Browsing",
   "short_name": "CyberGuard",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Checks each website you open with your own CyberGuard AI on this computer and warns you before dangerous pages.",
   "permissions": ["storage", "webNavigation", "scripting"],
   "host_permissions": ["http://127.0.0.1:8000/*", "http://localhost:8000/*"],

@@ -1,13 +1,15 @@
 # CyberGuard AI - Safe Browsing (browser extension)
 
 Warns you **before** a dangerous website opens, in every browser you use. It asks *your own* CyberGuard backend on
-this computer (http://127.0.0.1:8000) about each page; nothing is sent to any other server.
+this computer (http://127.0.0.1:8000) about each page; nothing is sent to any other server unless you switch on
+"threat lists" (then only site names go to VirusTotal, URLhaus and AbuseIPDB, using the keys in CyberGuard's settings).
 
 | What it checks | How |
 |---|---|
 | Each page you open (look-alike, spoofed and manipulated addresses) | URL engine + models, without contacting the site |
 | Redirects (a normal link that forwards you to a bad site) | every address on the way is judged |
 | Fake login pages (only if you allow "check login pages") | the page's code, with your typing removed, goes to the fake-login-page model |
+| Threat lists (only if you allow "threat lists", 11 Nov) | your CyberGuard asks VirusTotal, URLhaus and AbuseIPDB about the **site name only** (never the full address); results in the popup, a listed site gets the warning page |
 
 Protection is **off until you switch it on** in the extension's settings. Private pages (this computer, your home or
 office network, browser pages, files) are never sent.
