@@ -104,12 +104,12 @@ export function HeroSection() {
             <ICONS.brain size={13} /> AI-Powered Cybersecurity Platform
           </span>
           <h1 className="text-3xl sm:text-4xl lg:text-[2.75rem] font-extrabold text-white tracking-tight leading-[1.1]">
-            Protect What Matters Before Threats Strike.
+            Intelligent Threat Detection. Unified Security. Smarter Defense.
           </h1>
           <p className="text-base text-slate-400 mt-5 leading-relaxed max-w-xl">
-            CyberGuard is an intelligent cybersecurity platform designed to detect, analyze, and assess modern digital
-            threats — from phishing and malware to deepfakes, impersonation, account takeovers, malicious URLs, and
-            suspicious cyber activity.
+            CyberGuard AI is an AI-powered cybersecurity platform designed to identify phishing, deepfakes, digital
+            impersonation, credential attacks, malicious URLs, and emerging cyber threats through an integrated threat
+            detection and monitoring system.
           </p>
           <p className="text-sm font-semibold text-cyan-300 mt-4 tracking-wide">
             Detect the Threat. Understand the Risk. Stay Protected.

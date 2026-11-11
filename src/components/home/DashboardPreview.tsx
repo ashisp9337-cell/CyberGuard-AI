@@ -36,25 +36,26 @@ export function DashboardPreview() {
             aria-hidden="true"
           />
 
-          <div className="relative grid lg:grid-cols-[auto_1fr] gap-8 items-center">
+          <div className="relative grid lg:grid-cols-[auto_1fr] gap-8 items-center lg:pr-64">
             <div className="flex justify-center">
-              <CircularScore value={92} size={150} strokeWidth={12} label="SECURITY SCORE" color="var(--color-safe)" />
+              <CircularScore value={0} size={150} strokeWidth={12} label="RISK SCORE 0-100" color="var(--color-safe)" />
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4 gap-3">
               {[
-                { label: "Active Threats", value: "24", color: "var(--color-critical)" },
-                { label: "Scanned Items", value: "12.4K", color: "var(--color-brand)" },
-                { label: "Suspicious", value: "37", color: "var(--color-warning)" },
-                { label: "Reports", value: "164", color: "var(--color-info)" },
+                // (11 Nov) no invented numbers: each tile says what the real dashboard counts from YOUR scans
+                { label: "Active Threats", value: "open incidents", color: "var(--color-critical)" },
+                { label: "Scanned Items", value: "every scan saved", color: "var(--color-brand)" },
+                { label: "Suspicious", value: "needs a check", color: "var(--color-warning)" },
+                { label: "Reports", value: "PDF / CSV export", color: "var(--color-info)" },
               ].map((s) => (
                 <div key={s.label} className="rounded-lg border border-default bg-elevated p-3">
                   <p className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">{s.label}</p>
-                  <p className="text-lg font-extrabold" style={{ color: s.color }}>{s.value}</p>
+                  <p className="text-sm font-bold" style={{ color: s.color }}>{s.value}</p>
                 </div>
               ))}
-              <p className="col-span-2 sm:col-span-4 text-[11px] text-slate-500 flex items-center gap-1.5 mt-1">
-                <ICONS.info size={12} /> Illustrative interface example, not live production data.
+              <p className="col-span-2 sm:col-span-4 lg:col-span-2 xl:col-span-4 text-[11px] text-slate-500 flex items-center gap-1.5 mt-1">
+                <ICONS.info size={12} /> Layout example only - the real dashboard shows your own scans, starting empty.
               </p>
             </div>
           </div>
@@ -65,7 +66,7 @@ export function DashboardPreview() {
               <SeverityBadge severity="critical" size="sm" />
             </div>
             <p className="text-xs font-semibold text-white">Critical Threat</p>
-            <p className="text-[11px] text-slate-500 mt-0.5">Risk Score: 92</p>
+            <p className="text-[11px] text-slate-500 mt-0.5">Score 86-100: act now</p>
           </FloatingCard>
 
           <FloatingCard className="hidden lg:block bottom-10 right-24 w-52" delay={1.2}>
@@ -73,7 +74,7 @@ export function DashboardPreview() {
               <SeverityBadge severity="high" size="sm" />
             </div>
             <p className="text-xs font-semibold text-white">Suspicious URL</p>
-            <p className="text-[11px] text-slate-500 mt-0.5">Risk Score: 76</p>
+            <p className="text-[11px] text-slate-500 mt-0.5">Score 71-85: do not trust it</p>
           </FloatingCard>
 
           <FloatingCard className="hidden xl:block top-1/2 -translate-y-1/2 -right-2 w-48" delay={2}>
